@@ -2,10 +2,13 @@ import SwiftUI
 import StoreKit
 
 struct PlanSelectionView: View {
-    @StateObject private var subscriptionManager = SubscriptionManager()
+    @StateObject private var storeKit = StoreKitManager()
+    @EnvironmentObject var authManager: FirebaseAuthManager
+    
+    @State private var selectedPlan: SubscriptionLevel = .trial
+    @State private var isYearly: Bool = false  // NEW: Toggle for yearly/monthly
     @State private var isLoading = false
     @State private var errorMessage: String?
-    @State private var selectedPlan: SubscriptionLevel = .trial
     
     let onPlanSelected: (SubscriptionLevel) -> Void
     
@@ -31,13 +34,17 @@ struct PlanSelectionView: View {
                     }
                     .padding(.top, 20)
                     
-                    // Plan Cards
+                    // NEW: Monthly/Yearly Toggle
+                    billingPeriodToggle
+                    
+                    // Plan Cards - Using your existing SubscriptionLevel enum
                     VStack(spacing: 16) {
                         // Free Trial Card
                         PlanCard(
                             plan: .trial,
                             isSelected: selectedPlan == .trial,
                             isPopular: false,
+                            isYearly: isYearly,
                             onSelect: { selectedPlan = .trial }
                         )
                         
@@ -45,7 +52,8 @@ struct PlanSelectionView: View {
                         PlanCard(
                             plan: .pro,
                             isSelected: selectedPlan == .pro,
-                            isPopular: true,
+                            isPopular: selectedPlan != .club, // Pro is popular unless Club is selected
+                            isYearly: isYearly,
                             onSelect: { selectedPlan = .pro }
                         )
                         
@@ -54,7 +62,17 @@ struct PlanSelectionView: View {
                             plan: .premium,
                             isSelected: selectedPlan == .premium,
                             isPopular: false,
+                            isYearly: isYearly,
                             onSelect: { selectedPlan = .premium }
+                        )
+                        
+                        // Club Plan Card
+                        PlanCard(
+                            plan: .club,
+                            isSelected: selectedPlan == .club,
+                            isPopular: false,
+                            isYearly: isYearly,
+                            onSelect: { selectedPlan = .club }
                         )
                     }
                     .padding(.horizontal)
@@ -62,7 +80,7 @@ struct PlanSelectionView: View {
                     // Continue Button
                     Button(action: handleContinue) {
                         HStack {
-                            if isLoading {
+                            if isLoading || storeKit.purchaseInProgress {
                                 ProgressView()
                                     .progressViewStyle(CircularProgressViewStyle(tint: .white))
                                     .scaleEffect(0.8)
@@ -78,11 +96,11 @@ struct PlanSelectionView: View {
                         .foregroundColor(.white)
                         .cornerRadius(12)
                     }
-                    .disabled(isLoading)
+                    .disabled(isLoading || storeKit.purchaseInProgress)
                     .padding(.horizontal)
                     
                     // Error Message
-                    if let errorMessage = errorMessage {
+                    if let errorMessage = errorMessage ?? storeKit.errorMessage {
                         Text(errorMessage)
                             .font(.caption)
                             .foregroundColor(.red)
@@ -110,48 +128,103 @@ struct PlanSelectionView: View {
             .navigationBarHidden(true)
         }
         .onAppear {
-            subscriptionManager.loadProducts()
+            storeKit.setAuthManager(authManager)
+            Task {
+                await storeKit.loadProducts()
+            }
         }
     }
     
+    // NEW: Monthly/Yearly Toggle Component
+    private var billingPeriodToggle: some View {
+        HStack {
+            Text("Monthly")
+                .font(.subheadline)
+                .fontWeight(isYearly ? .regular : .semibold)
+                .foregroundColor(isYearly ? .secondary : .primary)
+            
+            Toggle("", isOn: $isYearly)
+                .toggleStyle(SwitchToggleStyle(tint: .blue))
+                .scaleEffect(0.8)
+            
+            HStack(spacing: 4) {
+                Text("Yearly")
+                    .font(.subheadline)
+                    .fontWeight(isYearly ? .semibold : .regular)
+                    .foregroundColor(isYearly ? .primary : .secondary)
+                
+                if isYearly {
+                    Text("(Save 17%)")
+                        .font(.caption)
+                        .foregroundColor(.green)
+                        .fontWeight(.medium)
+                }
+            }
+        }
+        .padding(.horizontal)
+        .animation(.easeInOut(duration: 0.2), value: isYearly)
+    }
+    
     private func handleContinue() {
-        guard !isLoading else { return }
+        guard !isLoading && !storeKit.purchaseInProgress else { return }
         
         isLoading = true
         errorMessage = nil
         
         if selectedPlan == .trial {
-            // Start free trial immediately
+            // Start free trial immediately - no purchase needed
             onPlanSelected(.trial)
             isLoading = false
         } else {
-            // Purchase subscription
+            // For paid plans, find the matching product and purchase through StoreKit
             Task {
-                do {
-                    let success = try await subscriptionManager.purchase(plan: selectedPlan)
-                    await MainActor.run {
-                        if success {
-                            onPlanSelected(selectedPlan)
-                        } else {
-                            errorMessage = "Purchase failed. Please try again."
-                        }
-                        isLoading = false
-                    }
-                } catch {
-                    await MainActor.run {
-                        errorMessage = "Purchase error: \(error.localizedDescription)"
-                        isLoading = false
-                    }
-                }
+                await handlePaidPlanPurchase()
             }
         }
+    }
+    
+    private func handlePaidPlanPurchase() async {
+        // Find the appropriate product for the selected plan and billing period
+        let targetProductID: String
+        
+        switch selectedPlan {
+        case .pro:
+            targetProductID = isYearly ? "com.coachcaddie.pro.yearly" : "com.coachcaddie.pro.monthly"
+        case .premium:
+            targetProductID = isYearly ? "com.coachcaddie.premium.yearly" : "com.coachcaddie.premium.monthly"
+        case .club:
+            targetProductID = isYearly ? "com.coachcaddie.club.yearly" : "com.coachcaddie.club.monthly"
+        default:
+            errorMessage = "Invalid plan selection"
+            isLoading = false
+            return
+        }
+        
+        // Find the product in the loaded products
+        guard let product = storeKit.products.first(where: { $0.id == targetProductID }) else {
+            errorMessage = "Subscription products not available. Please try again later."
+            isLoading = false
+            return
+        }
+        
+        // Purchase through StoreKit
+        await storeKit.purchase(product)
+        
+        // Check if purchase was successful
+        if storeKit.isProductPurchased(product.id) {
+            // Purchase successful - complete the flow
+            onPlanSelected(selectedPlan)
+        }
+        
+        isLoading = false
     }
 }
 
 struct PlanCard: View {
-    let plan: SubscriptionLevel
+    let plan: SubscriptionLevel // Using your existing enum!
     let isSelected: Bool
     let isPopular: Bool
+    let isYearly: Bool  // NEW: Whether to show yearly pricing
     let onSelect: () -> Void
     
     var body: some View {
@@ -161,7 +234,7 @@ struct PlanCard: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
-                            Text(plan.displayName)
+                            Text(plan.displayName) // Using your existing property!
                                 .font(.title2)
                                 .fontWeight(.bold)
                             
@@ -177,14 +250,22 @@ struct PlanCard: View {
                             }
                         }
                         
-                        Text(plan.monthlyPrice)
-                            .font(.headline)
-                            .foregroundColor(.blue)
-                        
-                        if plan != .trial {
-                            Text("or \(plan.yearlyPrice) yearly")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+                        // NEW: Show pricing based on isYearly toggle
+                        if plan == .trial {
+                            Text(plan.monthlyPrice) // Trial is always the same
+                                .font(.headline)
+                                .foregroundColor(.blue)
+                        } else {
+                            Text(isYearly ? plan.yearlyPrice : plan.monthlyPrice)
+                                .font(.headline)
+                                .foregroundColor(.blue)
+                            
+                            if isYearly {
+                                Text("Save 17% vs monthly")
+                                    .font(.caption)
+                                    .foregroundColor(.green)
+                                    .fontWeight(.medium)
+                            }
                         }
                     }
                     
@@ -195,7 +276,7 @@ struct PlanCard: View {
                         .foregroundColor(isSelected ? .blue : .gray)
                 }
                 
-                // Features List
+                // Features List - Using your existing features array!
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(plan.features, id: \.self) { feature in
                         HStack(alignment: .top, spacing: 8) {
@@ -221,114 +302,11 @@ struct PlanCard: View {
                         RoundedRectangle(cornerRadius: 16)
                             .stroke(isSelected ? Color.blue : Color(.systemGray4), lineWidth: isSelected ? 2 : 1)
                     )
-                    .shadow(color: isSelected ? Color.blue.opacity(0.2) : Color.black.opacity(0.1), 
+                    .shadow(color: isSelected ? Color.blue.opacity(0.2) : Color.black.opacity(0.1),
                            radius: isSelected ? 8 : 4, x: 0, y: 2)
             )
         }
         .buttonStyle(PlainButtonStyle())
-    }
-}
-
-// MARK: - Subscription Manager
-@MainActor
-class SubscriptionManager: ObservableObject {
-    @Published var products: [Product] = []
-    @Published var purchaseState: PurchaseState = .idle
-    
-    private var productIds: Set<String> = [
-        "com.coachcaddie.pro.monthly",
-        "com.coachcaddie.pro.yearly", 
-        "com.coachcaddie.premium.monthly",
-        "com.coachcaddie.premium.yearly"
-    ]
-    
-    enum PurchaseState {
-        case idle
-        case purchasing
-        case purchased
-        case failed(Error)
-    }
-    
-    func loadProducts() {
-        Task {
-            do {
-                let products = try await Product.products(for: productIds)
-                await MainActor.run {
-                    self.products = products.sorted { $0.price < $1.price }
-                }
-            } catch {
-                print("Failed to load products: \(error)")
-            }
-        }
-    }
-    
-    func purchase(plan: SubscriptionLevel) async throws -> Bool {
-        guard let product = getProduct(for: plan) else {
-            throw SubscriptionError.productNotFound
-        }
-        
-        purchaseState = .purchasing
-        
-        do {
-            let result = try await product.purchase()
-            
-            switch result {
-            case .success(let verification):
-                switch verification {
-                case .verified(let transaction):
-                    await transaction.finish()
-                    purchaseState = .purchased
-                    return true
-                case .unverified:
-                    purchaseState = .failed(SubscriptionError.unverifiedTransaction)
-                    return false
-                }
-            case .userCancelled:
-                purchaseState = .idle
-                return false
-            case .pending:
-                purchaseState = .idle
-                return false
-            @unknown default:
-                purchaseState = .failed(SubscriptionError.unknownError)
-                return false
-            }
-        } catch {
-            purchaseState = .failed(error)
-            throw error
-        }
-    }
-    
-    private func getProduct(for plan: SubscriptionLevel) -> Product? {
-        let productId: String
-        
-        switch plan {
-        case .pro:
-            productId = "com.coachcaddie.pro.monthly" // Default to monthly
-        case .premium:
-            productId = "com.coachcaddie.premium.monthly" // Default to monthly
-        default:
-            return nil
-        }
-        
-        return products.first { $0.id == productId }
-    }
-}
-
-enum SubscriptionError: LocalizedError {
-    case productNotFound
-    case unverifiedTransaction
-    case unknownError
-    
-    var errorDescription: String? {
-        switch self {
-        case .productNotFound:
-            return "Product not found"
-        case .unverifiedTransaction:
-            return "Transaction could not be verified"
-        case .unknownError:
-            return "An unknown error occurred"
-        }
     }
 }
 

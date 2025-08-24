@@ -7,7 +7,6 @@ struct COPPATeamCreationFlow: View {
     
     @State private var currentStep = 0
     @State private var teamName = ""
-    @State private var teamDescription = ""
     @State private var hasAcknowledgedResponsibility = false
     @State private var showingResponsibilityDisclaimer = false
     @State private var showingParentNoticeGenerator = false
@@ -59,7 +58,7 @@ struct COPPATeamCreationFlow: View {
                 EnhancedParentNoticeGeneratorView(
                     team: Team(
                         name: teamName,
-                        description: teamDescription,
+                        format: .elevenVEleven,
                         players: [],
                         games: [],
                         practices: []
@@ -121,13 +120,6 @@ struct COPPATeamCreationFlow: View {
                     TextField("Enter team name", text: $teamName)
                         .textFieldStyle(RoundedBorderTextFieldStyle())
                 }
-                
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Description (Optional)")
-                        .font(.headline)
-                    TextField("Brief team description", text: $teamDescription)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                }
             }
             .padding(.horizontal)
             
@@ -165,7 +157,7 @@ struct COPPATeamCreationFlow: View {
                 COPPAFeatureCard(
                     icon: "trash.circle.fill",
                     title: "Automatic Data Deletion",
-                    description: "Team data automatically deletes after 90 days of inactivity",
+                    description: "Team data automatically deletes after 180 days of inactivity",
                     color: .orange
                 )
                 
@@ -325,7 +317,7 @@ struct COPPATeamCreationFlow: View {
             }
             
             VStack(spacing: 16) {
-                TeamSummaryCard(teamName: teamName, teamDescription: teamDescription)
+                TeamSummaryCard(teamName: teamName)
                 
                 ComplianceSummaryCard(
                     hasAcknowledgedResponsibility: hasAcknowledgedResponsibility,
@@ -412,7 +404,7 @@ struct COPPATeamCreationFlow: View {
     private func createTeam() {
         let newTeam = Team(
             name: teamName,
-            description: teamDescription,
+            format: .elevenVEleven,
             players: [],
             games: [],
             practices: []
@@ -424,9 +416,10 @@ struct COPPATeamCreationFlow: View {
         privacySettings.coppaComplianceAcknowledged = hasAcknowledgedResponsibility
         privacySettings.coppaAcknowledgmentDate = Date()
         
-        newTeam.privacySettings = privacySettings
+        var mutableTeam = newTeam
+        mutableTeam.privacySettings = privacySettings
         
-        teamManager.addTeam(newTeam)
+        teamManager.addTeam(mutableTeam)
         presentationMode.wrappedValue.dismiss()
     }
 }
@@ -481,7 +474,6 @@ struct NotificationReasonRow: View {
 
 struct TeamSummaryCard: View {
     let teamName: String
-    let teamDescription: String
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -501,16 +493,6 @@ struct TeamSummaryCard: View {
                     Text(teamName)
                         .foregroundColor(.secondary)
                     Spacer()
-                }
-                
-                if !teamDescription.isEmpty {
-                    HStack {
-                        Text("Description:")
-                            .fontWeight(.medium)
-                        Text(teamDescription)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                    }
                 }
             }
         }

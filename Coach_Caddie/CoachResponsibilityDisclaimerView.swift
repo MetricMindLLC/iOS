@@ -62,6 +62,7 @@ struct CoachResponsibilityDisclaimerView: View {
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding()
         .background(Color(.systemGray6))
@@ -132,7 +133,7 @@ struct CoachResponsibilityDisclaimerView: View {
                     • No dates of birth or age collection
                     • No photo/video uploads
                     • Minimal data collection (names, positions, basic stats)
-                    • Automatic data deletion after 90 days of inactivity
+                    • Automatic data deletion after 180 days of inactivity
                     • No commercial use or third-party sharing
                     • Secure, encrypted storage
                     • Role-based access controls
@@ -221,6 +222,7 @@ struct CoachResponsibilityDisclaimerView: View {
                     .foregroundColor(.orange)
                     .font(.caption)
                     .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding()
@@ -249,12 +251,14 @@ struct DisclaimerSection: View {
                 Text(title)
                     .font(.headline)
                     .fontWeight(.bold)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             
             Text(content)
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(nil)
         }
         .padding()
         .background(Color(.systemGray6))
@@ -270,23 +274,31 @@ struct AcknowledgmentCheckbox: View {
     
     var body: some View {
         Button(action: { isChecked.toggle() }) {
-            HStack(spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
                 Image(systemName: isChecked ? "checkmark.square.fill" : "square")
                     .foregroundColor(isChecked ? .green : .gray)
                     .font(.title3)
+                    .padding(.top, 2)
                 
-                Text(text)
-                    .font(.subheadline)
-                    .multilineTextAlignment(.leading)
-                    .foregroundColor(.primary)
-                
-                if isRequired {
-                    Text("*")
-                        .foregroundColor(.red)
-                        .fontWeight(.bold)
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(alignment: .top, spacing: 4) {
+                        Text(text)
+                            .font(.subheadline)
+                            .multilineTextAlignment(.leading)
+                            .foregroundColor(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .lineLimit(nil)
+                        
+                        if isRequired {
+                            Text("*")
+                                .foregroundColor(.red)
+                                .fontWeight(.bold)
+                                .padding(.top, -2)
+                        }
+                    }
                 }
                 
-                Spacer()
+                Spacer(minLength: 0)
             }
         }
         .buttonStyle(PlainButtonStyle())

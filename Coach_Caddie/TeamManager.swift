@@ -1,0 +1,1799 @@
+import SwiftUI
+import FirebaseAuth
+import FirebaseFirestore
+import Foundation
+import Combine
+
+// MARK: - Permission Cache Models (FIXED)
+struct UserPermissionCache {
+    let userUID: String
+    var teamRoles: [UUID: AccessLevel]  // FIXED: Changed from 'let' to 'var'
+    var editablePlayerIds: [UUID: [UUID]]  // FIXED: Changed from 'let' to 'var'
+    let cacheTimestamp: Date
+    
+    var isExpired: Bool {
+        Date().timeIntervalSince(cacheTimestamp) > 3600 // Expire after 1 hour
+    }
+}
+
+@MainActor
+class TeamManager: ObservableObject {
+    @Published var teams: [Team] = []
+    @Published var selectedTeam: Team?
+    @Published var isLoading = false
+    @Published var isOnline = true
+    @Published var errorMessage: String?
+    @Published var pendingChanges: [String: PendingChange] = [:]
+    @Published var appSettings = AppSettings()
+    @Published var isReconnecting = false
+    @Published var lastSavedDate: Date?
+    
+    // MARK: - Permission Caching (NEW)
+    @Published private var permissionCache: UserPermissionCache?
+    private let cacheExpirationInterval: TimeInterval = 3600 // 1 hour
+    
+    let firebaseManager = FirebaseManager.shared
+    var authManager: FirebaseAuthManager? // ADDED - Reference to auth manager
+    private let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+    
+    private let teamsFileName = "teams.json"
+    private let backupFileName = "teams_backup.json"
+    private let pendingChangesFileName = "pending_changes.json"
+    private let settingsFileName = "app_settings.json"
+    
+    private var saveWorkItem: DispatchWorkItem?
+    private let saveDebounceTime: TimeInterval = 0.5
+    private var cancellables = Set<AnyCancellable>()
+    
+    init() {
+        // IMPORTANT: Don't load local data immediately - wait for auth state
+        loadAppSettings()
+        setupNetworkMonitoring()
+        setupAuthStateListener()
+        
+        // Listen for clear data notification
+        NotificationCenter.default.publisher(for: Notification.Name("ClearLocalData"))
+            .sink { [weak self] _ in
+                self?.clearAllLocalData()
+            }
+            .store(in: &cancellables)
+        
+        // ADDED: Listen for force load teams notification
+        NotificationCenter.default.publisher(for: Notification.Name("ForceLoadTeams"))
+            .sink { [weak self] _ in
+                Task {
+                    await self?.forceLoadTeamsFromFirebase()
+                }
+            }
+            .store(in: &cancellables)
+        
+        // ADDED: Migrate existing teams to include TTL fields
+        // This will run after teams are loaded via auth state change
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            self.migrateTeamsForTTL()
+        }
+    }
+    
+    // ADDED: Method to set auth manager reference
+    func setAuthManager(_ authManager: FirebaseAuthManager) {
+        self.authManager = authManager
+    }
+    
+    private func handleNetworkReconnection() async {
+        do {
+            // Only reload if user is properly authenticated (not anonymous)
+            if let currentUser = Auth.auth().currentUser, !currentUser.isAnonymous {
+                await loadTeamsFromFirebase()
+            }
+        } catch {
+            await MainActor.run {
+                self.setError("Network reconnection failed: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    // UPDATED: Fixed setupAuthStateListener to avoid "Publishing changes from within view updates"
+    private func setupAuthStateListener() {
+        Auth.auth().addStateDidChangeListener { [weak self] auth, user in
+            // Use DispatchQueue.main.async instead of Task/MainActor.run to avoid the publishing error
+            DispatchQueue.main.async {
+                if user != nil {
+                    print("🔐 Auth state changed - user signed in, loading teams...")
+                    // Move async operations outside of the main queue callback
+                    Task {
+                        await self?.loadTeamsFromLocal() // Load local first
+                        await self?.loadAllUserPermissions() // Then load permissions
+                    }
+                } else {
+                    print("🔒 No authenticated user - not loading local data")
+                    self?.teams = []
+                    self?.clearPermissionCache()
+                }
+            }
+        }
+    }
+    
+    // UPDATED: Handle auth state changes properly
+    private func handleAuthStateChange() async {
+        if let currentUser = Auth.auth().currentUser, !currentUser.isAnonymous {
+            // User is authenticated - load their data
+            loadLocalData()
+            await loadTeamsFromFirebase()
+            // NEW: Load permissions after teams are loaded
+            await loadUserPermissions()
+        } else {
+            // User is not authenticated - clear all data
+            clearAllLocalData()
+            clearPermissionCache() // NEW: Clear permission cache
+        }
+    }
+    
+    private func setupNetworkMonitoring() {
+        firebaseManager.$isOnline
+            .debounce(for: .milliseconds(500), scheduler: DispatchQueue.main) // Debounce changes
+            .sink { [weak self] isOnline in
+                self?.isOnline = isOnline
+                
+                if isOnline {
+                    self?.isReconnecting = true
+                    Task {
+                        await self?.handleNetworkReconnection()
+                        await MainActor.run {
+                            self?.isReconnecting = false
+                        }
+                    }
+                }
+            }
+            .store(in: &cancellables)
+    }
+    
+    // MARK: - Authentication Helper
+    private func ensureAuthentication() async -> Bool {
+        // Check if user is already authenticated (and not anonymous)
+        if let currentUser = Auth.auth().currentUser, !currentUser.isAnonymous {
+            return true
+        }
+        
+        // Don't automatically sign in anonymously - require proper authentication
+        await MainActor.run {
+            self.setError("Authentication required. Please sign in.")
+        }
+        return false
+    }
+    
+    // MARK: - FIXED Permission Caching System
+    
+    var currentUserUID: String? {
+        return Auth.auth().currentUser?.uid
+    }
+    
+    /// Get user role for team (synchronous, uses cache with better new user handling)
+    func getCurrentUserRole(for team: Team) -> AccessLevel {
+        guard let currentUserUID = currentUserUID else {
+            print("⚠️ No current user UID available")
+            return .viewer
+        }
+        
+        // Check if user is the team coach first (this is always reliable)
+        if team.coachUID == currentUserUID {
+            print("✅ User is team coach for \(team.name)")
+            
+            // FIXED: Only update cache if it's not already cached correctly
+            if let cache = permissionCache,
+               let existingRole = cache.teamRoles[team.id],
+               existingRole == .coach {
+                // Cache already has correct info, don't update again
+                return .coach
+            }
+            
+            // FIXED: Use DispatchQueue.main.async to avoid "Publishing changes from within view updates"
+            DispatchQueue.main.async {
+                self.updateCacheForTeam(team.id, role: .coach, playerIds: team.players.map { $0.id })
+            }
+            
+            return .coach
+        }
+        
+        // Return cached role if available
+        if let cache = permissionCache,
+           !cache.isExpired,
+           let role = cache.teamRoles[team.id] {
+            print("🎯 CACHE HIT: Role for team \(team.name): \(role.displayName)")
+            return role
+        }
+        
+        print("⚠️ CACHE MISS: No cached role for team \(team.name)")
+        
+        // For new users with no cache, trigger an async refresh but return reasonable default
+        Task {
+            await refreshPermissions(for: team)
+        }
+        
+        // For immediate return, check if user is in starting lineup (likely a coach-created team)
+        if team.coachUID == currentUserUID ||
+           (team.coachUID == nil && !team.players.isEmpty) { // Legacy team with no coachUID
+            return .coach
+        }
+        
+        return .viewer // Safe default for new users
+    }
+
+    /// FIXED: Update cache for a specific team - now safe for synchronous calls
+    private func updateCacheForTeam(_ teamId: UUID, role: AccessLevel, playerIds: [UUID]) {
+        guard let currentUserUID = currentUserUID else { return }
+        
+        if var existingCache = permissionCache, existingCache.userUID == currentUserUID {
+            // Update existing cache
+            existingCache.teamRoles[teamId] = role
+            existingCache.editablePlayerIds[teamId] = playerIds
+            permissionCache = UserPermissionCache(
+                userUID: existingCache.userUID,
+                teamRoles: existingCache.teamRoles,
+                editablePlayerIds: existingCache.editablePlayerIds,
+                cacheTimestamp: Date()
+            )
+        } else {
+            // Create new cache
+            permissionCache = UserPermissionCache(
+                userUID: currentUserUID,
+                teamRoles: [teamId: role],
+                editablePlayerIds: [teamId: playerIds],
+                cacheTimestamp: Date()
+            )
+        }
+        
+        print("✅ Updated cache for team: \(role.displayName)")
+    }
+    /// Get editable player IDs for team (synchronous, uses cache and email matching)
+    /// FIXED: Now includes email matching for parents with sharedAccess subscription
+    func getEditablePlayerIds(for team: Team) -> [UUID] {
+        // First check cache
+        if let cache = permissionCache,
+           !cache.isExpired,
+           let playerIds = cache.editablePlayerIds[team.id] {
+            print("🎯 CACHE HIT: \(playerIds.count) editable players for team \(team.name)")
+            
+            // FIXED: Always check email matching for parents (including sharedAccess members)
+            let role = getCurrentUserRole(for: team)
+            if role == .parent || shouldCheckEmailMatching() {
+                if let userEmail = Auth.auth().currentUser?.email?.lowercased() {
+                    var allEditableIds = Set(playerIds)
+                    for player in team.players {
+                        let parentEmail = player.parentInfo.parentEmail.lowercased()
+                        let secondParentEmail = player.parentInfo.secondParentEmail.lowercased()
+                        
+                        if parentEmail == userEmail || secondParentEmail == userEmail {
+                            allEditableIds.insert(player.id)
+                        }
+                    }
+                    return Array(allEditableIds)
+                }
+            }
+            
+            return playerIds
+        }
+        
+        // If no cache, calculate based on role and email matching
+        let role = getCurrentUserRole(for: team)
+        
+        switch role {
+        case .coach:
+            // Coaches can edit all players
+            return team.players.map { $0.id }
+            
+        case .parent:
+            // Parents can edit players where their email matches
+            if let userEmail = Auth.auth().currentUser?.email?.lowercased() {
+                return team.players.compactMap { player in
+                    let parentEmail = player.parentInfo.parentEmail.lowercased()
+                    let secondParentEmail = player.parentInfo.secondParentEmail.lowercased()
+                    
+                    if parentEmail == userEmail || secondParentEmail == userEmail {
+                        return player.id
+                    }
+                    return nil
+                }
+            }
+            return []
+            
+        case .viewer:
+            // Viewers cannot edit any players
+            return []
+        }
+    }
+    
+    /// Helper method to check if we should check email matching
+    /// FIXED: Check for sharedAccess subscription instead of specific membership type
+    private func shouldCheckEmailMatching() -> Bool {
+        // Check if user has sharedAccess subscription (parents who joined via invite)
+        if let authManager = authManager,
+           let currentUser = authManager.currentUser {
+            // Users with sharedAccess subscription should have email matching checked
+            return currentUser.subscriptionLevel == .sharedAccess
+        }
+        return false
+    }
+    
+    /// Check if user can edit specific player (synchronous, uses cache and email matching)
+    /// FIXED: Now checks email matching for parents and sharedAccess members
+    func canCurrentUserEdit(player: Player, in team: Team) -> Bool {
+        let role = getCurrentUserRole(for: team)
+        
+        // Coaches can edit all players
+        if role == .coach {
+            return true
+        }
+        
+        // Parents and sharedAccess members can edit players where their email matches
+        if role == .parent || shouldCheckEmailMatching() {
+            // First check cached editable player IDs
+            let editableIds = getEditablePlayerIds(for: team)
+            if editableIds.contains(player.id) {
+                return true
+            }
+            
+            // FIXED: Also check email matching
+            if let userEmail = Auth.auth().currentUser?.email?.lowercased() {
+                let parentEmail = player.parentInfo.parentEmail.lowercased()
+                let secondParentEmail = player.parentInfo.secondParentEmail.lowercased()
+                
+                // If parent's email matches either parent email field, they can edit
+                if parentEmail == userEmail || secondParentEmail == userEmail {
+                    return true
+                }
+            }
+        }
+        
+        // Viewers cannot edit
+        return false
+    }
+    
+    /// NEW: Synchronous version that uses cache
+    func canCurrentUserEditTeam(_ team: Team) -> Bool {
+        let role = getCurrentUserRole(for: team)
+        return role == .coach
+    }
+    
+    /// FIXED: Load all user permissions with better new user handling
+    func loadAllUserPermissions() async {
+        guard let currentUserUID = currentUserUID else {
+            print("❌ No current user UID for permission loading")
+            return
+        }
+        
+        print("🔄 Loading ALL user permissions for UID: \(currentUserUID)")
+        
+        var teamRoles: [UUID: AccessLevel] = [:]
+        var editablePlayerIds: [UUID: [UUID]] = [:]
+        
+        // Use async/await for better error handling
+        await withTaskGroup(of: (UUID, AccessLevel, [UUID]).self) { group in
+            for team in teams {
+                group.addTask {
+                    let role = await self.fetchUserRoleFromFirebase(userUID: currentUserUID, team: team)
+                    let playerIds = await self.fetchEditablePlayerIdsFromFirebase(userUID: currentUserUID, team: team, role: role)
+                    return (team.id, role, playerIds)
+                }
+            }
+            
+            for await (teamId, role, playerIds) in group {
+                teamRoles[teamId] = role
+                editablePlayerIds[teamId] = playerIds
+            }
+        }
+        
+        // Cache the results
+        let newCache = UserPermissionCache(
+            userUID: currentUserUID,
+            teamRoles: teamRoles,
+            editablePlayerIds: editablePlayerIds,
+            cacheTimestamp: Date()
+        )
+        
+        await MainActor.run {
+            self.permissionCache = newCache
+            print("✅ Cached permissions for \(teamRoles.count) teams")
+            
+            // Debug output with better formatting
+            for (teamId, role) in teamRoles {
+                if let team = teams.first(where: { $0.id == teamId }) {
+                    print("   📋 \(team.name): \(role.displayName) (\(editablePlayerIds[teamId]?.count ?? 0) editable players)")
+                }
+            }
+        }
+    }
+    
+    /// Load all permissions for current user (call once at app startup) - LEGACY NAME
+    func loadUserPermissions() async {
+        await loadAllUserPermissions()
+    }
+    
+    /// Refresh permissions for specific team (FIXED)
+    func refreshPermissions(for team: Team) async {
+        guard let currentUserUID = currentUserUID else { return }
+        
+        print("🔄 Refreshing permissions for team: \(team.name)")
+        
+        let role = await fetchUserRoleFromFirebase(userUID: currentUserUID, team: team)
+        let playerIds = await fetchEditablePlayerIdsFromFirebase(userUID: currentUserUID, team: team, role: role)
+        
+        await MainActor.run {
+            // Update cache - create new cache object instead of modifying
+            if let existingCache = self.permissionCache {
+                // Create new cache with updated values
+                let newCache = UserPermissionCache(
+                    userUID: existingCache.userUID,
+                    teamRoles: existingCache.teamRoles.merging([team.id: role]) { _, new in new },
+                    editablePlayerIds: existingCache.editablePlayerIds.merging([team.id: playerIds]) { _, new in new },
+                    cacheTimestamp: Date()
+                )
+                self.permissionCache = newCache
+            } else {
+                // Create new cache
+                self.permissionCache = UserPermissionCache(
+                    userUID: currentUserUID,
+                    teamRoles: [team.id: role],
+                    editablePlayerIds: [team.id: playerIds],
+                    cacheTimestamp: Date()
+                )
+            }
+            
+            print("✅ Updated permissions cache for team \(team.name)")
+            print("   📋 Role: \(role.displayName)")
+            print("   👥 Editable players: \(playerIds.count)")
+        }
+    }
+    
+    /// Clear permission cache (call on logout)
+    func clearPermissionCache() {
+        permissionCache = nil
+        print("🗑️ Permission cache cleared")
+    }
+    
+    /// Check if cache needs refresh
+    func shouldRefreshPermissions() -> Bool {
+        guard let cache = permissionCache else { return true }
+        return cache.isExpired
+    }
+    
+    /// FIXED: Auto-refresh permissions for new users when they create their first team
+    func refreshPermissionsForNewCoach(team: Team) async {
+        guard let currentUserUID = currentUserUID else { return }
+        
+        print("🔄 Refreshing permissions for new coach - Team: \(team.name)")
+        
+        // Immediately set coach role in cache
+        updateCacheForTeam(team.id, role: .coach, playerIds: team.players.map { $0.id })
+        
+        // Also refresh from Firebase to ensure consistency
+        await refreshPermissions(for: team)
+    }
+    
+    // ADDED: For compatibility - call loadTeamsFromLocal instead of loadLocalData directly
+    private func loadTeamsFromLocal() async {
+        loadLocalData()
+    }
+    
+    // Update both methods to use "members" and "accessLevel"
+    private func fetchUserRoleFromFirebase(userUID: String, team: Team) async -> AccessLevel {
+        do {
+            print("🔍 Firebase read: Fetching role for team \(team.name)")
+            
+            // First check if user is the team creator/coach
+            if team.coachUID == userUID {
+                return .coach
+            }
+            
+            // Then check the members subcollection for assigned role
+            let memberDoc = try await Firestore.firestore().collection("teams")
+                .document(team.id.uuidString)
+                .collection("members")  // ← Fixed collection name
+                .document(userUID)
+                .getDocument()
+            
+            if let data = memberDoc.data(),
+               let roleString = data["accessLevel"] as? String,  // ← Fixed field name
+               let role = AccessLevel(rawValue: roleString) {
+                return role
+            }
+            
+            // FIXED: Check if user has sharedAccess subscription and their email matches a parent
+            if shouldCheckEmailMatching() {
+                if let userEmail = Auth.auth().currentUser?.email?.lowercased() {
+                    for player in team.players {
+                        let parentEmail = player.parentInfo.parentEmail.lowercased()
+                        let secondParentEmail = player.parentInfo.secondParentEmail.lowercased()
+                        
+                        if parentEmail == userEmail || secondParentEmail == userEmail {
+                            // User's email matches a parent email, grant parent access
+                            return .parent
+                        }
+                    }
+                }
+            }
+            
+            return .viewer
+            
+        } catch {
+            if let firestoreError = error as NSError?,
+               firestoreError.domain == "FIRFirestoreErrorDomain",
+               firestoreError.code == 7 {
+                print("⚠️ Permission denied reading team member - user likely not a member")
+            } else {
+                print("❌ Error fetching role: \(error)")
+            }
+            
+            // FIXED: Even on error, check email matching for sharedAccess users
+            if shouldCheckEmailMatching() {
+                if let userEmail = Auth.auth().currentUser?.email?.lowercased() {
+                    for player in team.players {
+                        let parentEmail = player.parentInfo.parentEmail.lowercased()
+                        let secondParentEmail = player.parentInfo.secondParentEmail.lowercased()
+                        
+                        if parentEmail == userEmail || secondParentEmail == userEmail {
+                            return .parent
+                        }
+                    }
+                }
+            }
+            
+            return .viewer
+        }
+    }
+
+    /// Fetch editable player IDs from Firebase (FIXED: includes email matching for all parent-role users)
+    private func fetchEditablePlayerIdsFromFirebase(userUID: String, team: Team, role: AccessLevel) async -> [UUID] {
+        // Coaches can edit all players
+        if role == .coach {
+            return team.players.map { $0.id }
+        }
+        
+        // For parents (including sharedAccess members with parent role), check Firebase and email matching
+        if role == .parent {
+            var firebasePlayerIds: [UUID] = []
+            
+            do {
+                print("🔍 Firebase read: Fetching editable players for parent in team \(team.name)")
+                
+                let memberDoc = try await Firestore.firestore().collection("teams")
+                    .document(team.id.uuidString)
+                    .collection("members")
+                    .document(userUID)
+                    .getDocument()
+                
+                if let data = memberDoc.data(),
+                   let playerIdStrings = data["playerIds"] as? [String] {
+                    firebasePlayerIds = playerIdStrings.compactMap { UUID(uuidString: $0) }
+                }
+                
+            } catch {
+                print("⚠️ Error fetching editable players from Firebase: \(error)")
+            }
+            
+            // FIXED: Always check email matching for ALL users with parent role
+            // This includes both regular parents and sharedAccess members
+            if let userEmail = Auth.auth().currentUser?.email?.lowercased() {
+                var allEditableIds = Set(firebasePlayerIds)
+                
+                for player in team.players {
+                    let parentEmail = player.parentInfo.parentEmail.lowercased()
+                    let secondParentEmail = player.parentInfo.secondParentEmail.lowercased()
+                    
+                    if parentEmail == userEmail || secondParentEmail == userEmail {
+                        allEditableIds.insert(player.id)
+                    }
+                }
+                
+                let finalIds = Array(allEditableIds)
+                print("🔧 Found \(finalIds.count) total editable players (Firebase + email matching) for \(userEmail)")
+                return finalIds
+            }
+            
+            return firebasePlayerIds
+        }
+        
+        return []
+    }
+    
+    // MARK: - App Startup Integration (NEW)
+    
+    /// Call this once when app launches or user logs in
+    func initializeUserSession() async {
+        print("🚀 Initializing user session...")
+        
+        // Load team data first
+        loadData()
+        
+        // Wait a moment for teams to load
+        try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+        
+        // Load all permissions in parallel
+        await loadUserPermissions()
+        
+        print("✅ User session initialized")
+    }
+    
+    /// Call this when user logs out
+    func cleanupUserSession() {
+        clearPermissionCache()
+        teams.removeAll()
+        print("🧹 User session cleaned up")
+    }
+    
+    func loadData() {
+        // UPDATED: Only load local data if user is authenticated
+        guard let currentUser = Auth.auth().currentUser, !currentUser.isAnonymous else {
+            print("🔒 No authenticated user - not loading local data")
+            return
+        }
+        
+        loadLocalData()
+        
+        // ADDED: Recalculate stats after loading data to ensure they're current
+        recalculateAllStatsAfterLoad()
+        
+        Task {
+            await loadTeamsFromFirebase()
+        }
+    }
+
+    // ADDED: Recalculate all stats after data is loaded
+    private func recalculateAllStatsAfterLoad() {
+        for teamIndex in teams.indices {
+            recalculateStatsForTeam(teamIndex: teamIndex)
+        }
+        // Don't call updateTeam here to avoid unnecessary saves during startup
+    }
+    
+    // UPDATED: Check authentication before loading local data
+    private func loadLocalData() {
+        // CRITICAL: Only load local data if user is authenticated
+        guard let currentUser = Auth.auth().currentUser, !currentUser.isAnonymous else {
+            print("🔒 No authenticated user - clearing local data")
+            teams = []
+            selectedTeam = nil
+            return
+        }
+        
+        let teamsURL = documentsDirectory.appendingPathComponent(teamsFileName)
+        
+        guard FileManager.default.fileExists(atPath: teamsURL.path) else {
+            teams = []
+            return
+        }
+        
+        do {
+            let data = try Data(contentsOf: teamsURL)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let loadedTeams = try decoder.decode([Team].self, from: data)
+            
+            // ADDED: Filter teams to only include those belonging to current user
+            teams = loadedTeams.filter { team in
+                team.coachUID == currentUser.uid
+            }
+            
+            // Set selected team to first team if not set
+            if selectedTeam == nil && !teams.isEmpty {
+                selectedTeam = teams.first
+            }
+            
+            print("📱 Loaded \(teams.count) teams for user \(currentUser.uid)")
+        } catch {
+            print("Failed to load teams: \(error)")
+            teams = []
+        }
+    }
+    
+    func addTeam(_ team: Team, isDemo: Bool = false) {
+        // Enhanced team limits checking with better error messaging
+        if let authManager = authManager,
+           let currentUser = authManager.currentUser {
+            
+            // Check if user can create teams at all
+            guard currentUser.subscriptionLevel.canCreateTeams else {
+                switch currentUser.subscriptionLevel {
+                case .sharedAccess:
+                    setError("Shared access users cannot create teams. Ask a coach to invite you to their team.")
+                case .cancelled, .expired:
+                    setError("Your subscription has expired. Please renew your subscription to create teams.")
+                default:
+                    setError("Your current plan doesn't allow team creation. Please upgrade your subscription.")
+                }
+                return
+            }
+            
+            // Check team count limits (only for non-demo teams)
+            if !isDemo {
+                let currentTeams = teams.count
+                let maxTeams = currentUser.maxTeamsAllowed
+                
+                if currentTeams >= maxTeams {
+                    let planName = currentUser.subscriptionLevel.displayName
+                    if maxTeams == 1 {
+                        setError("You've reached your team limit for the \(planName) plan. Upgrade to create more teams.")
+                    } else {
+                        setError("You've reached your maximum of \(maxTeams) teams for the \(planName) plan. Upgrade to create more teams.")
+                    }
+                    return
+                }
+            }
+        }
+        
+        // CRITICAL FIX: Ensure team has coachUID set
+        var teamToAdd = team
+        if teamToAdd.coachUID == nil || teamToAdd.coachUID!.isEmpty {
+            if let user = Auth.auth().currentUser {
+                teamToAdd.coachUID = user.uid
+                print("✅ Set coachUID to current user: \(user.uid)")
+            }
+        }
+        
+        teams.append(teamToAdd)
+        debouncedSave()
+        
+        // For demo teams or when offline, just save locally
+        if isDemo || !isOnline {
+            // Demo teams are created locally first
+            if !isDemo {
+                // Only add to pending changes if not a demo team
+                addToPendingChanges("team_\(teamToAdd.id.uuidString)", action: "create", teamId: teamToAdd.id.uuidString)
+            }
+        } else {
+            // Online and not demo - save to Firebase
+            Task {
+                do {
+                    await saveTeamToFirebase(teamToAdd)
+                    
+                    // ADDED: Automatically add creator as coach member in Firebase
+                    if let user = Auth.auth().currentUser {
+                        try await firebaseManager.addUserToTeam(
+                            userId: user.uid,
+                            teamId: teamToAdd.id.uuidString,
+                            accessLevel: .coach,
+                            userEmail: user.email ?? ""
+                        )
+                        print("✅ Added creator as coach member in Firebase")
+                    }
+                } catch {
+                    await MainActor.run {
+                        // Enhanced error handling for Firebase errors
+                        if error.localizedDescription.contains("permission") {
+                            self.setError("Team creation failed: You've reached your team limit for your current subscription plan. Please upgrade to create more teams.")
+                        } else {
+                            self.setError("Failed to save team to cloud: \(error.localizedDescription)")
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    func canCreateMoreTeams() -> Bool {
+        guard let authManager = authManager,
+              let currentUser = authManager.currentUser else { return false }
+        
+        return currentUser.subscriptionLevel.canCreateTeams && teams.count < currentUser.maxTeamsAllowed
+    }
+
+    func getTeamCreationStatusMessage() -> String? {
+        guard let authManager = authManager,
+              let currentUser = authManager.currentUser else { return "Please sign in to create teams." }
+        
+        if !currentUser.subscriptionLevel.canCreateTeams {
+            switch currentUser.subscriptionLevel {
+            case .sharedAccess:
+                return "Shared access users cannot create teams."
+            case .cancelled, .expired:
+                return "Your subscription has expired."
+            default:
+                return "Your plan doesn't allow team creation."
+            }
+        }
+        
+        let currentTeams = teams.count
+        let maxTeams = currentUser.maxTeamsAllowed
+        
+        if currentTeams >= maxTeams {
+            if maxTeams == 1 {
+                return "You've reached your team limit."
+            } else {
+                return "You've reached your maximum of \(maxTeams) teams."
+            }
+        }
+        
+        if currentTeams == maxTeams - 1 {
+            return "This will be your last team on the \(currentUser.subscriptionLevel.displayName) plan."
+        }
+        
+        return nil
+    }
+
+    // Add this computed property for UI to check team limits
+    var teamLimitInfo: (current: Int, max: Int, canCreate: Bool) {
+        guard let authManager = authManager,
+              let currentUser = authManager.currentUser else {
+            return (current: teams.count, max: 0, canCreate: false)
+        }
+        
+        return (
+            current: teams.count,
+            max: currentUser.maxTeamsAllowed,
+            canCreate: canCreateMoreTeams()
+        )
+    }
+    func updateTeam(_ team: Team) {
+        if let index = teams.firstIndex(where: { $0.id == team.id }) {
+            teams[index] = team
+            debouncedSave()
+            
+            if isOnline {
+                Task {
+                    await saveTeamToFirebase(team)
+                }
+            } else {
+                addToPendingChanges("team_\(team.id.uuidString)", action: "update", teamId: team.id.uuidString)
+            }
+        }
+    }
+    
+    func deleteTeam(_ team: Team) {
+        teams.removeAll { $0.id == team.id }
+        
+        if selectedTeam?.id == team.id {
+            selectedTeam = teams.first
+        }
+        
+        debouncedSave()
+        
+        if isOnline {
+            Task {
+                await deleteTeamFromFirebase(team)
+            }
+        } else {
+            addToPendingChanges("team_\(team.id.uuidString)", action: "delete", teamId: team.id.uuidString)
+        }
+    }
+    
+    func updatePlayer(in team: Team, player: Player) {
+        if let teamIndex = teams.firstIndex(where: { $0.id == team.id }) {
+            if let playerIndex = teams[teamIndex].players.firstIndex(where: { $0.id == player.id }) {
+                teams[teamIndex].players[playerIndex] = player
+                updateTeam(teams[teamIndex])
+            }
+        }
+    }
+    
+    func addPlayer(to team: Team, player: Player) {
+        if let teamIndex = teams.firstIndex(where: { $0.id == team.id }) {
+            teams[teamIndex].players.append(player)
+            updateTeam(teams[teamIndex])
+        }
+    }
+    
+    func removePlayer(from team: Team, player: Player) {
+        if let teamIndex = teams.firstIndex(where: { $0.id == team.id }) {
+            teams[teamIndex].players.removeAll { $0.id == player.id }
+            updateTeam(teams[teamIndex])
+        }
+    }
+    
+    func addGame(to team: Team, game: Game) {
+        if let teamIndex = teams.firstIndex(where: { $0.id == team.id }) {
+            teams[teamIndex].games.append(game)
+            updateTeam(teams[teamIndex])
+        }
+    }
+    
+    func updateGame(in team: Team, game: Game) {
+        if let teamIndex = teams.firstIndex(where: { $0.id == team.id }) {
+            if let gameIndex = teams[teamIndex].games.firstIndex(where: { $0.id == game.id }) {
+                teams[teamIndex].games[gameIndex] = game
+                updateTeam(teams[teamIndex])
+            }
+        }
+    }
+    
+    func removeGame(from team: Team, game: Game) {
+        if let teamIndex = teams.firstIndex(where: { $0.id == team.id }) {
+            teams[teamIndex].games.removeAll { $0.id == game.id }
+            
+            // Immediately recalculate stats for this team after game deletion
+            recalculateStatsForTeam(teamIndex: teamIndex)
+            
+            updateTeam(teams[teamIndex])
+        }
+    }
+    
+    func forceRecalculateAllStats() {
+        for teamIndex in teams.indices {
+            recalculateStatsForTeam(teamIndex: teamIndex)
+            updateTeam(teams[teamIndex])
+        }
+    }
+    
+    func recalculateStatsForTeam(teamIndex: Int) {
+        let team = teams[teamIndex]
+        var updatedTeam = team
+        
+        // Recalculate each player's season stats from game events
+        for playerIndex in updatedTeam.players.indices {
+            let playerId = updatedTeam.players[playerIndex].id
+            var newStats = PlayerSeasonStats() // Reset to zero
+            
+            // Count stats from all games
+            for game in team.games {
+                // Count from game events
+                for event in game.gameEvents where event.playerId == playerId {
+                    switch event.eventType {
+                    case .goal:
+                        newStats.goals += 1
+                    case .assist:
+                        newStats.assists += 1
+                    case .shot, .shotOnTarget:
+                        newStats.shots += 1
+                    case .save:
+                        newStats.saves += 1
+                    case .goalAgainst:
+                        newStats.goalsConceded += 1
+                    case .yellowCard:
+                        newStats.yellowCards += 1
+                    case .redCard:
+                        newStats.redCards += 1
+                    default:
+                        break
+                    }
+                }
+                
+                // Calculate presumed minutes
+                var updatedGame = game
+                updatedGame.updateAllPresumedMinutes(with: updatedTeam)
+                
+                if let playerGameStats = updatedGame.playerStats.first(where: { $0.playerId == playerId }) {
+                    if playerGameStats.minutesPlayed > 0 {
+                        newStats.gamesPlayed += 1
+                    }
+                    newStats.minutesPlayed += playerGameStats.minutesPlayed
+                } else {
+                    let presumedMinutes = updatedGame.calculatePresumedMinutesPlayed(for: playerId, with: updatedTeam)
+                    if presumedMinutes > 0 {
+                        newStats.gamesPlayed += 1
+                        newStats.minutesPlayed += presumedMinutes
+                    }
+                }
+                
+                // Update the game in the team's games array
+                if let gameIndex = updatedTeam.games.firstIndex(where: { $0.id == game.id }) {
+                    updatedTeam.games[gameIndex] = updatedGame
+                }
+            }
+            
+            updatedTeam.players[playerIndex].seasonStats = newStats
+        }
+        
+        // Apply the updated team back
+        teams[teamIndex] = updatedTeam
+    }
+    
+    func addPractice(to team: Team, practice: Practice) {
+        if let teamIndex = teams.firstIndex(where: { $0.id == team.id }) {
+            teams[teamIndex].practices.append(practice)
+            updateTeam(teams[teamIndex])
+        }
+    }
+    
+    func updatePractice(in team: Team, practice: Practice) {
+        if let teamIndex = teams.firstIndex(where: { $0.id == team.id }) {
+            if let practiceIndex = teams[teamIndex].practices.firstIndex(where: { $0.id == practice.id }) {
+                teams[teamIndex].practices[practiceIndex] = practice
+                updateTeam(teams[teamIndex])
+            }
+        }
+    }
+    
+    func removePractice(from team: Team, practice: Practice) {
+        if let teamIndex = teams.firstIndex(where: { $0.id == team.id }) {
+            teams[teamIndex].practices.removeAll { $0.id == practice.id }
+            updateTeam(teams[teamIndex])
+        }
+    }
+    
+    // MARK: - Demo Data
+    func createDemoTeam() {
+        // Create a basic demo team - you'll need to implement Team.createDemoTeam() or create manually
+        // For now, this is a placeholder
+        print("Demo team creation requested - implement Team.createDemoTeam() method")
+    }
+    
+    // MARK: - Team Joining (FIXED)
+    func joinTeamWithCode(_ code: String) async -> Bool {
+        guard await ensureAuthentication() else { return false }
+        
+        guard isOnline else {
+            setError("Cannot join teams while offline")
+            return false
+        }
+        
+        do {
+            let team = try await firebaseManager.joinTeamWithCode(code)
+            
+            await MainActor.run {
+                if !self.teams.contains(where: { $0.id == team.id }) {
+                    self.teams.append(team)
+                    self.saveLocalData()
+                    self.setupRealTimeListener(for: team)
+                }
+            }
+            
+            // FIXED: Add await for async call
+            await refreshPermissions(for: team)
+            
+            return true
+        } catch {
+            await MainActor.run {
+                self.setError("Failed to join team: \(error.localizedDescription)")
+            }
+            return false
+        }
+    }
+    
+    // MARK: - Invite Code Management (FIXED)
+    func generateInviteCode(for team: Team, accessLevel: AccessLevel) async -> String? {
+        print("🔍 DEBUG: Generating invite code")
+        print("🔍 Team: \(team.name)")
+        print("🔍 Team coachUID: \(team.coachUID ?? "nil")")
+        print("🔍 Current user UID: \(Auth.auth().currentUser?.uid ?? "nil")")
+        print("🔍 Access level requested: \(accessLevel.rawValue)")
+        
+        // Check if user is team creator
+        if team.coachUID == Auth.auth().currentUser?.uid {
+            print("✅ User is team creator")
+        } else {
+            print("❌ User is NOT team creator")
+        }
+        
+        // FIXED: Check user role (using cached version) - handle properly
+        let userRole = getCurrentUserRole(for: team)
+        print("🔍 User's current role: \(userRole.rawValue)")
+        
+        guard isOnline else {
+            setError("Cannot generate invite codes while offline")
+            return nil
+        }
+        
+        // Ensure authentication before Firebase operation
+        guard await ensureAuthentication() else { return nil }
+        
+        do {
+            let invite = try await firebaseManager.generateInviteCode(for: team, accessLevel: accessLevel)
+            return invite.id
+        } catch {
+            setError("Failed to generate invite code: \(error.localizedDescription)")
+            return nil
+        }
+    }
+    
+    // MARK: - LEGACY ASYNC METHODS (Keep for backward compatibility)
+    
+    func getCurrentUserRoleAsync(for team: Team) async -> AccessLevel? {
+        // If cache is fresh, return from cache
+        if let cache = permissionCache,
+           !cache.isExpired,
+           let role = cache.teamRoles[team.id] {
+            return role
+        }
+        
+        // Otherwise, fetch from Firebase and update cache
+        guard let user = Auth.auth().currentUser,
+              let authManager = authManager,
+              let currentUser = authManager.currentUser else {
+            print("❌ No user or auth manager")
+            return nil
+        }
+        
+        print("🔍 getCurrentUserRoleAsync DEBUG:")
+        print("   Team: \(team.name)")
+        print("   User UID: \(user.uid)")
+        print("   Team coachUID: \(team.coachUID ?? "nil")")
+        
+        // If user is the team creator, they're automatically a coach
+        if team.coachUID == user.uid {
+            print("   ✅ User is team creator - returning .coach")
+            return .coach
+        }
+        
+        // Check Firebase for their assigned role in this team
+        do {
+            let firebaseRole = try await firebaseManager.getUserRole(for: team.id.uuidString, userId: user.uid)
+            print("   ✅ Found Firebase role: \(firebaseRole.rawValue)")
+            
+            // Update cache with this result
+            await refreshPermissions(for: team)
+            
+            return firebaseRole
+        } catch {
+            print("   ❌ No Firebase role found: \(error)")
+            
+            // FIXED: Check email matching for sharedAccess users
+            if currentUser.subscriptionLevel == .sharedAccess {
+                if let userEmail = user.email?.lowercased() {
+                    for player in team.players {
+                        let parentEmail = player.parentInfo.parentEmail.lowercased()
+                        let secondParentEmail = player.parentInfo.secondParentEmail.lowercased()
+                        
+                        if parentEmail == userEmail || secondParentEmail == userEmail {
+                            print("   ✅ Email match found - returning .parent")
+                            return .parent
+                        }
+                    }
+                }
+            }
+            
+            // If no Firebase role found, use their default membership type
+            print("   📋 Using membership type default: \(currentUser.effectiveMembershipType.defaultAccessLevel.rawValue)")
+            return currentUser.effectiveMembershipType.defaultAccessLevel
+        }
+    }
+
+    func canCurrentUserEditAsync(player: Player, in team: Team) async -> Bool {
+        // Use cached version if available
+        let cachedResult = canCurrentUserEdit(player: player, in: team)
+        if shouldRefreshPermissions() {
+            // If cache is stale, refresh in background
+            Task {
+                await refreshPermissions(for: team)
+            }
+        }
+        return cachedResult
+    }
+
+    func canCurrentUserEditTeamAsync(_ team: Team) async -> Bool {
+        guard let user = Auth.auth().currentUser else { return false }
+        
+        // If user created the team, they can edit it
+        if team.coachUID == user.uid {
+            return true
+        }
+        
+        // Check their role for this team
+        let userRole = await getCurrentUserRoleAsync(for: team)
+        return userRole == .coach
+    }
+
+    func getEditablePlayerIdsAsync(for team: Team) async -> [UUID] {
+        guard let user = Auth.auth().currentUser else { return [] }
+        
+        // Use cached version if available and fresh
+        let cachedIds = getEditablePlayerIds(for: team)
+        if !shouldRefreshPermissions() {
+            return cachedIds
+        }
+        
+        // Otherwise fetch from Firebase
+        let userRole = await getCurrentUserRoleAsync(for: team)
+        
+        switch userRole {
+        case .coach:
+            return team.players.map { $0.id }
+        case .parent:
+            let userEmail = user.email?.lowercased() ?? ""
+            return team.players.compactMap { player in
+                let parentEmail = player.parentInfo.parentEmail.lowercased()
+                let secondParentEmail = player.parentInfo.secondParentEmail.lowercased()
+                
+                if parentEmail == userEmail || secondParentEmail == userEmail {
+                    return player.id
+                }
+                return nil
+            }
+        case .viewer:
+            return []
+        case .none:
+            return []
+        }
+    }
+    
+    // MARK: - Membership Type Restrictions (NEW)
+    func canCreateTeams() -> Bool {
+        guard let authManager = authManager,
+              let currentUser = authManager.currentUser else { return false }
+        return currentUser.effectiveMembershipType.canCreateTeams
+    }
+    
+    // MARK: - RSVP Management
+    func updateGameRSVP(gameId: UUID, playerId: UUID, status: RSVPStatus) {
+        guard let teamIndex = teams.firstIndex(where: { $0.games.contains(where: { $0.id == gameId }) }) else { return }
+        
+        var updatedTeam = teams[teamIndex]
+        
+        // Update local data immediately for UI responsiveness
+        if let gameIndex = updatedTeam.games.firstIndex(where: { $0.id == gameId }) {
+            updatedTeam.games[gameIndex].playerRSVPs[playerId] = status
+            teams[teamIndex] = updatedTeam
+            debouncedSave()
+        }
+        
+        // Use fast subcollection update if available
+        if isOnline {
+            Task {
+                // Ensure authentication before Firebase operation
+                guard await ensureAuthentication() else { return }
+                
+                do {
+                    try await firebaseManager.updateGameRSVP(
+                        gameId: gameId,
+                        playerId: playerId,
+                        status: status,
+                        in: updatedTeam
+                    )
+                } catch {
+                    await MainActor.run {
+                        self.setError("Failed to update RSVP: \(error.localizedDescription)")
+                    }
+                }
+            }
+        }
+    }
+
+    func updatePracticeRSVP(practiceId: UUID, playerId: UUID, status: RSVPStatus) {
+        guard let teamIndex = teams.firstIndex(where: { $0.practices.contains(where: { $0.id == practiceId }) }) else { return }
+        
+        var updatedTeam = teams[teamIndex]
+        
+        // Update local data immediately for UI responsiveness
+        if let practiceIndex = updatedTeam.practices.firstIndex(where: { $0.id == practiceId }) {
+            updatedTeam.practices[practiceIndex].playerRSVPs[playerId] = status
+            teams[teamIndex] = updatedTeam
+            debouncedSave()
+        }
+        
+        // Use fast subcollection update if available
+        if isOnline {
+            Task {
+                // Ensure authentication before Firebase operation
+                guard await ensureAuthentication() else { return }
+                
+                do {
+                    try await firebaseManager.updatePracticeRSVP(
+                        practiceId: practiceId,
+                        playerId: playerId,
+                        status: status,
+                        in: updatedTeam
+                    )
+                } catch {
+                    await MainActor.run {
+                        self.setError("Failed to update RSVP: \(error.localizedDescription)")
+                    }
+                }
+            }
+        }
+    }
+    
+    func migrateTeamsForTTL() {
+        guard !teams.isEmpty else { return }
+        
+        print("🔄 Migrating \(teams.count) teams for TTL support...")
+        
+        var migratedCount = 0
+        
+        for i in teams.indices {
+            if teams[i].expirationDate == nil {
+                teams[i].updateActivityTimestamp() // FIXED: Use correct method name from your models
+                updateTeam(teams[i]) // Save to Firestore
+                migratedCount += 1
+                print("✅ Migrated team: \(teams[i].name)")
+            } else {
+                print("⚪ Team already has TTL: \(teams[i].name)")
+            }
+        }
+        
+        if migratedCount > 0 {
+            print("🎉 Successfully migrated \(migratedCount) teams for automatic deletion")
+        } else {
+            print("ℹ️ All teams already have TTL configured")
+        }
+    }
+    
+    // MARK: - Subcollection Management
+    func loadTeamDataWithSubcollections(_ team: Team) async {
+        guard team.useSubcollections && isOnline else { return }
+        
+        // Ensure authentication before Firebase operation
+        guard await ensureAuthentication() else { return }
+        
+        do {
+            // Load subcollection data
+            async let players = firebaseManager.loadPlayersFromSubcollection(for: team)
+            async let games = firebaseManager.loadGamesFromSubcollection(for: team)
+            async let practices = firebaseManager.loadPracticesFromSubcollection(for: team)
+            
+            let (loadedPlayers, loadedGames, loadedPractices) = try await (players, games, practices)
+            
+            await MainActor.run {
+                if let teamIndex = self.teams.firstIndex(where: { $0.id == team.id }) {
+                    self.teams[teamIndex].players = loadedPlayers
+                    self.teams[teamIndex].games = loadedGames
+                    self.teams[teamIndex].practices = loadedPractices
+                    self.teams[teamIndex].lastSyncDate = Date()
+                    self.saveLocalData()
+                }
+            }
+        } catch {
+            await MainActor.run {
+                self.setError("Failed to load subcollection data: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    // MARK: - App Settings Management
+    func loadAppSettings() {
+        let settingsURL = documentsDirectory.appendingPathComponent(settingsFileName)
+        
+        guard FileManager.default.fileExists(atPath: settingsURL.path) else {
+            appSettings = AppSettings()
+            return
+        }
+        
+        do {
+            let data = try Data(contentsOf: settingsURL)
+            appSettings = try JSONDecoder().decode(AppSettings.self, from: data)
+        } catch {
+            print("Failed to load app settings: \(error)")
+            appSettings = AppSettings()
+        }
+    }
+    
+    func saveAppSettings() {
+        let settingsURL = documentsDirectory.appendingPathComponent(settingsFileName)
+        
+        do {
+            let data = try JSONEncoder().encode(appSettings)
+            try data.write(to: settingsURL)
+        } catch {
+            print("Failed to save app settings: \(error)")
+        }
+    }
+    
+    // MARK: - Local Data Management
+    private func saveLocalData() {
+        // UPDATED: Only save if user is authenticated
+        guard let currentUser = Auth.auth().currentUser, !currentUser.isAnonymous else {
+            print("🔒 No authenticated user - not saving local data")
+            return
+        }
+        
+        let teamsURL = documentsDirectory.appendingPathComponent(teamsFileName)
+        
+        do {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            let data = try encoder.encode(teams)
+            try data.write(to: teamsURL)
+            
+            lastSavedDate = Date()
+            
+            // Create backup
+            createBackup(data: data)
+            
+            print("💾 Saved \(teams.count) teams for user \(currentUser.uid)")
+        } catch {
+            setError("Failed to save teams: \(error.localizedDescription)")
+        }
+    }
+    
+    private func createBackup(data: Data) {
+        let backupURL = documentsDirectory.appendingPathComponent(backupFileName)
+        try? data.write(to: backupURL)
+    }
+    
+    // MARK: - Helper Methods
+    private func debouncedSave() {
+        saveWorkItem?.cancel()
+        
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.saveLocalData()
+        }
+        
+        saveWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + saveDebounceTime, execute: workItem)
+    }
+    
+    private func setError(_ message: String) {
+        errorMessage = message
+        print("❌ TeamManager Error: \(message)")
+    }
+    
+    // MARK: - Clear Local Data (ENHANCED)
+    func clearAllLocalData() {
+        print("🧹 Clearing all local data...")
+        
+        // Clear in-memory data
+        teams = []
+        selectedTeam = nil
+        pendingChanges = [:]
+        clearPermissionCache() // NEW: Clear permission cache
+        
+        // Clear local files
+        let teamsURL = documentsDirectory.appendingPathComponent(teamsFileName)
+        let backupURL = documentsDirectory.appendingPathComponent(backupFileName)
+        let pendingChangesURL = documentsDirectory.appendingPathComponent(pendingChangesFileName)
+        
+        // Remove all data files
+        try? FileManager.default.removeItem(at: teamsURL)
+        try? FileManager.default.removeItem(at: backupURL)
+        try? FileManager.default.removeItem(at: pendingChangesURL)
+        // NOTE: Don't clear app settings as they're user preferences, not user data
+        
+        print("✅ All local data cleared")
+    }
+    
+    // MARK: - Debug and Fix Methods
+    func debugTeamPermissions() {
+        guard let currentUser = Auth.auth().currentUser else {
+            print("❌ No authenticated user")
+            return
+        }
+        
+        print("🔍 Current user UID: \(currentUser.uid)")
+        print("🔍 Current user email: \(currentUser.email ?? "No email")")
+        
+        for team in teams {
+            print("🔍 Team: \(team.name)")
+            print("   - Team ID: \(team.id)")
+            print("   - Coach UID: \(team.coachUID ?? "NIL")")
+            print("   - Match: \(team.coachUID == currentUser.uid ? "✅" : "❌")")
+            
+            // NEW: Show cached permissions
+            let role = getCurrentUserRole(for: team)
+            print("   - Cached Role: \(role.rawValue)")
+        }
+    }
+    
+    // MARK: - Fix Team Ownership (FIXED)
+    func fixTeamOwnership() async {
+        guard let currentUser = Auth.auth().currentUser else {
+            setError("No authenticated user")
+            return
+        }
+        
+        print("🔧 Fixing team ownership for user: \(currentUser.uid)")
+        
+        for i in 0..<teams.count {
+            var team = teams[i]
+            
+            // If team doesn't have coachUID or it's nil, set it to current user
+            if team.coachUID == nil || team.coachUID!.isEmpty {
+                print("🔧 Fixing team: \(team.name) - setting coachUID to \(currentUser.uid)")
+                team.coachUID = currentUser.uid
+                teams[i] = team
+                
+                // Save to Firebase
+                if isOnline {
+                    do {
+                        try await firebaseManager.saveTeam(team)
+                        print("✅ Fixed team: \(team.name)")
+                        
+                        // FIXED: Add await for async call
+                        await refreshPermissions(for: team)
+                    } catch {
+                        print("❌ Failed to fix team \(team.name): \(error)")
+                    }
+                }
+            } else {
+                print("✅ Team \(team.name) already has coachUID: \(team.coachUID!)")
+            }
+        }
+        
+        // Save locally
+        debouncedSave()
+    }
+    
+    // MARK: - Firebase Operations
+    private func saveTeamToFirebase(_ team: Team) async {
+        // Ensure authentication before Firebase operation
+        guard await ensureAuthentication() else { return }
+        
+        do {
+            try await firebaseManager.saveTeam(team)
+            await MainActor.run {
+                self.removePendingChange("team_\(team.id.uuidString)")
+            }
+        } catch {
+            await MainActor.run {
+                self.setError("Failed to save team: \(error.localizedDescription)")
+                self.addToPendingChanges("team_\(team.id.uuidString)", action: "update", teamId: team.id.uuidString)
+            }
+        }
+    }
+    
+    private func deleteTeamFromFirebase(_ team: Team) async {
+        // Ensure authentication before Firebase operation
+        guard await ensureAuthentication() else { return }
+        
+        do {
+            try await firebaseManager.deleteTeam(team)
+            await MainActor.run {
+                self.removePendingChange("team_\(team.id.uuidString)")
+            }
+        } catch {
+            await MainActor.run {
+                self.setError("Failed to delete team: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    // MARK: - Firebase Data Loading
+    private func loadTeamsFromFirebase() async {
+        guard let user = Auth.auth().currentUser, !user.isAnonymous else {
+            print("No authenticated user or user is anonymous, skipping Firebase load")
+            return
+        }
+        
+        await MainActor.run {
+            isLoading = true
+            errorMessage = nil
+        }
+        
+        do {
+            let firebaseTeams = try await firebaseManager.loadTeams(for: user.uid)
+            
+            // NEW: Load subcollection data for teams that use subcollections
+            var fullyLoadedTeams: [Team] = []
+            for team in firebaseTeams {
+                if team.useSubcollections {
+                    // Load subcollection data
+                    async let players = firebaseManager.loadPlayersFromSubcollection(for: team)
+                    async let games = firebaseManager.loadGamesFromSubcollection(for: team)
+                    async let practices = firebaseManager.loadPracticesFromSubcollection(for: team)
+                    
+                    do {
+                        let (loadedPlayers, loadedGames, loadedPractices) = try await (players, games, practices)
+                        var updatedTeam = team
+                        updatedTeam.players = loadedPlayers
+                        updatedTeam.games = loadedGames
+                        updatedTeam.practices = loadedPractices
+                        fullyLoadedTeams.append(updatedTeam)
+                    } catch {
+                        print("❌ Error loading subcollection data for team \(team.name): \(error)")
+                        fullyLoadedTeams.append(team) // Use team without subcollection data
+                    }
+                } else {
+                    fullyLoadedTeams.append(team)
+                }
+            }
+            
+            await MainActor.run {
+                let localTeams = self.teams
+                let mergedTeams = self.mergeTeams(local: localTeams, remote: fullyLoadedTeams)
+                self.teams = mergedTeams
+                
+                // Set selected team if none is selected
+                if self.selectedTeam == nil && !self.teams.isEmpty {
+                    self.selectedTeam = self.teams.first
+                }
+                
+                self.isLoading = false
+                self.saveLocalData()
+                
+                // Setup real-time listeners for all teams
+                for team in self.teams {
+                    // Placeholder - implement setupRealTimeListener in FirebaseManager
+                    print("Setting up real-time listener for team: \(team.name)")
+                }
+            }
+            
+            // Sync any pending changes (moved outside MainActor.run)
+            await syncPendingChanges()
+        } catch {
+            await MainActor.run {
+                if !self.teams.isEmpty {
+                    // Have local data, show error but don't clear teams
+                    self.setError("Failed to sync with cloud: \(error.localizedDescription)")
+                } else {
+                    self.setError("Failed to load teams: \(error.localizedDescription)")
+                }
+                self.isLoading = false
+            }
+        }
+    }
+    
+    // MARK: - Force Load Teams
+    func forceLoadTeamsFromFirebase() async {
+        await loadTeamsFromFirebase()
+    }
+    
+    // MARK: - Real-time Listeners
+    private func setupRealTimeListener(for team: Team) {
+        // Placeholder - implement setupRealTimeListener in FirebaseManager
+        print("Real-time listener setup for team: \(team.name)")
+    }
+    
+    // MARK: - Backup and Recovery
+    func restoreFromBackup() {
+        let backupURL = documentsDirectory.appendingPathComponent(backupFileName)
+        
+        guard FileManager.default.fileExists(atPath: backupURL.path) else {
+            setError("No backup file found")
+            return
+        }
+        
+        do {
+            let data = try Data(contentsOf: backupURL)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let backupTeams = try decoder.decode([Team].self, from: data)
+            
+            // Find teams in backup that are missing from current teams
+            let missingTeams = backupTeams.filter { backupTeam in
+                !teams.contains { $0.id == backupTeam.id }
+            }
+            
+            if !missingTeams.isEmpty {
+                teams.append(contentsOf: missingTeams)
+                saveLocalData()
+                print("✅ Restored \(missingTeams.count) teams from backup")
+            } else {
+                print("ℹ️ No missing teams found in backup")
+            }
+            
+        } catch {
+            print("❌ Failed to restore from backup: \(error)")
+        }
+    }
+    
+    // MARK: - ADDED: Fix Orphaned Teams (FIXED)
+    func fixOrphanedTeams() async {
+        guard let currentUser = Auth.auth().currentUser else {
+            print("❌ No authenticated user")
+            return
+        }
+        
+        print("🔧 Looking for orphaned teams to fix...")
+        
+        do {
+            // Find teams with no coachUID or empty coachUID
+            let orphanedTeams = try await Firestore.firestore().collection("teams")
+                .whereField("coachUID", isEqualTo: NSNull())
+                .getDocuments()
+            
+            // Also check for empty string coachUID
+            let emptyCoachTeams = try await Firestore.firestore().collection("teams")
+                .whereField("coachUID", isEqualTo: "")
+                .getDocuments()
+            
+            let allOrphaned = orphanedTeams.documents + emptyCoachTeams.documents
+            
+            print("🔧 Found \(allOrphaned.count) orphaned teams")
+            
+            for doc in allOrphaned {
+                let data = doc.data()
+                let teamName = data["name"] as? String ?? "Unknown"
+                
+                print("🔧 Fixing team: \(teamName)")
+                
+                // Update the team with current user as coach
+                try await Firestore.firestore().collection("teams").document(doc.documentID).updateData([
+                    "coachUID": currentUser.uid
+                ])
+                
+                // Add team to user's teams array
+                try await Firestore.firestore().collection("users").document(currentUser.uid).setData([
+                    "teams": FieldValue.arrayUnion([doc.documentID]),
+                    "lastUpdated": FieldValue.serverTimestamp()
+                ], merge: true)
+                
+                print("✅ Fixed team: \(teamName)")
+            }
+            
+            if !allOrphaned.isEmpty {
+                // Reload teams after fixing
+                await forceLoadTeamsFromFirebase()
+                
+                // NEW: Refresh permissions after fixing orphaned teams
+                await loadUserPermissions()
+            }
+            
+        } catch {
+            print("❌ Error fixing orphaned teams: \(error)")
+        }
+    }
+    
+    // MARK: - Pending Changes Management
+    struct PendingChange: Codable {
+        let action: String
+        let teamId: String
+        let timestamp: Date
+    }
+    
+    private func addToPendingChanges(_ id: String, action: String, teamId: String) {
+        pendingChanges[id] = PendingChange(action: action, teamId: teamId, timestamp: Date())
+        savePendingChanges()
+    }
+    
+    private func removePendingChange(_ id: String) {
+        pendingChanges.removeValue(forKey: id)
+        savePendingChanges()
+    }
+    
+    private func savePendingChanges() {
+        let url = documentsDirectory.appendingPathComponent(pendingChangesFileName)
+        do {
+            let data = try JSONEncoder().encode(pendingChanges)
+            try data.write(to: url)
+        } catch {
+            print("Failed to save pending changes: \(error)")
+        }
+    }
+    
+    private func loadPendingChanges() {
+        let url = documentsDirectory.appendingPathComponent(pendingChangesFileName)
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        
+        do {
+            let data = try Data(contentsOf: url)
+            pendingChanges = try JSONDecoder().decode([String: PendingChange].self, from: data)
+        } catch {
+            print("Failed to load pending changes: \(error)")
+        }
+    }
+    
+    private func syncPendingChanges() async {
+        guard !pendingChanges.isEmpty else { return }
+        
+        // Ensure authentication before syncing
+        guard await ensureAuthentication() else { return }
+        
+        for (_, change) in pendingChanges {
+            if let team = teams.first(where: { $0.id.uuidString == change.teamId }) {
+                switch change.action {
+                case "create", "update":
+                    await saveTeamToFirebase(team)
+                case "delete":
+                    await deleteTeamFromFirebase(team)
+                default:
+                    break
+                }
+            }
+        }
+    }
+    
+    // MARK: - Team Merging
+    private func mergeTeams(local: [Team], remote: [Team]) -> [Team] {
+        var merged: [Team] = []
+        var processedIds: Set<UUID> = []
+        
+        // Process remote teams (authoritative)
+        for remoteTeam in remote {
+            merged.append(remoteTeam)
+            processedIds.insert(remoteTeam.id)
+        }
+        
+        // Add local teams that aren't in remote
+        for localTeam in local {
+            if !processedIds.contains(localTeam.id) {
+                merged.append(localTeam)
+            }
+        }
+        
+        return merged
+    }
+}
+
+// MARK: - User Team Limits Extension
+extension User {
+    var maxTeamsAllowed: Int {
+        switch subscriptionLevel {
+        case .trial: return 1
+        case .pro: return 1
+        case .premium: return 3
+        case .club: return 20
+        case .free: return Int.max  // Legacy unlimited
+        case .sharedAccess: return 0  // Can't create teams, only join
+        case .cancelled, .expired: return 0
+        }
+    }
+    
+    func canCreateMoreTeams(currentTeamCount: Int) -> Bool {
+        return currentTeamCount < maxTeamsAllowed
+    }
+}

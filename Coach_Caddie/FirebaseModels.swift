@@ -1,12 +1,5 @@
-//
-//  TeamInvite.swift
-//  Coach_Caddie
-//
-//  Created by Jason Hutches on 7/14/25.
-//
-
-
 import Foundation
+import FirebaseFirestore
 
 // MARK: - Firebase-Specific Models
 
@@ -20,6 +13,20 @@ struct TeamInvite: Codable, Identifiable {
     let expiresAt: Date
     let usedCount: Int
     let maxUses: Int
+}
+
+// MARK: - Team Member Info (ADD THIS TO FirebaseModels.swift)
+struct TeamMemberInfo: Identifiable, Codable {
+    let id = UUID()
+    let userId: String
+    let email: String
+    let accessLevel: AccessLevel
+    let joinedAt: Date
+    
+    var displayName: String {
+        // Extract name from email if no display name available
+        return email.components(separatedBy: "@").first?.capitalized ?? email
+    }
 }
 
 struct ChatMessage: Codable, Identifiable {
@@ -79,6 +86,33 @@ enum FirebaseError: LocalizedError {
             return "Team not found"
         case .accessDenied:
             return "Access denied"
+        }
+    }
+    // MARK: - Team Member Model
+    struct TeamMember: Codable, Identifiable {
+        let id: String
+        let userId: String
+        let email: String
+        let accessLevel: AccessLevel
+        let joinedAt: Date
+        
+        enum CodingKeys: String, CodingKey {
+            case id
+            case userId
+            case email
+            case accessLevel
+            case joinedAt
+        }
+        
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decode(String.self, forKey: .id)
+            userId = try container.decode(String.self, forKey: .userId)
+            email = try container.decode(String.self, forKey: .email)
+            accessLevel = try container.decode(AccessLevel.self, forKey: .accessLevel)
+            
+            let timestamp = try container.decode(Timestamp.self, forKey: .joinedAt)
+            joinedAt = timestamp.dateValue()
         }
     }
 }

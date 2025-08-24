@@ -34,9 +34,9 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		FE7B1A4B2E25702900F3F140 /* Coach_Caddie.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Coach_Caddie.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		FE7B1A582E25702B00F3F140 /* Coach_CaddieTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = Coach_CaddieTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		FE7B1A622E25702B00F3F140 /* Coach_CaddieUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = Coach_CaddieUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		FE7B1A4B2E25702900F3F140 /* Coach Caddie.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Coach Caddie.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		FE7B1A582E25702B00F3F140 /* Coach CaddieTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Coach CaddieTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		FE7B1A622E25702B00F3F140 /* Coach CaddieUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Coach CaddieUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -102,9 +102,9 @@
 		FE7B1A4C2E25702900F3F140 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				FE7B1A4B2E25702900F3F140 /* Coach_Caddie.app */,
-				FE7B1A582E25702B00F3F140 /* Coach_CaddieTests.xctest */,
-				FE7B1A622E25702B00F3F140 /* Coach_CaddieUITests.xctest */,
+				FE7B1A4B2E25702900F3F140 /* Coach Caddie.app */,
+				FE7B1A582E25702B00F3F140 /* Coach CaddieTests.xctest */,
+				FE7B1A622E25702B00F3F140 /* Coach CaddieUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -112,9 +112,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		FE7B1A4A2E25702900F3F140 /* Coach_Caddie */ = {
+		FE7B1A4A2E25702900F3F140 /* Coach Caddie */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = FE7B1A6C2E25702B00F3F140 /* Build configuration list for PBXNativeTarget "Coach_Caddie" */;
+			buildConfigurationList = FE7B1A6C2E25702B00F3F140 /* Build configuration list for PBXNativeTarget "Coach Caddie" */;
 			buildPhases = (
 				FE7B1A472E25702900F3F140 /* Sources */,
 				FE7B1A482E25702900F3F140 /* Frameworks */,
@@ -127,7 +127,7 @@
 			fileSystemSynchronizedGroups = (
 				FE7B1A4D2E25702900F3F140 /* Coach_Caddie */,
 			);
-			name = Coach_Caddie;
+			name = "Coach Caddie";
 			packageProductDependencies = (
 				FE7B1A762E25713C00F3F140 /* FirebaseAuth */,
 				FE7B1A782E25713C00F3F140 /* FirebaseFirestore */,
@@ -138,12 +138,12 @@
 				FEA7F4372E27107200ABA2DE /* GoogleSignInSwift */,
 			);
 			productName = Coach_Caddie;
-			productReference = FE7B1A4B2E25702900F3F140 /* Coach_Caddie.app */;
+			productReference = FE7B1A4B2E25702900F3F140 /* Coach Caddie.app */;
 			productType = "com.apple.product-type.application";
 		};
-		FE7B1A572E25702B00F3F140 /* Coach_CaddieTests */ = {
+		FE7B1A572E25702B00F3F140 /* Coach CaddieTests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = FE7B1A6F2E25702B00F3F140 /* Build configuration list for PBXNativeTarget "Coach_CaddieTests" */;
+			buildConfigurationList = FE7B1A6F2E25702B00F3F140 /* Build configuration list for PBXNativeTarget "Coach CaddieTests" */;
 			buildPhases = (
 				FE7B1A542E25702B00F3F140 /* Sources */,
 				FE7B1A552E25702B00F3F140 /* Frameworks */,
@@ -157,16 +157,16 @@
 			fileSystemSynchronizedGroups = (
 				FE7B1A5B2E25702B00F3F140 /* Coach_CaddieTests */,
 			);
-			name = Coach_CaddieTests;
+			name = "Coach CaddieTests";
 			packageProductDependencies = (
 			);
 			productName = Coach_CaddieTests;
-			productReference = FE7B1A582E25702B00F3F140 /* Coach_CaddieTests.xctest */;
+			productReference = FE7B1A582E25702B00F3F140 /* Coach CaddieTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
-		FE7B1A612E25702B00F3F140 /* Coach_CaddieUITests */ = {
+		FE7B1A612E25702B00F3F140 /* Coach CaddieUITests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = FE7B1A722E25702B00F3F140 /* Build configuration list for PBXNativeTarget "Coach_CaddieUITests" */;
+			buildConfigurationList = FE7B1A722E25702B00F3F140 /* Build configuration list for PBXNativeTarget "Coach CaddieUITests" */;
 			buildPhases = (
 				FE7B1A5E2E25702B00F3F140 /* Sources */,
 				FE7B1A5F2E25702B00F3F140 /* Frameworks */,
@@ -180,11 +180,11 @@
 			fileSystemSynchronizedGroups = (
 				FE7B1A652E25702B00F3F140 /* Coach_CaddieUITests */,
 			);
-			name = Coach_CaddieUITests;
+			name = "Coach CaddieUITests";
 			packageProductDependencies = (
 			);
 			productName = Coach_CaddieUITests;
-			productReference = FE7B1A622E25702B00F3F140 /* Coach_CaddieUITests.xctest */;
+			productReference = FE7B1A622E25702B00F3F140 /* Coach CaddieUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
 /* End PBXNativeTarget section */
@@ -210,7 +210,7 @@
 					};
 				};
 			};
-			buildConfigurationList = FE7B1A462E25702900F3F140 /* Build configuration list for PBXProject "Coach_Caddie" */;
+			buildConfigurationList = FE7B1A462E25702900F3F140 /* Build configuration list for PBXProject "Coach Caddie" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -228,9 +228,9 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				FE7B1A4A2E25702900F3F140 /* Coach_Caddie */,
-				FE7B1A572E25702B00F3F140 /* Coach_CaddieTests */,
-				FE7B1A612E25702B00F3F140 /* Coach_CaddieUITests */,
+				FE7B1A4A2E25702900F3F140 /* Coach Caddie */,
+				FE7B1A572E25702B00F3F140 /* Coach CaddieTests */,
+				FE7B1A612E25702B00F3F140 /* Coach CaddieUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -286,12 +286,12 @@
 /* Begin PBXTargetDependency section */
 		FE7B1A5A2E25702B00F3F140 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = FE7B1A4A2E25702900F3F140 /* Coach_Caddie */;
+			target = FE7B1A4A2E25702900F3F140 /* Coach Caddie */;
 			targetProxy = FE7B1A592E25702B00F3F140 /* PBXContainerItemProxy */;
 		};
 		FE7B1A642E25702B00F3F140 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = FE7B1A4A2E25702900F3F140 /* Coach_Caddie */;
+			target = FE7B1A4A2E25702900F3F140 /* Coach Caddie */;
 			targetProxy = FE7B1A632E25702B00F3F140 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
@@ -506,7 +506,7 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Coach_Caddie.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Coach_Caddie";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Coach Caddie.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Coach Caddie";
 			};
 			name = Debug;
 		};
@@ -526,7 +526,7 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Coach_Caddie.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Coach_Caddie";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Coach Caddie.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Coach Caddie";
 			};
 			name = Release;
 		};
@@ -569,7 +569,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		FE7B1A462E25702900F3F140 /* Build configuration list for PBXProject "Coach_Caddie" */ = {
+		FE7B1A462E25702900F3F140 /* Build configuration list for PBXProject "Coach Caddie" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				FE7B1A6A2E25702B00F3F140 /* Debug */,
@@ -578,7 +578,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		FE7B1A6C2E25702B00F3F140 /* Build configuration list for PBXNativeTarget "Coach_Caddie" */ = {
+		FE7B1A6C2E25702B00F3F140 /* Build configuration list for PBXNativeTarget "Coach Caddie" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				FE7B1A6D2E25702B00F3F140 /* Debug */,
@@ -587,7 +587,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		FE7B1A6F2E25702B00F3F140 /* Build configuration list for PBXNativeTarget "Coach_CaddieTests" */ = {
+		FE7B1A6F2E25702B00F3F140 /* Build configuration list for PBXNativeTarget "Coach CaddieTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				FE7B1A702E25702B00F3F140 /* Debug */,
@@ -596,7 +596,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		FE7B1A722E25702B00F3F140 /* Build configuration list for PBXNativeTarget "Coach_CaddieUITests" */ = {
+		FE7B1A722E25702B00F3F140 /* Build configuration list for PBXNativeTarget "Coach CaddieUITests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				FE7B1A732E25702B00F3F140 /* Debug */,

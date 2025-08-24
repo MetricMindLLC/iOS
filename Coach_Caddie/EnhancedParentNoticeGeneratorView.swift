@@ -1,5 +1,4 @@
 import SwiftUI
-import Firebase
 
 // MARK: - Enhanced Parent Notice Generator View
 struct EnhancedParentNoticeGeneratorView: View {
@@ -51,7 +50,7 @@ struct EnhancedParentNoticeGeneratorView: View {
                 loadCoachInfo()
             }
             .sheet(isPresented: $showingShareSheet) {
-                ShareSheet(activityItems: [generatedNotice])
+                ActivityShareSheet(activityItems: [generatedNotice])
             }
         }
     }
@@ -168,14 +167,10 @@ struct EnhancedParentNoticeGeneratorView: View {
     
     // MARK: - Helper Functions
     private func loadCoachInfo() {
-        if let currentUser = Auth.auth().currentUser {
-            if let displayName = currentUser.displayName, !displayName.isEmpty {
-                coachName = displayName
-            }
-            if let email = currentUser.email, !email.isEmpty {
-                coachEmail = email
-            }
-        }
+        // You can manually set coach info or load from your existing auth system
+        // For now, we'll leave these empty for manual entry
+        coachName = ""
+        coachEmail = ""
     }
     
     private func generateNotice() {
@@ -204,8 +199,8 @@ struct EnhancedParentNoticeGeneratorView: View {
         
         PRIVACY PROTECTIONS:
         • Information used only for team management
-        • No photos or personal details collected
-        • Data automatically deleted after 90 days of inactivity
+        • No personal details collected beyond the essentials
+        • Data automatically deleted after 180 days of inactivity
         
         Questions? Contact me directly.
         
@@ -245,8 +240,8 @@ struct EnhancedParentNoticeGeneratorView: View {
         PRIVACY & SAFETY MEASURES:
         • All information is used solely for team management
         • No commercial use or third-party sharing
-        • Automatic data deletion after 90 days of inactivity
-        • No photos, videos, or dates of birth collected
+        • Automatic data deletion after 180 days of inactivity
+        • No dates of birth, ages, or detailed personal information collected
         • Secure, encrypted storage with restricted access
         
         YOUR RIGHTS:
@@ -272,8 +267,8 @@ struct EnhancedParentNoticeGeneratorView: View {
     }
 }
 
-// MARK: - Share Sheet Component
-struct ShareSheet: UIViewControllerRepresentable {
+// MARK: - Activity Share Sheet Component
+struct ActivityShareSheet: UIViewControllerRepresentable {
     let activityItems: [Any]
     @Environment(\.presentationMode) var presentationMode
     
