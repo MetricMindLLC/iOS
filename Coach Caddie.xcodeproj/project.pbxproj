@@ -6,6 +6,16 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		FE7B1A772E25713C00F3F140 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = FE7B1A762E25713C00F3F140 /* FirebaseAuth */; };
+		FE7B1A792E25713C00F3F140 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = FE7B1A782E25713C00F3F140 /* FirebaseFirestore */; };
+		FE7B1A7B2E25713C00F3F140 /* FirebaseInAppMessaging-Beta in Frameworks */ = {isa = PBXBuildFile; productRef = FE7B1A7A2E25713C00F3F140 /* FirebaseInAppMessaging-Beta */; };
+		FE7B1A7D2E25713C00F3F140 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = FE7B1A7C2E25713C00F3F140 /* FirebaseMessaging */; };
+		FE7B1A7F2E25713C00F3F140 /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = FE7B1A7E2E25713C00F3F140 /* FirebaseStorage */; };
+		FEA7F4362E27107200ABA2DE /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = FEA7F4352E27107200ABA2DE /* GoogleSignIn */; };
+		FEA7F4382E27107200ABA2DE /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = FEA7F4372E27107200ABA2DE /* GoogleSignInSwift */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		FE7B1A592E25702B00F3F140 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -52,6 +62,13 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FE7B1A7D2E25713C00F3F140 /* FirebaseMessaging in Frameworks */,
+				FE7B1A772E25713C00F3F140 /* FirebaseAuth in Frameworks */,
+				FEA7F4382E27107200ABA2DE /* GoogleSignInSwift in Frameworks */,
+				FE7B1A792E25713C00F3F140 /* FirebaseFirestore in Frameworks */,
+				FE7B1A7F2E25713C00F3F140 /* FirebaseStorage in Frameworks */,
+				FE7B1A7B2E25713C00F3F140 /* FirebaseInAppMessaging-Beta in Frameworks */,
+				FEA7F4362E27107200ABA2DE /* GoogleSignIn in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -112,6 +129,13 @@
 			);
 			name = Coach_Caddie;
 			packageProductDependencies = (
+				FE7B1A762E25713C00F3F140 /* FirebaseAuth */,
+				FE7B1A782E25713C00F3F140 /* FirebaseFirestore */,
+				FE7B1A7A2E25713C00F3F140 /* FirebaseInAppMessaging-Beta */,
+				FE7B1A7C2E25713C00F3F140 /* FirebaseMessaging */,
+				FE7B1A7E2E25713C00F3F140 /* FirebaseStorage */,
+				FEA7F4352E27107200ABA2DE /* GoogleSignIn */,
+				FEA7F4372E27107200ABA2DE /* GoogleSignInSwift */,
 			);
 			productName = Coach_Caddie;
 			productReference = FE7B1A4B2E25702900F3F140 /* Coach_Caddie.app */;
@@ -195,6 +219,10 @@
 			);
 			mainGroup = FE7B1A422E25702900F3F140;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				FE7B1A752E25713B00F3F140 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+				FEA7F4342E27107200ABA2DE /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = FE7B1A4C2E25702900F3F140 /* Products */;
 			projectDirPath = "";
@@ -395,11 +423,14 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = RK33LU6G35;
+				CURRENT_PROJECT_VERSION = 4;
+				DEVELOPMENT_TEAM = N46B389T6Y;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Coach-Caddie-Info.plist";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.sports";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -410,11 +441,16 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "MetricMind.Coach-Caddie";
+				PRODUCT_BUNDLE_IDENTIFIER = metricmind.coachcaddie;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Debug;
 		};
@@ -423,11 +459,14 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = RK33LU6G35;
+				CURRENT_PROJECT_VERSION = 4;
+				DEVELOPMENT_TEAM = N46B389T6Y;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Coach-Caddie-Info.plist";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.sports";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -438,11 +477,16 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "MetricMind.Coach-Caddie";
+				PRODUCT_BUNDLE_IDENTIFIER = metricmind.coachcaddie;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Release;
 		};
@@ -450,14 +494,15 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_STYLE = Manual;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = RK33LU6G35;
+				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "MetricMind.Coach-CaddieTests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -469,14 +514,15 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_STYLE = Manual;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = RK33LU6G35;
+				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "MetricMind.Coach-CaddieTests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -487,13 +533,14 @@
 		FE7B1A732E25702B00F3F140 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_STYLE = Manual;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = RK33LU6G35;
+				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "MetricMind.Coach-CaddieUITests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -504,13 +551,14 @@
 		FE7B1A742E25702B00F3F140 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_STYLE = Manual;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = RK33LU6G35;
+				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "MetricMind.Coach-CaddieUITests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -558,6 +606,63 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		FE7B1A752E25713B00F3F140 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 11.15.0;
+			};
+		};
+		FEA7F4342E27107200ABA2DE /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/google/GoogleSignIn-iOS";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 9.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		FE7B1A762E25713C00F3F140 /* FirebaseAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FE7B1A752E25713B00F3F140 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAuth;
+		};
+		FE7B1A782E25713C00F3F140 /* FirebaseFirestore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FE7B1A752E25713B00F3F140 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFirestore;
+		};
+		FE7B1A7A2E25713C00F3F140 /* FirebaseInAppMessaging-Beta */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FE7B1A752E25713B00F3F140 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = "FirebaseInAppMessaging-Beta";
+		};
+		FE7B1A7C2E25713C00F3F140 /* FirebaseMessaging */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FE7B1A752E25713B00F3F140 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseMessaging;
+		};
+		FE7B1A7E2E25713C00F3F140 /* FirebaseStorage */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FE7B1A752E25713B00F3F140 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseStorage;
+		};
+		FEA7F4352E27107200ABA2DE /* GoogleSignIn */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FEA7F4342E27107200ABA2DE /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignIn;
+		};
+		FEA7F4372E27107200ABA2DE /* GoogleSignInSwift */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FEA7F4342E27107200ABA2DE /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignInSwift;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = FE7B1A432E25702900F3F140 /* Project object */;
 }
