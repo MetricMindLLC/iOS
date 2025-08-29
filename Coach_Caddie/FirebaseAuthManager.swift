@@ -269,19 +269,23 @@ class FirebaseAuthManager: ObservableObject {
         }
     }
     
-    // FIXED: Combined membership type and subscription level update
     func updateMembershipTypeAndSubscription(
         membershipType: MembershipType,
         subscriptionLevel: SubscriptionLevel
     ) async throws {
-        print("🔍 FirebaseAuthManager: Updating membership type to: \(membershipType.rawValue) and subscription to: \(subscriptionLevel.rawValue)")
-        guard let firebaseUser = Auth.auth().currentUser,
+        guard let firebaseUser = Auth.auth().currentUser,  // ADD THIS LINE
               let currentUser = currentUser else {
-            print("❌ FirebaseAuthManager: No current user for membership/subscription update")
             throw NSError(domain: "Auth", code: -1, userInfo: [NSLocalizedDescriptionKey: "No current user"])
         }
         
-        // Create updated user object with both membership type and subscription level
+        // NEW: Check trial eligibility before allowing trial selection
+        if subscriptionLevel == .trial && currentUser.hasUsedTrial {
+            throw NSError(domain: "Auth", code: -1, userInfo: [NSLocalizedDescriptionKey: "Trial already used. Please select a paid plan."])
+        }
+        
+        // NEW: Mark trial as used when starting trial
+        let hasUsedTrial = currentUser.hasUsedTrial || (subscriptionLevel == .trial)
+        
         let updatedUser = User(
             id: currentUser.id,
             firebaseUID: currentUser.firebaseUID,
@@ -290,8 +294,10 @@ class FirebaseAuthManager: ObservableObject {
             dateJoined: currentUser.dateJoined,
             subscriptionLevel: subscriptionLevel,
             trialStartDate: subscriptionLevel == .trial ? Date() : currentUser.trialStartDate,
-            cancellationDate: subscriptionLevel != .cancelled ? nil : currentUser.cancellationDate,
-            dataRetentionEndDate: subscriptionLevel != .cancelled ? nil : currentUser.dataRetentionEndDate
+            subscriptionEndDate: currentUser.subscriptionEndDate,
+            cancellationDate: currentUser.cancellationDate,
+            dataRetentionEndDate: currentUser.dataRetentionEndDate,
+            hasUsedTrial: hasUsedTrial  // NEW
         )
         
         // Save to Firebase
@@ -718,10 +724,14 @@ class FirebaseAuthManager: ObservableObject {
         }
     }
 
-    // FIXED: Reactivate subscription method
-    func reactivateSubscription(level: SubscriptionLevel) async throws {
+    func reactivateSubscription(_ level: SubscriptionLevel) async throws {
         guard let currentUser = currentUser else {
             throw NSError(domain: "Auth", code: -1, userInfo: [NSLocalizedDescriptionKey: "No current user"])
+        }
+        
+        // NEW: Prevent trial re-use during reactivation
+        if level == .trial && currentUser.hasUsedTrial {
+            throw NSError(domain: "Auth", code: -1, userInfo: [NSLocalizedDescriptionKey: "Trial already used. Please select a paid plan."])
         }
         
         // Create updated user object

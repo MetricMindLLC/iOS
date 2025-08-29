@@ -246,25 +246,41 @@ struct StoreKitPlanSelectionView: View {
                     } else {
                         // Plan Options
                         VStack(spacing: 16) {
-                            // Trial Option
-                            PlanSelectionCard(
-                                title: "Free Trial",
-                                price: "Free for 7 days",
-                                features: [
-                                    "1 team",
-                                    "Up to 20 players",
-                                    "Basic game & practice management",
-                                    "Formation planning",
-                                    "Limited team sharing"
-                                ],
-                                isRecommended: false,
-                                isSelected: selectedOption == .startTrial,
-                                badgeText: nil
-                            ) {
-                                selectedOption = .startTrial
+                            // Only show trial if user is eligible
+                            if let user = authManager.currentUser, user.isTrialEligible {
+                                // Trial Option
+                                PlanSelectionCard(
+                                    title: "Free Trial",
+                                    price: "Free for 3 days",
+                                    features: [
+                                        "1 team",
+                                        "Up to 20 players",
+                                        "Basic game & practice management",
+                                        "Formation planning",
+                                        "Limited team sharing"
+                                    ],
+                                    isRecommended: false,
+                                    isSelected: selectedOption == .startTrial,
+                                    badgeText: nil
+                                ) {
+                                    selectedOption = .startTrial
+                                }
+                            } else {
+                                // Show message for ineligible users
+                                VStack(spacing: 8) {
+                                    Text("Trial Already Used")
+                                        .font(.headline)
+                                        .foregroundColor(.secondary)
+                                    Text("Please select a paid plan to continue")
+                                        .font(.subheadline)
+                                        .foregroundColor(.secondary)
+                                }
+                                .padding()
+                                .background(Color(.systemGray6))
+                                .cornerRadius(12)
                             }
                             
-                            // Pro Plans
+                            // Pro Plans (always show)
                             if let proMonthly = storeKit.products.first(where: { $0.id == "com.coachcaddie.pro.monthly" }),
                                let proYearly = storeKit.products.first(where: { $0.id == "com.coachcaddie.pro.yearly" }) {
                                 PlanSelectionCard(
@@ -286,7 +302,7 @@ struct StoreKitPlanSelectionView: View {
                                 }
                             }
                             
-                            // Premium Plans
+                            // Premium Plans (always show)
                             if let premiumMonthly = storeKit.products.first(where: { $0.id == "com.coachcaddie.premium.monthly" }),
                                let premiumYearly = storeKit.products.first(where: { $0.id == "com.coachcaddie.premium.yearly" }) {
                                 PlanSelectionCard(
@@ -309,24 +325,22 @@ struct StoreKitPlanSelectionView: View {
                                 }
                             }
                             
-                            // Club Plans
+                            // Club Plans (always show)
                             if let clubMonthly = storeKit.products.first(where: { $0.id == "com.coachcaddie.club.monthly" }),
                                let clubYearly = storeKit.products.first(where: { $0.id == "com.coachcaddie.club.yearly" }) {
                                 PlanSelectionCard(
                                     title: "Club",
                                     price: "\(clubMonthly.displayPrice)/mo or \(clubYearly.displayPrice)/yr",
                                     features: [
-                                        "Unlimited teams",
-                                        "Unlimited players",
+                                        "50 teams",
                                         "Everything in Premium",
-                                        "Unlimited invites",
-                                        "Club-wide management",
-                                        "Custom branding",
+                                        "Club management tools",
+                                        "White-label options",
                                         "Dedicated support"
                                     ],
                                     isRecommended: false,
                                     isSelected: selectedOption == .subscribeClub,
-                                    badgeText: "BEST VALUE"
+                                    badgeText: nil
                                 ) {
                                     selectedOption = .subscribeClub
                                 }
@@ -363,7 +377,7 @@ struct StoreKitPlanSelectionView: View {
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                             
-                            Text("After 7 days, you'll need to choose a paid plan to continue")
+                            Text("After 3 days, you'll need to choose a paid plan to continue")
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
                         } else {
@@ -425,6 +439,15 @@ struct StoreKitPlanSelectionView: View {
     }
     
     private func handleContinue() {
+        // NEW: Check trial eligibility before allowing trial selection
+        if selectedOption == .startTrial {
+            guard let user = authManager.currentUser, user.isTrialEligible else {
+                errorMessage = "Trial already used. Please select a paid plan."
+                showingError = true
+                return
+            }
+        }
+        
         switch selectedOption {
         case .startTrial:
             // Start trial - just set membership and trial subscription

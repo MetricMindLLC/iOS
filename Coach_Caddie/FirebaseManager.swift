@@ -1,38 +1,30 @@
-import SwiftUI
 import Foundation
 import FirebaseAuth
 import FirebaseFirestore
+import FirebaseStorage
 import FirebaseMessaging
-import UserNotifications
 import Network
 
-// MARK: - Firebase Manager
+@MainActor
 class FirebaseManager: NSObject, ObservableObject {
     static let shared = FirebaseManager()
     
+    private let db = Firestore.firestore()
+    private let storage = Storage.storage()
+    
+    // MARK: - Published Properties
+    @Published var isLoadingTeams = false
+    @Published var error: String?
+    @Published var lastSyncDate: Date?
     @Published var isOnline = true
     @Published var pendingSyncItems = 0
     @Published var isReconnecting = false
     
-    private let db = Firestore.firestore()
+    // Keep track of active listeners
     private var teamListeners: [String: ListenerRegistration] = [:]
     private var chatListeners: [String: ListenerRegistration] = [:]
     private let monitor = NWPathMonitor()
     private let queue = DispatchQueue(label: "NetworkMonitor")
-    
-    private func reconnectFirebaseListeners() {
-        isReconnecting = true
-        
-        // Restart any active listeners
-        for (teamId, _) in teamListeners {
-            print("Reconnecting listener for team: \(teamId)")
-            // The existing listeners will automatically reconnect, but we can log this
-        }
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-            self.isReconnecting = false
-        }
-    }
     
     override init() {
         super.init()
@@ -40,9 +32,12 @@ class FirebaseManager: NSObject, ObservableObject {
         setupMessaging()
     }
     
+    deinit {
+        monitor.cancel()
+    }
+    
     // MARK: - Network Monitoring
     private func setupNetworkMonitoring() {
-        // Add debouncing to prevent frequent state changes
         monitor.pathUpdateHandler = { [weak self] path in
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { // 500ms debounce
                 let isOnline = path.status == .satisfied
@@ -51,7 +46,6 @@ class FirebaseManager: NSObject, ObservableObject {
                     print("Network status changed: \(isOnline ? "Online" : "Offline")")
                     
                     if isOnline {
-                        // Reconnect Firebase listeners after network comes back
                         self?.reconnectFirebaseListeners()
                     }
                 }
@@ -62,7 +56,6 @@ class FirebaseManager: NSObject, ObservableObject {
         // Also check Firebase Auth connection
         _ = Auth.auth().addStateDidChangeListener { [weak self] auth, user in
             if user != nil {
-                // User is signed in, assume we're online unless Network framework says otherwise
                 if self?.monitor.currentPath.status == .satisfied {
                     DispatchQueue.main.async {
                         self?.isOnline = true
@@ -72,8 +65,17 @@ class FirebaseManager: NSObject, ObservableObject {
         }
     }
     
-    deinit {
-        monitor.cancel()
+    private func reconnectFirebaseListeners() {
+        isReconnecting = true
+        
+        // Restart any active listeners
+        for (teamId, _) in teamListeners {
+            print("Reconnecting listener for team: \(teamId)")
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            self.isReconnecting = false
+        }
     }
     
     // MARK: - Team Management
@@ -82,18 +84,110 @@ class FirebaseManager: NSObject, ObservableObject {
             throw FirebaseError.notAuthenticated
         }
         
-        // Create a mutable copy of the team
-        var teamToSave = team
+        print("🔥 saveTeam called for team: \(team.name)")
+        print("🔥 Team ID: \(team.id.uuidString)")
+        print("🔥 useSubcollections: \(team.useSubcollections)")
         
-        // Set the coachUID if it's not already set (for backward compatibility)
-        if teamToSave.coachUID == nil {
-            teamToSave.coachUID = user.uid
-        }
-        
-        let teamData = try Firestore.Encoder().encode(teamToSave)
         let teamRef = db.collection("teams").document(team.id.uuidString)
         
-        try await teamRef.setData(teamData)
+        if team.useSubcollections {
+            // Create a copy of team without the large arrays
+            var teamDataForFirebase = team
+            teamDataForFirebase.players = []
+            teamDataForFirebase.games = []
+            teamDataForFirebase.practices = []
+            
+            // Save the main team document
+            let teamData = try Firestore.Encoder().encode(teamDataForFirebase)
+            try await teamRef.setData(teamData)
+            
+            // Save players to subcollection
+            let playersRef = teamRef.collection("players")
+            for player in team.players {
+                let playerData = try Firestore.Encoder().encode(player)
+                try await playersRef.document(player.id.uuidString).setData(playerData)
+            }
+            
+            // Save games to subcollection with their nested subcollections
+            let gamesRef = teamRef.collection("games")
+            for game in team.games {
+                let gameRef = gamesRef.document(game.id.uuidString)
+                
+                // IMPORTANT: Save the nested subcollections FIRST before modifying the game
+                
+                // Save audit log entries to nested subcollection
+                if let auditLog = game.auditLog, !auditLog.isEmpty {
+                    let auditLogRef = gameRef.collection("auditLog")
+                    // First delete existing entries
+                    let existingAuditDocs = try await auditLogRef.getDocuments()
+                    for doc in existingAuditDocs.documents {
+                        try await doc.reference.delete()
+                    }
+                    // Then save new entries
+                    for (index, auditEntry) in auditLog.enumerated() {
+                        let auditData = try Firestore.Encoder().encode(auditEntry)
+                        try await auditLogRef.document(String(index)).setData(auditData)
+                    }
+                    print("📝 Saved \(auditLog.count) audit log entries for game vs \(game.opponent)")
+                }
+                
+                // Save player stats to nested subcollection
+                if !game.playerStats.isEmpty {
+                    let playerStatsRef = gameRef.collection("playerStats")
+                    // First delete existing stats
+                    let existingStatsDocs = try await playerStatsRef.getDocuments()
+                    for doc in existingStatsDocs.documents {
+                        try await doc.reference.delete()
+                    }
+                    // Then save new stats
+                    for stats in game.playerStats {
+                        let statsData = try Firestore.Encoder().encode(stats)
+                        try await playerStatsRef.document(stats.playerId.uuidString).setData(statsData)
+                    }
+                    print("📊 Saved \(game.playerStats.count) player stats for game vs \(game.opponent)")
+                }
+                
+                // Save current lineup to nested subcollection
+                if let actualStartingLineup = game.actualStartingLineup, !actualStartingLineup.isEmpty {
+                    let currentLineupRef = gameRef.collection("currentLineup")
+                    // First delete existing lineup
+                    let existingLineupDocs = try await currentLineupRef.getDocuments()
+                    for doc in existingLineupDocs.documents {
+                        try await doc.reference.delete()
+                    }
+                    // Then save new lineup
+                    for (index, position) in actualStartingLineup.enumerated() {
+                        let positionData = try Firestore.Encoder().encode(position)
+                        try await currentLineupRef.document(String(index)).setData(positionData)
+                    }
+                    print("📋 Saved \(actualStartingLineup.count) lineup positions for game vs \(game.opponent)")
+                }
+                
+                // NOW save the main game document WITHOUT nested arrays
+                var gameDataForFirebase = game
+                gameDataForFirebase.auditLog = []  // Clear the array, not nil
+                gameDataForFirebase.playerStats = []
+                gameDataForFirebase.actualStartingLineup = []  // Clear the array, not nil
+                
+                let gameData = try Firestore.Encoder().encode(gameDataForFirebase)
+                try await gameRef.setData(gameData)
+            }
+            
+            // Save practices to subcollection
+            let practicesRef = teamRef.collection("practices")
+            for practice in team.practices {
+                let practiceData = try Firestore.Encoder().encode(practice)
+                try await practicesRef.document(practice.id.uuidString).setData(practiceData)
+            }
+            
+            print("✅ Team saved with subcollections successfully")
+            
+        } else {
+            // Save everything as embedded arrays in the main document
+            let teamData = try Firestore.Encoder().encode(team)
+            try await teamRef.setData(teamData)
+            print("✅ Team saved with embedded data successfully")
+        }
         
         // Save team reference under user's document
         let userRef = db.collection("users").document(user.uid)
@@ -101,11 +195,33 @@ class FirebaseManager: NSObject, ObservableObject {
             "teams": FieldValue.arrayUnion([team.id.uuidString]),
             "lastUpdated": FieldValue.serverTimestamp()
         ], merge: true)
+        
+        lastSyncDate = Date()
     }
     
-    func loadTeams(for userUID: String) async throws -> [Team] {
+    func loadTeam(teamId: String) async throws -> Team? {
+        let teamDoc = try await db.collection("teams").document(teamId).getDocument()
+        
+        guard teamDoc.exists else { return nil }
+        
+        var team = try teamDoc.data(as: Team.self)
+        
+        // If using subcollections, load data from them
+        if team.useSubcollections {
+            team.players = try await loadPlayersFromSubcollection(for: team)
+            team.games = try await loadGamesWithSubcollections(for: team)
+            team.practices = try await loadPracticesFromSubcollection(for: team)
+        }
+        
+        return team
+    }
+    
+    func loadTeams(for userId: String) async throws -> [Team] {
+        isLoadingTeams = true
+        defer { isLoadingTeams = false }
+        
         // First try to get teams from user document
-        let userDoc = try await db.collection("users").document(userUID).getDocument()
+        let userDoc = try await db.collection("users").document(userId).getDocument()
         
         var teamIDs: [String] = []
         
@@ -117,7 +233,7 @@ class FirebaseManager: NSObject, ObservableObject {
         // If no teams in user document, try to find teams where this user is the coach
         if teamIDs.isEmpty {
             let teamsQuery = try await db.collection("teams")
-                .whereField("coachUID", isEqualTo: userUID)
+                .whereField("coachUID", isEqualTo: userId)
                 .getDocuments()
             
             teamIDs = teamsQuery.documents.map { $0.documentID }
@@ -129,7 +245,15 @@ class FirebaseManager: NSObject, ObservableObject {
             do {
                 let teamDoc = try await db.collection("teams").document(teamID).getDocument()
                 if let teamData = teamDoc.data() {
-                    let team = try Firestore.Decoder().decode(Team.self, from: teamData)
+                    var team = try Firestore.Decoder().decode(Team.self, from: teamData)
+                    
+                    // If team uses subcollections, load them
+                    if team.useSubcollections {
+                        team.players = try await loadPlayersFromSubcollection(for: team)
+                        team.games = try await loadGamesWithSubcollections(for: team)
+                        team.practices = try await loadPracticesFromSubcollection(for: team)
+                    }
+                    
                     teams.append(team)
                 }
             } catch {
@@ -137,6 +261,7 @@ class FirebaseManager: NSObject, ObservableObject {
             }
         }
         
+        lastSyncDate = Date()
         return teams
     }
     
@@ -145,8 +270,49 @@ class FirebaseManager: NSObject, ObservableObject {
             throw FirebaseError.notAuthenticated
         }
         
+        guard team.coachUID == user.uid else {
+            throw FirebaseError.accessDenied
+        }
+        
+        let teamRef = db.collection("teams").document(team.id.uuidString)
+        
+        if team.useSubcollections {
+            // Delete all players
+            let playersSnapshot = try await teamRef.collection("players").getDocuments()
+            for doc in playersSnapshot.documents {
+                try await doc.reference.delete()
+            }
+            
+            // Delete all games and their nested subcollections
+            let gamesSnapshot = try await teamRef.collection("games").getDocuments()
+            for gameDoc in gamesSnapshot.documents {
+                let auditLogSnapshot = try await gameDoc.reference.collection("auditLog").getDocuments()
+                for doc in auditLogSnapshot.documents {
+                    try await doc.reference.delete()
+                }
+                
+                let playerStatsSnapshot = try await gameDoc.reference.collection("playerStats").getDocuments()
+                for doc in playerStatsSnapshot.documents {
+                    try await doc.reference.delete()
+                }
+                
+                let currentLineupSnapshot = try await gameDoc.reference.collection("currentLineup").getDocuments()
+                for doc in currentLineupSnapshot.documents {
+                    try await doc.reference.delete()
+                }
+                
+                try await gameDoc.reference.delete()
+            }
+            
+            // Delete all practices
+            let practicesSnapshot = try await teamRef.collection("practices").getDocuments()
+            for doc in practicesSnapshot.documents {
+                try await doc.reference.delete()
+            }
+        }
+        
         // Delete team document
-        try await db.collection("teams").document(team.id.uuidString).delete()
+        try await teamRef.delete()
         
         // Remove team reference from user document
         let userRef = db.collection("users").document(user.uid)
@@ -176,8 +342,22 @@ class FirebaseManager: NSObject, ObservableObject {
             guard let data = snapshot?.data() else { return }
             
             do {
-                let updatedTeam = try Firestore.Decoder().decode(Team.self, from: data)
-                completion(updatedTeam)
+                var updatedTeam = try Firestore.Decoder().decode(Team.self, from: data)
+                
+                // If using subcollections, load them
+                if updatedTeam.useSubcollections {
+                    Task {
+                        updatedTeam.players = try await self?.loadPlayersFromSubcollection(for: updatedTeam) ?? []
+                        updatedTeam.games = try await self?.loadGamesWithSubcollections(for: updatedTeam) ?? []
+                        updatedTeam.practices = try await self?.loadPracticesFromSubcollection(for: updatedTeam) ?? []
+                        
+                        await MainActor.run {
+                            completion(updatedTeam)
+                        }
+                    }
+                } else {
+                    completion(updatedTeam)
+                }
             } catch {
                 print("Error decoding team: \(error)")
             }
@@ -191,7 +371,510 @@ class FirebaseManager: NSObject, ObservableObject {
         teamListeners.removeValue(forKey: team.id.uuidString)
     }
     
-    // MARK: - Invite Code Management
+    // MARK: - Player Management
+    func updatePlayer(_ player: Player, in team: Team) async throws {
+        guard team.coachUID == Auth.auth().currentUser?.uid else {
+            throw FirebaseError.accessDenied
+        }
+        
+        if team.useSubcollections {
+            try await savePlayerToSubcollection(player, in: team)
+        } else {
+            var updatedTeam = team
+            if let index = updatedTeam.players.firstIndex(where: { $0.id == player.id }) {
+                updatedTeam.players[index] = player
+                try await saveTeam(updatedTeam)
+            }
+        }
+    }
+    
+    func deletePlayer(_ player: Player, from team: Team) async throws {
+        guard let user = Auth.auth().currentUser else {
+            throw FirebaseError.notAuthenticated
+        }
+        
+        // Remove player from team
+        var updatedTeam = team
+        updatedTeam.players.removeAll { $0.id == player.id }
+        try await saveTeam(updatedTeam)
+    }
+    
+    // MARK: - Game Management
+    func updateGame(_ game: Game, in team: Team) async throws {
+        guard let user = Auth.auth().currentUser else {
+            throw FirebaseError.notAuthenticated
+        }
+        
+        if team.useSubcollections {
+            try await saveGameWithSubcollections(game, in: team)
+        } else {
+            var updatedTeam = team
+            if let index = updatedTeam.games.firstIndex(where: { $0.id == game.id }) {
+                updatedTeam.games[index] = game
+                try await saveTeam(updatedTeam)
+            }
+        }
+    }
+    
+    func deleteGame(_ game: Game, from team: Team) async throws {
+        guard let user = Auth.auth().currentUser else {
+            throw FirebaseError.notAuthenticated
+        }
+        
+        // Remove game from team
+        var updatedTeam = team
+        updatedTeam.games.removeAll { $0.id == game.id }
+        try await saveTeam(updatedTeam)
+    }
+    
+    private func saveGameWithSubcollections(_ game: Game, in team: Team) async throws {
+        guard team.useSubcollections else { return }
+        
+        let gameRef = db.collection("teams").document(team.id.uuidString)
+            .collection("games").document(game.id.uuidString)
+        
+        // Save nested subcollections FIRST
+        
+        // Save audit log entries
+        if let auditLog = game.auditLog, !auditLog.isEmpty {
+            let auditLogRef = gameRef.collection("auditLog")
+            let existingAuditDocs = try await auditLogRef.getDocuments()
+            for doc in existingAuditDocs.documents {
+                try await doc.reference.delete()
+            }
+            for (index, auditEntry) in auditLog.enumerated() {
+                let auditData = try Firestore.Encoder().encode(auditEntry)
+                try await auditLogRef.document(String(index)).setData(auditData)
+            }
+        }
+        
+        // Save player stats
+        if !game.playerStats.isEmpty {
+            let playerStatsRef = gameRef.collection("playerStats")
+            let existingStatsDocs = try await playerStatsRef.getDocuments()
+            for doc in existingStatsDocs.documents {
+                try await doc.reference.delete()
+            }
+            for stats in game.playerStats {
+                let statsData = try Firestore.Encoder().encode(stats)
+                try await playerStatsRef.document(stats.playerId.uuidString).setData(statsData)
+            }
+        }
+        
+        // Save current lineup
+        if let actualStartingLineup = game.actualStartingLineup, !actualStartingLineup.isEmpty {
+            let currentLineupRef = gameRef.collection("currentLineup")
+            let existingLineupDocs = try await currentLineupRef.getDocuments()
+            for doc in existingLineupDocs.documents {
+                try await doc.reference.delete()
+            }
+            for (index, position) in actualStartingLineup.enumerated() {
+                let positionData = try Firestore.Encoder().encode(position)
+                try await currentLineupRef.document(String(index)).setData(positionData)
+            }
+        }
+        
+        // NOW save the main game document WITHOUT nested arrays
+        var gameDataForFirebase = game
+        gameDataForFirebase.auditLog = []  // Use empty array, not nil
+        gameDataForFirebase.playerStats = []
+        gameDataForFirebase.actualStartingLineup = []  // Use empty array, not nil
+        
+        let gameData = try Firestore.Encoder().encode(gameDataForFirebase)
+        try await gameRef.setData(gameData)
+    }
+    
+    // MARK: - Practice Management
+    func updatePractice(_ practice: Practice, in team: Team) async throws {
+        guard let user = Auth.auth().currentUser else {
+            throw FirebaseError.notAuthenticated
+        }
+        
+        if team.useSubcollections {
+            try await savePracticeToSubcollection(practice, in: team)
+        } else {
+            var updatedTeam = team
+            if let index = updatedTeam.practices.firstIndex(where: { $0.id == practice.id }) {
+                updatedTeam.practices[index] = practice
+                try await saveTeam(updatedTeam)
+            }
+        }
+    }
+    
+    func deletePractice(_ practice: Practice, from team: Team) async throws {
+        guard let user = Auth.auth().currentUser else {
+            throw FirebaseError.notAuthenticated
+        }
+        
+        // Remove practice from team
+        var updatedTeam = team
+        updatedTeam.practices.removeAll { $0.id == practice.id }
+        try await saveTeam(updatedTeam)
+    }
+    
+    func updateGameRSVP(gameId: UUID, playerId: UUID, status: RSVPStatus, in team: Team) async throws {
+        guard let user = Auth.auth().currentUser else {
+            throw FirebaseError.notAuthenticated
+        }
+        
+        if team.useSubcollections {
+            // FAST: Update only the game subcollection document
+            let gameRef = db.collection("teams").document(team.id.uuidString)
+                .collection("games").document(gameId.uuidString)
+            
+            try await gameRef.updateData([
+                "playerRSVPs.\(playerId.uuidString)": status.rawValue
+            ])
+        } else {
+            // FALLBACK: Use existing method
+            if let game = team.games.first(where: { $0.id == gameId }) {
+                var updatedGame = game
+                updatedGame.playerRSVPs[playerId] = status
+                try await updateGame(updatedGame, in: team)
+            }
+        }
+    }
+    
+    func updatePracticeRSVP(practiceId: UUID, playerId: UUID, status: RSVPStatus, in team: Team) async throws {
+        if team.useSubcollections {
+            let practiceRef = db.collection("teams").document(team.id.uuidString)
+                .collection("practices").document(practiceId.uuidString)
+            
+            try await practiceRef.updateData([
+                "playerRSVPs.\(playerId.uuidString)": status.rawValue
+            ])
+        } else {
+            if let practice = team.practices.first(where: { $0.id == practiceId }) {
+                var updatedPractice = practice
+                updatedPractice.playerRSVPs[playerId] = status
+                try await updatePractice(updatedPractice, in: team)
+            }
+        }
+    }
+    
+    // MARK: - Subcollection Management
+    func enableSubcollections(for team: Team) async throws {
+        guard let user = Auth.auth().currentUser else {
+            throw FirebaseError.notAuthenticated
+        }
+        
+        var updatedTeam = team
+        updatedTeam.useSubcollections = true
+        updatedTeam.lastSyncDate = Date()
+        
+        try await saveTeam(updatedTeam)
+    }
+    
+    // MARK: - Load Data from Subcollections
+    func loadPlayersFromSubcollection(for team: Team) async throws -> [Player] {
+        guard team.useSubcollections else { return team.players }
+        
+        let playersRef = db.collection("teams").document(team.id.uuidString).collection("players")
+        let snapshot = try await playersRef.getDocuments()
+        
+        var players: [Player] = []
+        for document in snapshot.documents {
+            let player = try Firestore.Decoder().decode(Player.self, from: document.data())
+            players.append(player)
+        }
+        
+        return players
+    }
+    
+    func loadGamesFromSubcollection(for team: Team) async throws -> [Game] {
+        return try await loadGamesWithSubcollections(for: team)
+    }
+    
+    func loadGamesWithSubcollections(for team: Team) async throws -> [Game] {
+        guard team.useSubcollections else { return team.games }
+        
+        let gamesRef = db.collection("teams").document(team.id.uuidString).collection("games")
+        let snapshot = try await gamesRef.getDocuments()
+        
+        var games: [Game] = []
+        
+        for document in snapshot.documents {
+            var game = try Firestore.Decoder().decode(Game.self, from: document.data())
+            let gameRef = gamesRef.document(document.documentID)
+            
+            // Load audit log subcollection
+            do {
+                let auditLogSnapshot = try await gameRef.collection("auditLog").getDocuments()
+                var auditLog: [GameAuditEntry] = []
+                
+                for auditDoc in auditLogSnapshot.documents {
+                    let auditEntry = try Firestore.Decoder().decode(GameAuditEntry.self, from: auditDoc.data())
+                    auditLog.append(auditEntry)
+                }
+                
+                auditLog.sort { $0.realTime < $1.realTime }
+                game.auditLog = auditLog
+                print("✅ Loaded \(auditLog.count) audit log entries for game vs \(game.opponent)")
+            } catch {
+                print("⚠️ Could not load audit log for game \(game.id): \(error)")
+                game.auditLog = []
+            }
+            
+            // Load player stats subcollection
+            do {
+                let playerStatsSnapshot = try await gameRef.collection("playerStats").getDocuments()
+                var playerStats: [PlayerGameStats] = []
+                
+                for statsDoc in playerStatsSnapshot.documents {
+                    let stats = try Firestore.Decoder().decode(PlayerGameStats.self, from: statsDoc.data())
+                    playerStats.append(stats)
+                }
+                
+                game.playerStats = playerStats
+                print("✅ Loaded \(playerStats.count) player stats for game vs \(game.opponent)")
+            } catch {
+                print("⚠️ Could not load player stats for game \(game.id): \(error)")
+                game.playerStats = []
+            }
+            
+            // Load current lineup subcollection
+            do {
+                let currentLineupSnapshot = try await gameRef.collection("currentLineup").getDocuments()
+                var currentLineup: [LineupPosition] = []
+                
+                var positionsByIndex: [String: LineupPosition] = [:]
+                
+                for lineupDoc in currentLineupSnapshot.documents {
+                    let position = try Firestore.Decoder().decode(LineupPosition.self, from: lineupDoc.data())
+                    positionsByIndex[lineupDoc.documentID] = position
+                }
+                
+                let sortedKeys = positionsByIndex.keys.sorted { key1, key2 in
+                    (Int(key1) ?? 0) < (Int(key2) ?? 0)
+                }
+                
+                for key in sortedKeys {
+                    if let position = positionsByIndex[key] {
+                        currentLineup.append(position)
+                    }
+                }
+                
+                game.actualStartingLineup = currentLineup
+                print("✅ Loaded \(currentLineup.count) lineup positions for game vs \(game.opponent)")
+            } catch {
+                print("⚠️ Could not load lineup for game \(game.id): \(error)")
+                game.actualStartingLineup = []
+            }
+            
+            games.append(game)
+        }
+        
+        print("🎯 Successfully loaded \(games.count) games with full subcollection data")
+        return games
+    }
+    
+    func recalculateSeasonStatsFromGames(for team: Team) -> Team {
+        var updatedTeam = team
+        
+        for index in updatedTeam.players.indices {
+            updatedTeam.players[index].seasonStats = PlayerStats()
+        }
+        
+        for game in updatedTeam.games where game.isCompleted {
+            for gamePlayerStats in game.playerStats {
+                if let playerIndex = updatedTeam.players.firstIndex(where: { $0.id == gamePlayerStats.playerId }) {
+                    updatedTeam.players[playerIndex].seasonStats.goals += gamePlayerStats.goals
+                    updatedTeam.players[playerIndex].seasonStats.assists += gamePlayerStats.assists
+                    updatedTeam.players[playerIndex].seasonStats.saves += gamePlayerStats.saves
+                    updatedTeam.players[playerIndex].seasonStats.goalsConceded += gamePlayerStats.goalsConceded
+                    updatedTeam.players[playerIndex].seasonStats.yellowCards += gamePlayerStats.yellowCards
+                    updatedTeam.players[playerIndex].seasonStats.redCards += gamePlayerStats.redCards
+                    updatedTeam.players[playerIndex].seasonStats.minutesPlayed += gamePlayerStats.minutesPlayed
+                    
+                    if gamePlayerStats.minutesPlayed > 0 {
+                        updatedTeam.players[playerIndex].seasonStats.gamesPlayed += 1
+                    }
+                }
+            }
+        }
+        
+        print("🏆 Recalculated season stats after subcollection load")
+        return updatedTeam
+    }
+    
+    // Add alias for compatibility
+    func recalculateSeasonStatsAfterSubcollectionLoad(for team: Team) -> Team {
+        return recalculateSeasonStatsFromGames(for: team)
+    }
+    
+    func loadPracticesFromSubcollection(for team: Team) async throws -> [Practice] {
+        guard team.useSubcollections else { return team.practices }
+        
+        let practicesRef = db.collection("teams").document(team.id.uuidString).collection("practices")
+        let snapshot = try await practicesRef.getDocuments()
+        
+        var practices: [Practice] = []
+        for document in snapshot.documents {
+            let practice = try Firestore.Decoder().decode(Practice.self, from: document.data())
+            practices.append(practice)
+        }
+        
+        return practices
+    }
+    
+    // MARK: - Individual Subcollection Updates
+    func savePlayerToSubcollection(_ player: Player, in team: Team) async throws {
+        guard team.useSubcollections else { return }
+        
+        let playerRef = db.collection("teams").document(team.id.uuidString)
+            .collection("players").document(player.id.uuidString)
+        
+        let playerData = try Firestore.Encoder().encode(player)
+        try await playerRef.setData(playerData)
+    }
+    
+    func saveGameToSubcollection(_ game: Game, in team: Team) async throws {
+        try await saveGameWithSubcollections(game, in: team)
+    }
+    
+    func savePracticeToSubcollection(_ practice: Practice, in team: Team) async throws {
+        guard team.useSubcollections else { return }
+        
+        let practiceRef = db.collection("teams").document(team.id.uuidString)
+            .collection("practices").document(practice.id.uuidString)
+        
+        let practiceData = try Firestore.Encoder().encode(practice)
+        try await practiceRef.setData(practiceData)
+    }
+    
+    // MARK: - Team Member Management
+    func getTeamMembers(for teamId: String) async throws -> [TeamMemberInfo] {
+        let membersRef = db.collection("teams").document(teamId).collection("members")
+        let snapshot = try await membersRef.getDocuments()
+        
+        var members: [TeamMemberInfo] = []
+        for document in snapshot.documents {
+            let data = document.data()
+            if let userId = data["userId"] as? String,
+               let email = data["email"] as? String,
+               let accessLevelString = data["accessLevel"] as? String,
+               let accessLevel = AccessLevel(rawValue: accessLevelString),
+               let joinedAtTimestamp = data["joinedAt"] as? Timestamp {
+                
+                let member = TeamMemberInfo(
+                    userId: userId,
+                    email: email,
+                    accessLevel: accessLevel,
+                    joinedAt: joinedAtTimestamp.dateValue()
+                )
+                members.append(member)
+            }
+        }
+        
+        return members
+    }
+    
+    func revokeTeamAccess(userId: String, teamId: String) async throws {
+        // Remove from team members
+        try await db.collection("teams")
+            .document(teamId)
+            .collection("members")
+            .document(userId)
+            .delete()
+        
+        // Remove team from user's teams array
+        let userRef = db.collection("users").document(userId)
+        try await userRef.updateData([
+            "teams": FieldValue.arrayRemove([teamId])
+        ])
+        
+        print("✅ Revoked access for user \(userId) from team \(teamId)")
+    }
+    
+    func addUserToTeam(userId: String, teamId: String, accessLevel: AccessLevel, userEmail: String) async throws {
+        let memberData: [String: Any] = [
+            "userId": userId,
+            "email": userEmail,
+            "accessLevel": accessLevel.rawValue,
+            "joinedAt": Timestamp(date: Date())
+        ]
+        
+        try await db.collection("teams")
+            .document(teamId)
+            .collection("members")
+            .document(userId)
+            .setData(memberData)
+        
+        // Also add team to user's teams array
+        let userRef = db.collection("users").document(userId)
+        try await userRef.setData([
+            "teams": FieldValue.arrayUnion([teamId]),
+            "lastUpdated": FieldValue.serverTimestamp()
+        ], merge: true)
+        
+        print("✅ Added team \(teamId) to user \(userId) teams array")
+    }
+    
+    func getUserRole(for teamId: String, userId: String) async throws -> AccessLevel {
+        let memberDoc = try await db.collection("teams")
+            .document(teamId)
+            .collection("members")
+            .document(userId)
+            .getDocument()
+        
+        guard let data = memberDoc.data(),
+              let accessLevelString = data["accessLevel"] as? String,
+              let accessLevel = AccessLevel(rawValue: accessLevelString) else {
+            throw FirebaseError.accessDenied
+        }
+        
+        return accessLevel
+    }
+    
+    func canUserEditPlayer(_ playerId: UUID, in teamId: String, userId: String, userEmail: String) async throws -> Bool {
+        let userRole = try await getUserRole(for: teamId, userId: userId)
+        
+        switch userRole {
+        case .coach:
+            return true
+        case .parent:
+            let teamDoc = try await db.collection("teams").document(teamId).getDocument()
+            guard let team = try? teamDoc.data(as: Team.self) else { return false }
+            
+            guard let player = team.players.first(where: { $0.id == playerId }) else { return false }
+            
+            let parentEmail = player.parentInfo.parentEmail.lowercased()
+            let secondParentEmail = player.parentInfo.secondParentEmail.lowercased()
+            let currentUserEmail = userEmail.lowercased()
+            
+            return parentEmail == currentUserEmail || secondParentEmail == currentUserEmail
+        case .viewer:
+            return false
+        }
+    }
+    
+    // MARK: - Invite Management
+    func validateInviteCode(_ code: String) async throws -> TeamInvite {
+        print("🔍 Validating invite code: \(code)")
+        
+        let inviteDoc = try await db.collection("invites").document(code).getDocument()
+        
+        guard inviteDoc.exists else {
+            print("❌ Invite document does not exist for code: \(code)")
+            throw FirebaseError.invalidInviteCode
+        }
+        
+        let invite = try inviteDoc.data(as: TeamInvite.self)
+        
+        if invite.expiresAt < Date() {
+            print("❌ Invite is expired")
+            throw FirebaseError.expiredInviteCode
+        }
+        
+        if invite.usedCount >= invite.maxUses {
+            print("❌ Invite uses exceeded")
+            throw FirebaseError.expiredInviteCode
+        }
+        
+        print("✅ Invite code is valid")
+        return invite
+    }
+    
     func generateInviteCode(for team: Team, accessLevel: AccessLevel) async throws -> TeamInvite {
         guard let user = Auth.auth().currentUser else {
             throw FirebaseError.notAuthenticated
@@ -216,16 +899,14 @@ class FirebaseManager: NSObject, ObservableObject {
         return invite
     }
     
-    // MARK: - Invite Limit Enforcement
     func countActiveInvites(for teamId: String, accessLevel: AccessLevel) async throws -> Int {
         let query = db.collection("invites")
             .whereField("teamId", isEqualTo: teamId)
             .whereField("accessLevel", isEqualTo: accessLevel.rawValue)
-            .whereField("expiresAt", isGreaterThan: Date()) // Only count non-expired invites
+            .whereField("expiresAt", isGreaterThan: Date())
         
         let snapshot = try await query.getDocuments()
         
-        // Count invites that still have remaining uses
         let activeInvites = snapshot.documents.compactMap { doc -> TeamInvite? in
             guard let invite = try? doc.data(as: TeamInvite.self) else { return nil }
             return invite.usedCount < invite.maxUses ? invite : nil
@@ -234,7 +915,6 @@ class FirebaseManager: NSObject, ObservableObject {
         return activeInvites.count
     }
     
-    /// Get remaining invites for a user's team and access level
     func getRemainingInvites(for team: Team, accessLevel: AccessLevel, user: User) async throws -> Int {
         do {
             let activeCount = try await countActiveInvites(for: team.id.uuidString, accessLevel: accessLevel)
@@ -249,15 +929,12 @@ class FirebaseManager: NSObject, ObservableObject {
             return max(0, maxAllowed - activeCount)
             
         } catch {
-            print("❌ Error getting remaining invites, falling back to subscription limits: \(error)")
+            print("❌ Error getting remaining invites: \(error)")
             
-            // FALLBACK: If query fails (like missing index), return max allowed for legacy accounts
             if user.subscriptionLevel == .free {
-                // Legacy accounts have unlimited, so return a high number
                 return 999
             }
             
-            // For other subscription levels, return their max (assuming 0 used since we can't query)
             switch accessLevel {
             case .coach: return user.effectiveMaxCoachInvites
             case .parent: return user.effectiveMaxParentInvites
@@ -266,15 +943,12 @@ class FirebaseManager: NSObject, ObservableObject {
         }
     }
     
-    /// Check if user can generate an invite for the specified access level
     func canGenerateInvite(for team: Team, accessLevel: AccessLevel, user: User) async throws -> Bool {
         let remaining = try await getRemainingInvites(for: team, accessLevel: accessLevel, user: user)
         return remaining > 0
     }
     
-    /// Enhanced invite generation with subscription limit enforcement
     func generateInviteCodeWithLimits(for team: Team, accessLevel: AccessLevel, user: User) async throws -> TeamInvite {
-        // First check if user can generate this type of invite
         let canGenerate = try await canGenerateInvite(for: team, accessLevel: accessLevel, user: user)
         
         guard canGenerate else {
@@ -287,7 +961,6 @@ class FirebaseManager: NSObject, ObservableObject {
             )
         }
         
-        // Generate the invite code
         let inviteCode = generateShortCode()
         let invite = TeamInvite(
             id: inviteCode,
@@ -298,17 +971,16 @@ class FirebaseManager: NSObject, ObservableObject {
             createdAt: Date(),
             expiresAt: Calendar.current.date(byAdding: .day, value: 7, to: Date())!,
             usedCount: 0,
-            maxUses: 1 // Each invite can only be used once
+            maxUses: 1
         )
         
         let inviteData = try Firestore.Encoder().encode(invite)
         try await db.collection("invites").document(invite.id).setData(inviteData)
         
-        print("✅ Generated invite with limits enforcement: \(inviteCode) for \(accessLevel.rawValue)")
+        print("✅ Generated invite with limits enforcement: \(inviteCode)")
         return invite
     }
     
-    /// Clean up expired invites (call this periodically or on app startup)
     func cleanupExpiredInvites() async throws {
         let query = db.collection("invites")
             .whereField("expiresAt", isLessThan: Date())
@@ -331,33 +1003,25 @@ class FirebaseManager: NSObject, ObservableObject {
         
         print("🔍 Attempting to join team with code: \(code.uppercased())")
         
-        // Find invite with this code
         let inviteDoc = try await db.collection("invites").document(code.uppercased()).getDocument()
         
         guard inviteDoc.exists else {
-            print("❌ Invite document does not exist for code: \(code.uppercased())")
+            print("❌ Invite document does not exist")
             throw FirebaseError.invalidInviteCode
         }
         
-        print("✅ Found invite document")
-        
         let invite = try inviteDoc.data(as: TeamInvite.self)
         
-        print("📋 Invite details: accessLevel=\(invite.accessLevel.rawValue), expired=\(invite.expiresAt < Date()), uses=\(invite.usedCount)/\(invite.maxUses)")
-        
-        // Check if invite is expired
         if invite.expiresAt < Date() {
             print("❌ Invite is expired")
             throw FirebaseError.expiredInviteCode
         }
         
-        // Check if max uses exceeded
         if invite.usedCount >= invite.maxUses {
             print("❌ Invite uses exceeded")
             throw FirebaseError.expiredInviteCode
         }
         
-        // Get the team
         let teamDoc = try await db.collection("teams").document(invite.teamId).getDocument()
         guard let team = try? teamDoc.data(as: Team.self) else {
             print("❌ Team not found for ID: \(invite.teamId)")
@@ -376,7 +1040,7 @@ class FirebaseManager: NSObject, ObservableObject {
         
         // Update invite usage count
         try await db.collection("invites").document(invite.id).updateData([
-            "usedCount": invite.usedCount + 1
+            "usedCount": FieldValue.increment(Int64(1))
         ])
         
         print("✅ Successfully joined team and updated invite usage")
@@ -384,74 +1048,10 @@ class FirebaseManager: NSObject, ObservableObject {
         return team
     }
     
-    // MARK: - Team Member Management
-    func addUserToTeam(userId: String, teamId: String, accessLevel: AccessLevel, userEmail: String) async throws {
-        let memberData: [String: Any] = [
-            "userId": userId,
-            "email": userEmail,
-            "accessLevel": accessLevel.rawValue,
-            "joinedAt": Timestamp(date: Date())
-        ]
-        
-        try await db.collection("teams")
-            .document(teamId)
-            .collection("members")
-            .document(userId)
-            .setData(memberData)
-        
-        // ADDED: Also add team to user's teams array so it shows up in their teams list
-        let userRef = db.collection("users").document(userId)
-        try await userRef.setData([
-            "teams": FieldValue.arrayUnion([teamId]),
-            "lastUpdated": FieldValue.serverTimestamp()
-        ], merge: true)
-        
-        print("✅ Added team \(teamId) to user \(userId) teams array")
-    }
-
-    func getUserRole(for teamId: String, userId: String) async throws -> AccessLevel {
-        let memberDoc = try await db.collection("teams")
-            .document(teamId)
-            .collection("members")
-            .document(userId)
-            .getDocument()
-        
-        guard let data = memberDoc.data(),
-              let accessLevelString = data["accessLevel"] as? String,
-              let accessLevel = AccessLevel(rawValue: accessLevelString) else {
-            throw FirebaseError.accessDenied
-        }
-        
-        return accessLevel
-    }
-
-    func canUserEditPlayer(_ playerId: UUID, in teamId: String, userId: String, userEmail: String) async throws -> Bool {
-        let userRole = try await getUserRole(for: teamId, userId: userId)
-        
-        switch userRole {
-        case .coach:
-            return true
-        case .parent:
-            let teamDoc = try await db.collection("teams").document(teamId).getDocument()
-            guard let team = try? teamDoc.data(as: Team.self) else { return false }
-            
-            guard let player = team.players.first(where: { $0.id == playerId }) else { return false }
-            
-            let parentEmail = player.parentInfo.parentEmail.lowercased()
-            let secondParentEmail = player.parentInfo.secondParentEmail.lowercased()
-            let currentUserEmail = userEmail.lowercased()
-            
-            return parentEmail == currentUserEmail || secondParentEmail == currentUserEmail
-        case .viewer:
-            return false
-        }
-    }
-    
     // MARK: - Messaging Setup
     private func setupMessaging() {
         Messaging.messaging().delegate = self
         
-        // Get FCM token
         Task {
             do {
                 let token = try await Messaging.messaging().token()
@@ -509,324 +1109,15 @@ class FirebaseManager: NSObject, ObservableObject {
             id: UUID().uuidString,
             teamId: team.id.uuidString,
             senderId: user.id.uuidString,
-            senderName: currentFirebaseUser.displayName ?? currentFirebaseUser.email ?? "User",
+            senderName: currentFirebaseUser.displayName ?? currentFirebaseUser.email ?? "Unknown",
             message: text,
             timestamp: Date(),
-            isCoach: false  // You can determine this based on user role
+            isCoach: team.coachUID == user.firebaseUID
         )
         
         let messageData = try Firestore.Encoder().encode(message)
-        let chatRef = db.collection("teams").document(team.id.uuidString)
-            .collection("messages").document(message.id)
-        
-        try await chatRef.setData(messageData)
-    }
-    
-    // MARK: - Player Management
-    func updatePlayer(_ player: Player, in team: Team) async throws {
-        guard let user = Auth.auth().currentUser else {
-            throw FirebaseError.notAuthenticated
-        }
-        
-        // Update the team with the modified player
-        var updatedTeam = team
-        if let index = updatedTeam.players.firstIndex(where: { $0.id == player.id }) {
-            updatedTeam.players[index] = player
-            try await saveTeam(updatedTeam)
-        }
-    }
-    
-    func deletePlayer(_ player: Player, from team: Team) async throws {
-        guard let user = Auth.auth().currentUser else {
-            throw FirebaseError.notAuthenticated
-        }
-        
-        // Remove player from team
-        var updatedTeam = team
-        updatedTeam.players.removeAll { $0.id == player.id }
-        try await saveTeam(updatedTeam)
-    }
-    
-    // MARK: - Game Management
-    func updateGame(_ game: Game, in team: Team) async throws {
-        guard let user = Auth.auth().currentUser else {
-            throw FirebaseError.notAuthenticated
-        }
-        
-        // Update the team with the modified game
-        var updatedTeam = team
-        if let index = updatedTeam.games.firstIndex(where: { $0.id == game.id }) {
-            updatedTeam.games[index] = game
-            try await saveTeam(updatedTeam)
-        }
-    }
-    
-    /// Get all members of a team with their access levels
-    func getTeamMembers(for teamId: String) async throws -> [TeamMemberInfo] {
-        let membersRef = db.collection("teams").document(teamId).collection("members")
-        let snapshot = try await membersRef.getDocuments()
-        
-        var members: [TeamMemberInfo] = []
-        for document in snapshot.documents {
-            let data = document.data()
-            if let userId = data["userId"] as? String,
-               let email = data["email"] as? String,
-               let accessLevelString = data["accessLevel"] as? String,
-               let accessLevel = AccessLevel(rawValue: accessLevelString),
-               let joinedAtTimestamp = data["joinedAt"] as? Timestamp {
-                
-                let member = TeamMemberInfo(
-                    userId: userId,
-                    email: email,
-                    accessLevel: accessLevel,
-                    joinedAt: joinedAtTimestamp.dateValue()
-                )
-                members.append(member)
-            }
-        }
-        
-        return members
-    }
-
-    /// Revoke access for a team member
-    func revokeTeamAccess(userId: String, teamId: String) async throws {
-        // Remove from team members
-        try await db.collection("teams")
-            .document(teamId)
-            .collection("members")
-            .document(userId)
-            .delete()
-        
-        // Remove team from user's teams array
-        let userRef = db.collection("users").document(userId)
-        try await userRef.updateData([
-            "teams": FieldValue.arrayRemove([teamId])
-        ])
-        
-        print("✅ Revoked access for user \(userId) from team \(teamId)")
-    }
-    func deleteGame(_ game: Game, from team: Team) async throws {
-        guard let user = Auth.auth().currentUser else {
-            throw FirebaseError.notAuthenticated
-        }
-        
-        // Remove game from team
-        var updatedTeam = team
-        updatedTeam.games.removeAll { $0.id == game.id }
-        try await saveTeam(updatedTeam)
-    }
-    
-    // MARK: - Practice Management
-    func updatePractice(_ practice: Practice, in team: Team) async throws {
-        guard let user = Auth.auth().currentUser else {
-            throw FirebaseError.notAuthenticated
-        }
-        
-        // Update the team with the modified practice
-        var updatedTeam = team
-        if let index = updatedTeam.practices.firstIndex(where: { $0.id == practice.id }) {
-            updatedTeam.practices[index] = practice
-            try await saveTeam(updatedTeam)
-        }
-    }
-    
-    func deletePractice(_ practice: Practice, from team: Team) async throws {
-        guard let user = Auth.auth().currentUser else {
-            throw FirebaseError.notAuthenticated
-        }
-        
-        // Remove practice from team
-        var updatedTeam = team
-        updatedTeam.practices.removeAll { $0.id == practice.id }
-        try await saveTeam(updatedTeam)
-    }
-    
-    func updateGameRSVP(gameId: UUID, playerId: UUID, status: RSVPStatus, in team: Team) async throws {
-        guard let user = Auth.auth().currentUser else {
-            throw FirebaseError.notAuthenticated
-        }
-        
-        if team.useSubcollections {
-            // FAST: Update only the game subcollection document
-            let gameRef = db.collection("teams").document(team.id.uuidString)
-                .collection("games").document(gameId.uuidString)
-            
-            try await gameRef.updateData([
-                "playerRSVPs.\(playerId.uuidString)": status.rawValue
-            ])
-        } else {
-            // FALLBACK: Use existing method
-            if let game = team.games.first(where: { $0.id == gameId }) {
-                var updatedGame = game
-                updatedGame.playerRSVPs[playerId] = status
-                try await updateGame(updatedGame, in: team)
-            }
-        }
-    }
-
-    func updatePracticeRSVP(practiceId: UUID, playerId: UUID, status: RSVPStatus, in team: Team) async throws {
-        guard let user = Auth.auth().currentUser else {
-            throw FirebaseError.notAuthenticated
-        }
-        
-        if team.useSubcollections {
-            // FAST: Update only the practice subcollection document
-            let practiceRef = db.collection("teams").document(team.id.uuidString)
-                .collection("practices").document(practiceId.uuidString)
-            
-            try await practiceRef.updateData([
-                "playerRSVPs.\(playerId.uuidString)": status.rawValue
-            ])
-        } else {
-            // FALLBACK: Use existing method
-            if let practice = team.practices.first(where: { $0.id == practiceId }) {
-                var updatedPractice = practice
-                updatedPractice.playerRSVPs[playerId] = status
-                try await updatePractice(updatedPractice, in: team)
-            }
-        }
-    }
-
-    // MARK: - Subcollection Management
-    func enableSubcollections(for team: Team) async throws {
-        guard let user = Auth.auth().currentUser else {
-            throw FirebaseError.notAuthenticated
-        }
-        
-        // Migrate data to subcollections
-        let teamRef = db.collection("teams").document(team.id.uuidString)
-        
-        // Save players to subcollection
-        for player in team.players {
-            let playerRef = teamRef.collection("players").document(player.id.uuidString)
-            let playerData = try Firestore.Encoder().encode(player)
-            try await playerRef.setData(playerData)
-        }
-        
-        // Save games to subcollection
-        for game in team.games {
-            let gameRef = teamRef.collection("games").document(game.id.uuidString)
-            let gameData = try Firestore.Encoder().encode(game)
-            try await gameRef.setData(gameData)
-        }
-        
-        // Save practices to subcollection
-        for practice in team.practices {
-            let practiceRef = teamRef.collection("practices").document(practice.id.uuidString)
-            let practiceData = try Firestore.Encoder().encode(practice)
-            try await practiceRef.setData(practiceData)
-        }
-        
-        // Update team to use subcollections
-        var updatedTeam = team
-        updatedTeam.useSubcollections = true
-        updatedTeam.lastSyncDate = Date()
-        try await saveTeam(updatedTeam)
-    }
-
-    // MARK: - Load Data from Subcollections
-    func loadPlayersFromSubcollection(for team: Team) async throws -> [Player] {
-        guard team.useSubcollections else { return team.players }
-        
-        let playersRef = db.collection("teams").document(team.id.uuidString).collection("players")
-        let snapshot = try await playersRef.getDocuments()
-        
-        var players: [Player] = []
-        for document in snapshot.documents {
-            let player = try Firestore.Decoder().decode(Player.self, from: document.data())
-            players.append(player)
-        }
-        
-        return players
-    }
-
-    func loadGamesFromSubcollection(for team: Team) async throws -> [Game] {
-        guard team.useSubcollections else { return team.games }
-        
-        let gamesRef = db.collection("teams").document(team.id.uuidString).collection("games")
-        let snapshot = try await gamesRef.getDocuments()
-        
-        var games: [Game] = []
-        for document in snapshot.documents {
-            let game = try Firestore.Decoder().decode(Game.self, from: document.data())
-            games.append(game)
-        }
-        
-        return games
-    }
-
-    func loadPracticesFromSubcollection(for team: Team) async throws -> [Practice] {
-        guard team.useSubcollections else { return team.practices }
-        
-        let practicesRef = db.collection("teams").document(team.id.uuidString).collection("practices")
-        let snapshot = try await practicesRef.getDocuments()
-        
-        var practices: [Practice] = []
-        for document in snapshot.documents {
-            let practice = try Firestore.Decoder().decode(Practice.self, from: document.data())
-            practices.append(practice)
-        }
-        
-        return practices
-    }
-
-    // MARK: - Individual Subcollection Updates
-    func savePlayerToSubcollection(_ player: Player, in team: Team) async throws {
-        guard team.useSubcollections else { return }
-        
-        let playerRef = db.collection("teams").document(team.id.uuidString)
-            .collection("players").document(player.id.uuidString)
-        
-        let playerData = try Firestore.Encoder().encode(player)
-        try await playerRef.setData(playerData)
-    }
-
-    func saveGameToSubcollection(_ game: Game, in team: Team) async throws {
-        guard team.useSubcollections else { return }
-        
-        let gameRef = db.collection("teams").document(team.id.uuidString)
-            .collection("games").document(game.id.uuidString)
-        
-        let gameData = try Firestore.Encoder().encode(game)
-        try await gameRef.setData(gameData)
-    }
-
-    func savePracticeToSubcollection(_ practice: Practice, in team: Team) async throws {
-        guard team.useSubcollections else { return }
-        
-        let practiceRef = db.collection("teams").document(team.id.uuidString)
-            .collection("practices").document(practice.id.uuidString)
-        
-        let practiceData = try Firestore.Encoder().encode(practice)
-        try await practiceRef.setData(practiceData)
-    }
-    
-    func validateInviteCode(_ code: String) async throws -> TeamInvite {
-        print("🔍 Validating invite code: \(code)")
-        
-        let inviteDoc = try await db.collection("invites").document(code).getDocument()
-        
-        guard inviteDoc.exists else {
-            print("❌ Invite document does not exist for code: \(code)")
-            throw FirebaseError.invalidInviteCode
-        }
-        
-        let invite = try inviteDoc.data(as: TeamInvite.self)
-        
-        // Check if invite is expired
-        if invite.expiresAt < Date() {
-            print("❌ Invite is expired")
-            throw FirebaseError.expiredInviteCode
-        }
-        
-        // Check if max uses exceeded
-        if invite.usedCount >= invite.maxUses {
-            print("❌ Invite uses exceeded")
-            throw FirebaseError.expiredInviteCode
-        }
-        
-        print("✅ Invite code is valid")
-        return invite
+        try await db.collection("teams").document(team.id.uuidString)
+            .collection("messages").document(message.id).setData(messageData)
     }
     
     // MARK: - Utility Functions
@@ -843,7 +1134,6 @@ extension FirebaseManager: MessagingDelegate {
         saveFCMToken(token)
     }
 }
-
 // MARK: - TeamManager Extension (FIXED)
 extension TeamManager {
     

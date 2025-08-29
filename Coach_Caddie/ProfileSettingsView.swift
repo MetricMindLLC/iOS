@@ -1105,7 +1105,7 @@ struct ProfileSettingsView: View {
     @State private var isPreparingTemplate = false
     @State private var importMode: ImportOptionsView.ImportMode = .completeTeams
     @State private var targetTeamId: UUID?
-    
+    @State private var showingUpgradeModal = false
     // NEW STATE VARIABLES FOR SUBSCRIPTION:
     @State private var showingSubscription = false
     @State private var showingTrialAlert = false
@@ -1114,7 +1114,15 @@ struct ProfileSettingsView: View {
         NavigationView {
             Form {
                 userProfileSection
-                subscriptionSection // NEW SECTION
+                
+                // NEW: Show restoration section for cancelled users
+                subscriptionRestorationSection
+                
+                // Show regular subscription section only for non-cancelled users
+                if let user = authManager.currentUser, user.subscriptionLevel != .cancelled {
+                    subscriptionSection
+                }
+                
                 appSettingsSection
                 defaultSettingsSection
                 teamsSection
@@ -1135,28 +1143,21 @@ struct ProfileSettingsView: View {
                     Text("Are you sure you want to delete \(team.name)? This action cannot be undone.")
                 }
             }
-            .alert("Import Complete", isPresented: $showingImportResult) {
-                Button("OK") { }
-            } message: {
-                if let result = importResult {
-                    Text(result.message)
-                }
+            .sheet(isPresented: $showingUpgradeModal) {
+                ExpiredTrialUpgradeView()
             }
-            // NEW SHEET PRESENTATIONS:
             .sheet(isPresented: $showingSubscription) {
                 SubscriptionView()
                     .environmentObject(authManager)
             }
-            .alert("Trial Ending Soon", isPresented: $showingTrialAlert) {
-                Button("Upgrade Now") {
-                    showingSubscription = true
-                }
-                Button("Later", role: .cancel) { }
-            } message: {
-                if let user = authManager.currentUser {
-                    Text("Your trial expires in \(user.trialDaysRemaining) day\(user.trialDaysRemaining == 1 ? "" : "s"). Upgrade to continue using Coach Caddie.")
-                }
+            .sheet(isPresented: $showingAbout) {
+                AboutView()
             }
+            .fileImporter(
+                isPresented: $showingImportPicker,
+                allowedContentTypes: [.commaSeparatedText],
+                onCompletion: handleCSVImport
+            )
             .sheet(isPresented: $showingImportOptions) {
                 ImportOptionsView(
                     teamManager: teamManager,
@@ -1171,14 +1172,6 @@ struct ProfileSettingsView: View {
                     }
                 )
             }
-            .fileImporter(
-                isPresented: $showingImportPicker,
-                allowedContentTypes: [.commaSeparatedText],
-                onCompletion: handleCSVImport
-            )
-            .sheet(isPresented: $showingAbout) {
-                AboutView()
-            }
             .sheet(isPresented: $showingShareSheet, onDismiss: {
                 shareItems.removeAll()
             }) {
@@ -1192,12 +1185,81 @@ struct ProfileSettingsView: View {
                     exportSelectedTeam(selectedTeam)
                 }
             }
+            .alert("Import Complete", isPresented: $showingImportResult) {
+                Button("OK") {
+                    importResult = nil
+                    showingImportResult = false
+                }
+            } message: {
+                if let result = importResult {
+                    Text(result.message)
+                }
+            }
+            .alert("Trial Information", isPresented: $showingTrialAlert) {
+                Button("Upgrade") {
+                    showingSubscription = true
+                }
+                Button("Continue Trial", role: .cancel) { }
+            } message: {
+                if let user = authManager.currentUser, user.subscriptionLevel == .trial {
+                    Text("You have \(user.trialDaysRemaining) days remaining in your free trial. Upgrade now to continue using all features after the trial ends.")
+                }
+            }
+            .navigationTitle("Settings")
             // NEW TRIAL CHECK:
             .onAppear {
                 checkTrialStatus()
             }
         }
-        .navigationTitle("Settings")
+    }
+    
+    // NEW: Subscription restoration section for cancelled users
+    private var subscriptionRestorationSection: some View {
+        Section {
+            if let user = authManager.currentUser,
+               user.subscriptionLevel == .cancelled,
+               let retentionEndDate = user.dataRetentionEndDate {
+                
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(.orange)
+                        VStack(alignment: .leading) {
+                            Text("Subscription Cancelled")
+                                .font(.headline)
+                                .foregroundColor(.orange)
+                            Text("Your account data is preserved until \(retentionEndDate, style: .date)")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    
+                    Text("Restore your subscription anytime before \(retentionEndDate, style: .date) to regain full access to your teams and data.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding(.vertical, 4)
+                    
+                    Button(action: {
+                        showingSubscription = true
+                    }) {
+                        HStack {
+                            Image(systemName: "arrow.clockwise")
+                            Text("Restore Subscription")
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                }
+                .padding()
+                .background(Color.orange.opacity(0.1))
+                .cornerRadius(12)
+            }
+        } header: {
+            if let user = authManager.currentUser, user.subscriptionLevel == .cancelled {
+                Text("Account Status")
+            }
+        }
     }
     
     // NEW SUBSCRIPTION SECTION - FIXED:
@@ -1394,7 +1456,7 @@ struct ProfileSettingsView: View {
         }
     }
     
-  private var teamsSection: some View {
+    private var teamsSection: some View {
         Section {
             // Team limit information
             if let currentUser = authManager.currentUser,
@@ -1561,7 +1623,7 @@ struct ProfileSettingsView: View {
             Text("Data Management")
         } footer: {
             if canImportData {
-                Text("Download the template to see the correct format for importing players or teams.")
+                Text("Enable subcollections for better performance. Download the template to see the correct format for importing players or teams.")
             } else {
                 Text("Import functionality is only available to team coaches.")
             }
@@ -1655,6 +1717,7 @@ struct ProfileSettingsView: View {
             team.coachUID == currentUser.uid
         }
     }
+    
     
     // MARK: - Helper Methods
     

@@ -180,7 +180,20 @@ struct SubscriptionView: View {
             Text("Available Plans")
                 .font(.headline)
             
-            ForEach(storeKit.products.sorted(by: sortProducts), id: \.id) { product in
+            // Filter products to exclude trial if user is not eligible
+            let filteredProducts = storeKit.products.filter { product in
+                let subscriptionLevel = getSubscriptionLevel(for: product)
+                
+                // If it's a trial product, only show if user is eligible
+                if subscriptionLevel == .trial {
+                    return authManager.currentUser?.isTrialEligible ?? false
+                }
+                
+                // Show all other plans
+                return true
+            }
+            
+            ForEach(filteredProducts.sorted(by: sortProducts), id: \.id) { product in
                 SubscriptionPlanCard(
                     product: product,
                     currentLevel: currentSubscriptionLevel,
@@ -191,6 +204,25 @@ struct SubscriptionView: View {
                         handlePlanSelection(product)
                     }
                 )
+            }
+            
+            // Show message if trial is not available
+            if authManager.currentUser?.isTrialEligible == false {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Image(systemName: "info.circle")
+                            .foregroundColor(.blue)
+                        Text("Trial Not Available")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                    }
+                    Text("You've already used your free trial. Choose from the paid plans above.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .padding()
+                .background(Color.blue.opacity(0.1))
+                .cornerRadius(8)
             }
         }
     }

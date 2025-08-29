@@ -39,25 +39,28 @@ struct PlanSelectionView: View {
                     
                     // Plan Cards - Using your existing SubscriptionLevel enum
                     VStack(spacing: 16) {
-                        // Free Trial Card
-                        PlanCard(
-                            plan: .trial,
-                            isSelected: selectedPlan == .trial,
-                            isPopular: false,
-                            isYearly: isYearly,
-                            onSelect: { selectedPlan = .trial }
-                        )
+                        // Only show trial if user is eligible
+                        if let user = authManager.currentUser, user.isTrialEligible {
+                            // Free Trial Card
+                            PlanCard(
+                                plan: .trial,
+                                isSelected: selectedPlan == .trial,
+                                isPopular: false,
+                                isYearly: isYearly,
+                                onSelect: { selectedPlan = .trial }
+                            )
+                        }
                         
-                        // Pro Plan Card
+                        // Pro Plan Card (always show)
                         PlanCard(
                             plan: .pro,
                             isSelected: selectedPlan == .pro,
-                            isPopular: selectedPlan != .club, // Pro is popular unless Club is selected
+                            isPopular: selectedPlan != .club,
                             isYearly: isYearly,
                             onSelect: { selectedPlan = .pro }
                         )
                         
-                        // Premium Plan Card
+                        // Premium Plan Card (always show)
                         PlanCard(
                             plan: .premium,
                             isSelected: selectedPlan == .premium,
@@ -66,7 +69,7 @@ struct PlanSelectionView: View {
                             onSelect: { selectedPlan = .premium }
                         )
                         
-                        // Club Plan Card
+                        // Club Plan Card (always show)
                         PlanCard(
                             plan: .club,
                             isSelected: selectedPlan == .club,
@@ -131,6 +134,11 @@ struct PlanSelectionView: View {
             storeKit.setAuthManager(authManager)
             Task {
                 await storeKit.loadProducts()
+            }
+            
+            // NEW: Set default plan based on trial eligibility
+            if let user = authManager.currentUser, !user.isTrialEligible {
+                selectedPlan = .pro  // Default to pro if trial not eligible
             }
         }
     }

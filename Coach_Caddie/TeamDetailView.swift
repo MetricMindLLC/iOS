@@ -314,7 +314,7 @@ struct TeamOverviewTab: View {
                     Text(team.name)
                         .font(.largeTitle)
                         .bold()
-                    Text("\(team.format.rawValue) • \(team.defaultFormation.rawValue)")
+                    Text("\(team.format.rawValue) â€¢ \(team.defaultFormation.rawValue)")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
@@ -484,7 +484,7 @@ struct TeamOverviewTab: View {
     
     private var viewerQuickActions: some View {
         VStack(spacing: 12) {
-            Text("👁️ View Only Access")
+            Text("ðŸ‘ï¸ View Only Access")
                 .font(.headline)
                 .foregroundColor(.secondary)
             

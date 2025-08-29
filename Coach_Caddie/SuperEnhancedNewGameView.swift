@@ -297,8 +297,6 @@ struct SuperEnhancedNewGameView: View {
     }
     
     func createGame() {
-        // FIXED: Removed 'address' parameter since Game struct doesn't have it
-        // If address is needed, combine it with location
         let gameLocation: String? = {
             if location.isEmpty {
                 return nil
@@ -316,118 +314,111 @@ struct SuperEnhancedNewGameView: View {
             location: gameLocation,
             notes: notes.isEmpty ? nil : notes
         )
-        
-        // Update the team's games array
-        team.games.append(game)
-        
-        // Update in TeamManager
-        teamManager.updateTeam(team)
-        
+        teamManager.addGame(to: team, game: game)
         presentationMode.wrappedValue.dismiss()
     }
-}
-
-// Game Location Picker View - RENAMED FROM LocationPickerView
-struct GameLocationPickerView: View {
-    let locations: [GameLocation]
-    @Binding var selectedLocation: GameLocation?
-    @Binding var customLocation: String
-    @Binding var customAddress: String
-    @Environment(\.presentationMode) var presentationMode
-    @State private var isAddingCustom = false
-    @State private var tempLocation = ""
-    @State private var tempAddress = ""
-    
-    var body: some View {
-        NavigationView {
-            List {
-                Section("Common Locations") {
-                    ForEach(locations) { location in
-                        Button(action: {
-                            selectedLocation = location
-                            customLocation = location.name
-                            customAddress = location.address
-                            presentationMode.wrappedValue.dismiss()
-                        }) {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(location.name)
-                                        .font(.headline)
-                                        .foregroundColor(.primary)
-                                    Text(location.address)
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
-                                Spacer()
-                                if location.isDefault {
-                                    Text("Home")
-                                        .font(.caption)
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 4)
-                                        .background(Color.green.opacity(0.2))
-                                        .foregroundColor(.green)
-                                        .cornerRadius(8)
-                                }
-                            }
-                        }
-                    }
-                }
-                
-                Section {
-                    Button(action: {
-                        isAddingCustom = true
-                    }) {
-                        Label("Add Custom Location", systemImage: "plus.circle")
-                    }
-                }
-            }
-            .navigationTitle("Select Location")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Cancel") {
-                        presentationMode.wrappedValue.dismiss()
-                    }
-                }
-            }
-            .sheet(isPresented: $isAddingCustom) {
-                NavigationView {
-                    Form {
-                        Section("Location Details") {
-                            TextField("Location Name", text: $tempLocation)
-                            TextField("Address", text: $tempAddress)
-                        }
-                    }
-                    .navigationTitle("Custom Location")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .navigationBarLeading) {
-                            Button("Cancel") {
-                                isAddingCustom = false
-                                tempLocation = ""
-                                tempAddress = ""
-                            }
-                        }
-                        ToolbarItem(placement: .navigationBarTrailing) {
-                            Button("Done") {
-                                customLocation = tempLocation
-                                customAddress = tempAddress
-                                isAddingCustom = false
+    // Game Location Picker View - RENAMED FROM LocationPickerView
+    struct GameLocationPickerView: View {
+        let locations: [GameLocation]
+        @Binding var selectedLocation: GameLocation?
+        @Binding var customLocation: String
+        @Binding var customAddress: String
+        @Environment(\.presentationMode) var presentationMode
+        @State private var isAddingCustom = false
+        @State private var tempLocation = ""
+        @State private var tempAddress = ""
+        
+        var body: some View {
+            NavigationView {
+                List {
+                    Section("Common Locations") {
+                        ForEach(locations) { location in
+                            Button(action: {
+                                selectedLocation = location
+                                customLocation = location.name
+                                customAddress = location.address
                                 presentationMode.wrappedValue.dismiss()
+                            }) {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(location.name)
+                                            .font(.headline)
+                                            .foregroundColor(.primary)
+                                        Text(location.address)
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                    Spacer()
+                                    if location.isDefault {
+                                        Text("Home")
+                                            .font(.caption)
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 4)
+                                            .background(Color.green.opacity(0.2))
+                                            .foregroundColor(.green)
+                                            .cornerRadius(8)
+                                    }
+                                }
                             }
-                            .disabled(tempLocation.isEmpty)
+                        }
+                    }
+                    
+                    Section {
+                        Button(action: {
+                            isAddingCustom = true
+                        }) {
+                            Label("Add Custom Location", systemImage: "plus.circle")
+                        }
+                    }
+                }
+                .navigationTitle("Select Location")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("Cancel") {
+                            presentationMode.wrappedValue.dismiss()
+                        }
+                    }
+                }
+                .sheet(isPresented: $isAddingCustom) {
+                    NavigationView {
+                        Form {
+                            Section("Location Details") {
+                                TextField("Location Name", text: $tempLocation)
+                                TextField("Address", text: $tempAddress)
+                            }
+                        }
+                        .navigationTitle("Custom Location")
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .navigationBarLeading) {
+                                Button("Cancel") {
+                                    isAddingCustom = false
+                                    tempLocation = ""
+                                    tempAddress = ""
+                                }
+                            }
+                            ToolbarItem(placement: .navigationBarTrailing) {
+                                Button("Done") {
+                                    customLocation = tempLocation
+                                    customAddress = tempAddress
+                                    isAddingCustom = false
+                                    presentationMode.wrappedValue.dismiss()
+                                }
+                                .disabled(tempLocation.isEmpty)
+                            }
                         }
                     }
                 }
             }
         }
     }
-}
-
-// Game Location Model
-struct GameLocation: Identifiable {
-    let id = UUID()
-    let name: String
-    let address: String
-    var isDefault: Bool = false
+    
+    // Game Location Model
+    struct GameLocation: Identifiable {
+        let id = UUID()
+        let name: String
+        let address: String
+        var isDefault: Bool = false
+    }
 }

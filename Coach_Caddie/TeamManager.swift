@@ -44,7 +44,10 @@ class TeamManager: ObservableObject {
     private var saveWorkItem: DispatchWorkItem?
     private let saveDebounceTime: TimeInterval = 0.5
     private var cancellables = Set<AnyCancellable>()
-    
+    private var firebaseUpdateWorkItems: [UUID: DispatchWorkItem] = [:]
+    private let firebaseUpdateDebounceTime: TimeInterval = 1.5 // Shorter debounce for semi-live updates
+    private var gameStateUpdateWorkItems: [UUID: DispatchWorkItem] = [:]
+    private let gameStateUpdateDebounceTime: TimeInterval = 10.0 // Game state updates every 10 seconds
     init() {
         // IMPORTANT: Don't load local data immediately - wait for auth state
         loadAppSettings()
@@ -145,6 +148,201 @@ class TeamManager: ObservableObject {
                 }
             }
             .store(in: &cancellables)
+    }
+    
+    func updateTeam(_ team: Team) {
+        print("🔥 updateTeam called for team: \(team.name)")
+        print("🔥 Team ID: \(team.id)")
+        print("🔥 Current user UID: \(currentUserUID ?? "nil")")
+        print("🔥 Team coachUID: \(team.coachUID ?? "nil")")
+        print("🔥 isOnline: \(isOnline)")
+        
+        // 1. Update local state immediately (no change here)
+        if let index = teams.firstIndex(where: { $0.id == team.id }) {
+            teams[index] = team
+            debouncedSave() // Local save still immediate
+            
+            if isOnline {
+                // 2. Check if this is a game in progress (needs faster sync for live view)
+                let isActiveGame = GameStateManager.shared.activeGameState?.teamId == team.id
+                
+                if isActiveGame {
+                    // LIVE GAME: Use shorter debounce for semi-live updates
+                    updateTeamForLiveGame(team)
+                } else {
+                    // NON-GAME: Use normal debounce
+                    updateTeamWithDebounce(team, debounceTime: firebaseUpdateDebounceTime)
+                }
+            } else {
+                print("🔥 Adding to pending changes (offline)")
+                addToPendingChanges("team_\(team.id.uuidString)", action: "update", teamId: team.id.uuidString)
+            }
+        } else {
+            print("❌ Team not found in teams array!")
+        }
+    }
+    
+    private var teamListeners: [UUID: ListenerRegistration] = [:]
+
+    // Add this method to temporarily disable listeners
+    func pauseRealTimeListeners(for teamId: UUID) {
+        if let listener = teamListeners[teamId] {
+            listener.remove()
+            teamListeners.removeValue(forKey: teamId)
+            print("🔇 Paused real-time listener for team")
+        }
+    }
+
+    // Add this method to resume listeners
+    func resumeRealTimeListeners(for teamId: UUID) {
+        // Resume listener after a delay to ensure our save completes first
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
+            // Re-setup listener here (you'll need to call your existing listener setup code)
+            print("🔊 Resumed real-time listener for team")
+        }
+    }
+
+    // MARK: - Live Game Updates (for parent/viewer real-time experience)
+    private func updateTeamForLiveGame(_ team: Team) {
+        // Cancel any pending regular update
+        firebaseUpdateWorkItems[team.id]?.cancel()
+        
+        // Use shorter debounce for live games (1.5 seconds instead of 2+)
+        let workItem = DispatchWorkItem { [weak self] in
+            Task { [weak self] in
+                await self?.saveTeamToFirebaseLive(team)
+            }
+        }
+        
+        firebaseUpdateWorkItems[team.id] = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + firebaseUpdateDebounceTime, execute: workItem)
+        
+        print("🔥 Scheduled LIVE game Firebase save in \(firebaseUpdateDebounceTime) seconds")
+    }
+
+    // MARK: - Regular Team Updates (for non-game changes)
+    private func updateTeamWithDebounce(_ team: Team, debounceTime: TimeInterval) {
+        // Cancel any pending update for this team
+        firebaseUpdateWorkItems[team.id]?.cancel()
+        
+        let workItem = DispatchWorkItem { [weak self] in
+            Task { [weak self] in
+                await self?.saveTeamToFirebase(team)
+            }
+        }
+        
+        firebaseUpdateWorkItems[team.id] = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + debounceTime, execute: workItem)
+        
+        print("🔥 Scheduled regular Firebase save in \(debounceTime) seconds")
+    }
+
+    // MARK: - Live Game Firebase Save (maintains real-time listeners)
+    private func saveTeamToFirebaseLive(_ team: Team) async {
+        print("🔥 LIVE saveTeamToFirebase called for team: \(team.name)")
+        
+        guard await ensureAuthentication() else {
+            print("❌ ensureAuthentication failed")
+            return
+        }
+        
+        do {
+            try await firebaseManager.saveTeam(team)
+            print("✅ LIVE Firebase save completed - parents/viewers will see updates")
+            
+            await MainActor.run {
+                self.removePendingChange("team_\(team.id.uuidString)")
+                self.firebaseUpdateWorkItems.removeValue(forKey: team.id)
+            }
+        } catch {
+            print("❌ LIVE Firebase save failed: \(error)")
+            await MainActor.run {
+                self.setError("Failed to save team: \(error.localizedDescription)")
+                self.addToPendingChanges("team_\(team.id.uuidString)", action: "update", teamId: team.id.uuidString)
+                self.firebaseUpdateWorkItems.removeValue(forKey: team.id)
+            }
+        }
+    }
+
+    // MARK: - Regular Firebase Save (no refresh call for performance)
+    private func saveTeamToFirebase(_ team: Team) async {
+        print("🔥 saveTeamToFirebase called for team: \(team.name)")
+        
+        guard await ensureAuthentication() else {
+            print("❌ ensureAuthentication failed")
+            return
+        }
+        
+        do {
+            try await firebaseManager.saveTeam(team)
+            print("✅ Firebase save completed successfully")
+            
+            // REMOVED: The refresh call that was causing extra latency
+            // await refreshTeamData(team.id) // <-- STILL REMOVED
+            
+            await MainActor.run {
+                self.removePendingChange("team_\(team.id.uuidString)")
+                self.firebaseUpdateWorkItems.removeValue(forKey: team.id)
+            }
+        } catch {
+            print("❌ Firebase save failed: \(error)")
+            await MainActor.run {
+                self.setError("Failed to save team: \(error.localizedDescription)")
+                self.addToPendingChanges("team_\(team.id.uuidString)", action: "update", teamId: team.id.uuidString)
+                self.firebaseUpdateWorkItems.removeValue(forKey: team.id)
+            }
+        }
+    }
+
+    // MARK: - Immediate Save Method (for critical updates that need instant sync)
+    func updateTeamImmediately(_ team: Team) async {
+        print("🚨 IMMEDIATE team update requested")
+        
+        // Cancel any pending debounced update
+        firebaseUpdateWorkItems[team.id]?.cancel()
+        firebaseUpdateWorkItems.removeValue(forKey: team.id)
+        
+        // Update local state
+        if let index = teams.firstIndex(where: { $0.id == team.id }) {
+            teams[index] = team
+            debouncedSave()
+        }
+        
+        // Save immediately to Firebase for real-time sync
+        if isOnline {
+            await saveTeamToFirebaseLive(team)
+        } else {
+            addToPendingChanges("team_\(team.id.uuidString)", action: "update", teamId: team.id.uuidString)
+        }
+    }
+
+    // MARK: - Game State Sync (separate from team updates for better performance)
+    func syncGameStateForLiveView(_ gameState: ActiveGameState) {
+        guard let team = teams.first(where: { $0.id == gameState.teamId }) else { return }
+        
+        // Cancel any pending game state update
+        gameStateUpdateWorkItems[team.id]?.cancel()
+        
+        let workItem = DispatchWorkItem { [weak self] in
+            Task { [weak self] in
+                // Only sync critical game state info (time, score, current events)
+                await self?.syncMinimalGameState(gameState, for: team)
+            }
+        }
+        
+        gameStateUpdateWorkItems[team.id] = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + gameStateUpdateDebounceTime, execute: workItem)
+        
+        print("⏱️ Scheduled game state sync in \(gameStateUpdateDebounceTime) seconds")
+    }
+
+    private func syncMinimalGameState(_ gameState: ActiveGameState, for team: Team) async {
+        // Sync only essential game state data for live view
+        // This could be a separate Firebase document or a lightweight update
+        print("⏱️ Syncing minimal game state for live view")
+        
+        // Implementation would depend on your Firebase structure
+        // This keeps the real-time experience while reducing data transfer
     }
     
     // MARK: - Authentication Helper
@@ -822,21 +1020,6 @@ class TeamManager: ObservableObject {
             canCreate: canCreateMoreTeams()
         )
     }
-    func updateTeam(_ team: Team) {
-        if let index = teams.firstIndex(where: { $0.id == team.id }) {
-            teams[index] = team
-            debouncedSave()
-            
-            if isOnline {
-                Task {
-                    await saveTeamToFirebase(team)
-                }
-            } else {
-                addToPendingChanges("team_\(team.id.uuidString)", action: "update", teamId: team.id.uuidString)
-            }
-        }
-    }
-    
     func deleteTeam(_ team: Team) {
         teams.removeAll { $0.id == team.id }
         
@@ -903,6 +1086,28 @@ class TeamManager: ObservableObject {
             
             updateTeam(teams[teamIndex])
         }
+    }
+    
+    // Add this method to your TeamManager class
+    func deletePractice(from team: Team, practiceId: UUID) {
+        print("🗑️ TeamManager.deletePractice called for practice ID: \(practiceId)")
+        
+        guard let teamIndex = teams.firstIndex(where: { $0.id == team.id }) else {
+            print("🗑️ ERROR: Team not found in teams array")
+            return
+        }
+        
+        guard let practiceIndex = teams[teamIndex].practices.firstIndex(where: { $0.id == practiceId }) else {
+            print("🗑️ ERROR: Practice not found in team.practices array")
+            return
+        }
+        
+        // Remove the practice
+        teams[teamIndex].practices.remove(at: practiceIndex)
+        print("🗑️ Practice removed, remaining practices: \(teams[teamIndex].practices.count)")
+        
+        // Update the team using the same method as your game deletion
+        updateTeam(teams[teamIndex])
     }
     
     func forceRecalculateAllStats() {
@@ -1309,13 +1514,21 @@ class TeamManager: ObservableObject {
             
             let (loadedPlayers, loadedGames, loadedPractices) = try await (players, games, practices)
             
+            // Recalculate season stats from the loaded game data
+            var updatedTeam = team
+            updatedTeam.players = loadedPlayers
+            updatedTeam.games = loadedGames
+            updatedTeam.practices = loadedPractices
+            
+            // NEW: Recalculate season stats after loading subcollection data
+            updatedTeam = firebaseManager.recalculateSeasonStatsAfterSubcollectionLoad(for: updatedTeam)
+            
             await MainActor.run {
                 if let teamIndex = self.teams.firstIndex(where: { $0.id == team.id }) {
-                    self.teams[teamIndex].players = loadedPlayers
-                    self.teams[teamIndex].games = loadedGames
-                    self.teams[teamIndex].practices = loadedPractices
+                    self.teams[teamIndex] = updatedTeam
                     self.teams[teamIndex].lastSyncDate = Date()
                     self.saveLocalData()
+                    print("🏆 Season stats recalculated for team: \(updatedTeam.name)")
                 }
             }
         } catch {
@@ -1488,24 +1701,15 @@ class TeamManager: ObservableObject {
         debouncedSave()
     }
     
-    // MARK: - Firebase Operations
-    private func saveTeamToFirebase(_ team: Team) async {
-        // Ensure authentication before Firebase operation
-        guard await ensureAuthentication() else { return }
+    func refreshTeamData(_ teamId: UUID) async {
+        print("🔄 Refreshing team data from Firebase...")
         
-        do {
-            try await firebaseManager.saveTeam(team)
-            await MainActor.run {
-                self.removePendingChange("team_\(team.id.uuidString)")
-            }
-        } catch {
-            await MainActor.run {
-                self.setError("Failed to save team: \(error.localizedDescription)")
-                self.addToPendingChanges("team_\(team.id.uuidString)", action: "update", teamId: team.id.uuidString)
-            }
-        }
+        // Use the existing loadTeamsFromFirebase method
+        await loadTeamsFromFirebase()
+        
+        print("✅ Team data refresh completed")
     }
-    
+
     private func deleteTeamFromFirebase(_ team: Team) async {
         // Ensure authentication before Firebase operation
         guard await ensureAuthentication() else { return }
@@ -1536,10 +1740,10 @@ class TeamManager: ObservableObject {
         
         do {
             let firebaseTeams = try await firebaseManager.loadTeams(for: user.uid)
-            
-            // NEW: Load subcollection data for teams that use subcollections
             var fullyLoadedTeams: [Team] = []
             for team in firebaseTeams {
+                print("🔍 Team \(team.name) useSubcollections: \(team.useSubcollections)")  // ADD THIS LINE
+                
                 if team.useSubcollections {
                     // Load subcollection data
                     async let players = firebaseManager.loadPlayersFromSubcollection(for: team)
@@ -1753,6 +1957,25 @@ class TeamManager: ObservableObject {
                 default:
                     break
                 }
+            }
+        }
+    }
+    
+    func updateTeamImmediatelySync(_ team: Team) {
+        print("🚨 FORCING IMMEDIATE SYNC - bypassing debounce")
+        
+        // Update local state immediately
+        if let index = teams.firstIndex(where: { $0.id == team.id }) {
+            teams[index] = team
+            debouncedSave() // Still save locally
+        }
+        
+        // Force immediate Firebase save
+        Task {
+            if isOnline {
+                await saveTeamToFirebaseLive(team)
+            } else {
+                addToPendingChanges("team_\(team.id.uuidString)", action: "update", teamId: team.id.uuidString)
             }
         }
     }

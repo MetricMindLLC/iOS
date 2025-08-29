@@ -64,11 +64,10 @@ struct ContentView: View {
         }
     }
     
-    // MARK: - Header Section with Team Limit Awareness
     private var headerSection: some View {
         VStack(spacing: 20) {
-            // App Logo and Title
             HStack {
+                // Updated to match OnboardingView logo
                 ZStack {
                     RoundedRectangle(cornerRadius: 16)
                         .fill(
@@ -80,34 +79,20 @@ struct ContentView: View {
                         )
                         .frame(width: 60, height: 60)
                     
-                    // Field design (original logo)
-                    VStack(spacing: 1) {
-                        Rectangle()
-                            .fill(Color.white)
-                            .frame(width: 40, height: 2)
+                    VStack(spacing: 2) {
+                        Image(systemName: "sportscourt.fill")
+                            .font(.system(size: 20))
+                            .foregroundColor(.white)
                         
-                        HStack(spacing: 1) {
-                            Rectangle()
-                                .fill(Color.white)
-                                .frame(width: 2, height: 20)
+                        VStack(spacing: 0) {
+                            Text("COACH")
+                                .font(.system(size: 6, weight: .black, design: .rounded))
+                                .foregroundColor(.white)
                             
-                            Spacer()
-                            
-                            Circle()
-                                .stroke(Color.white, lineWidth: 1.5)
-                                .frame(width: 12, height: 12)
-                            
-                            Spacer()
-                            
-                            Rectangle()
-                                .fill(Color.white)
-                                .frame(width: 2, height: 20)
+                            Text("CADDIE")
+                                .font(.system(size: 6, weight: .black, design: .rounded))
+                                .foregroundColor(.white)
                         }
-                        .frame(width: 40)
-                        
-                        Rectangle()
-                            .fill(Color.white)
-                            .frame(width: 40, height: 2)
                     }
                 }
                 

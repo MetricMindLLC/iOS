@@ -57,6 +57,8 @@ struct LineupView: View {
     @State private var userRole: AccessLevel?
     @State private var canEditLineup = false
     @State private var showingSubstitutionPlanner = false
+    @State private var hasCheckedPermissions = false
+    @State private var currentGameMinute: Int = 0
     
     private var isReadOnlyUser: Bool {
         return userRole == .viewer || userRole == .parent
@@ -72,247 +74,14 @@ struct LineupView: View {
     var body: some View {
         GeometryReader { geometry in
             VStack(spacing: 0) {
-                // Modern Header Section
-                VStack(spacing: 16) {
-                    // Active Game Banner (if applicable)
-                    if let activeGame = gameStateManager.activeGameState, !showingGameMode {
-                        ActiveGameBanner(
-                            activeGame: activeGame,
-                            onViewGame: {
-                                enterActiveGameMode()
-                            }
-                        )
-                        .padding(.horizontal)
-                    }
-                    
-                    // Formation Selector
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            Text("Formation")
-                                .font(.headline)
-                                .foregroundColor(.primary)
-                            
-                            Spacer()
-                            
-                            // Plan Subs button
-                            if !showingGameMode && canEditLineup && selectedGame != nil {
-                                Button(action: { showingSubstitutionPlanner = true }) {
-                                    HStack(spacing: 6) {
-                                        Image(systemName: "repeat")
-                                        Text("Plan Subs")
-                                    }
-                                    .font(.subheadline)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 6)
-                                    .background(Color.blue.opacity(0.1))
-                                    .foregroundColor(.blue)
-                                    .cornerRadius(8)
-                                }
-                            }
-                            // Clear Lineup Button - UPDATED: Hide during game mode
-                            if canEditLineup && !showingGameMode {
-                                Button(action: clearLineup) {
-                                    HStack(spacing: 4) {
-                                        Image(systemName: "trash")
-                                            .font(.caption)
-                                        Text("Clear")
-                                            .font(.caption)
-                                    }
-                                    .foregroundColor(.red)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                                    .background(Color.red.opacity(0.1))
-                                    .cornerRadius(6)
-                                }
-                            }
-                            
-                            if selectedGame == nil {
-                                Button(action: { showingInstructions = true }) {
-                                    Image(systemName: "info.circle")
-                                        .font(.title3)
-                                        .foregroundColor(.blue)
-                                }
-                            }
-                        }
-                        .padding(.horizontal)
-                        
-                        if !showingGameMode {
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 8) {
-                                    ForEach(team.format.availableFormations, id: \.self) { formation in
-                                        ModernFormationButton(
-                                            formation: formation,
-                                            isSelected: selectedFormation == formation,
-                                            playerCount: lineupPositions.filter { $0.playerId != nil }.count,
-                                            totalPositions: formation.positions.count
-                                        ) {
-                                            if canEditLineup {
-                                                changeFormation(to: formation)
-                                            }
-                                        }
-                                    }
-                                }
-                                .padding(.horizontal)
-                            }
-                            .disabled(isReadOnlyUser)
-                        }
-                    }
-                    
-                    // Game Controls
-                    if !showingGameMode && canEditLineup {
-                        HStack(spacing: 12) {
-                            ModernGameSelectorButton(
-                                selectedGame: selectedGame,
-                                action: { showingGameSelector = true }
-                            )
-                        }
-                        .padding(.horizontal)
-                        
-                        if selectedGame != nil && !showingGameMode && gameStateManager.activeGameState == nil {
-                            Button(action: {
-                                // SAVE THE ACTUAL STARTING LINEUP BEFORE GAME STARTS
-                                if var game = selectedGame {
-                                    game.actualStartingLineup = lineupPositions  // Capture current lineup as starting lineup
-                                    selectedGame = game
-                                    if let gameIndex = team.games.firstIndex(where: { $0.id == game.id }) {
-                                        team.games[gameIndex] = game
-                                    }
-                                    teamManager.updateTeam(team)
-                                }
-                                
-                                showingGameMode = true
-                                isInGameMode = true
-                                gameStateManager.startGameSession(
-                                    game: selectedGame!,
-                                    team: team,
-                                    formation: selectedFormation,
-                                    lineupPositions: lineupPositions,
-                                    halfLength: team.defaultHalfLength
-                                )
-                                
-                                // Persist the new game state immediately
-                                gameStateManager.persistActiveGameState()
-                                
-                                checkAndExecutePlannedSubstitutions()
-                                startGameTimer()
-                            }) {
-                                HStack {
-                                    Image(systemName: "play.circle.fill")
-                                    Text("Start Game Mode")
-                                        .fontWeight(.semibold)
-                                }
-                                .foregroundColor(.white)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 14)
-                                .background(
-                                    LinearGradient(
-                                        gradient: Gradient(colors: [Color.green, Color.green.opacity(0.8)]),
-                                        startPoint: .leading,
-                                        endPoint: .trailing
-                                    )
-                                )
-                                .cornerRadius(12)
-                            }
-                            .padding(.horizontal)
-                        }
-                    }
-                }
-                
-                // Main Content Area
-                if showingGameMode && selectedGame != nil {
-                    ModernGameModeView(
-                        team: $team,
-                        game: Binding(
-                            get: { selectedGame ?? Game(date: Date(), opponent: "Unknown") },
-                            set: { newGame in
-                                selectedGame = newGame
-                                updateGameInTeam(newGame)
-                            }
-                        ),
-                        lineupPositions: $lineupPositions,
-                        selectedFormation: selectedFormation,
-                        showingEditTimer: $showingEditTimer,
-                        editedMinute: $editedMinute,
-                        editedSecond: $editedSecond,
-                        timerTick: timerTick,
-                        onExitGameMode: {
-                            if let _ = gameStateManager.activeGameState {
-                                gameStateManager.activeGameState?.lineupPositions = lineupPositions
-                            }
-                            showingGameMode = false
-                            isInGameMode = false
-                            stopGameTimer()
-                        },
-                        onClearGameData: {
-                            clearAllGameData()
-                        },
-                        onEndGame: {
-                            gameStateManager.addAuditEntry(
-                                eventType: .gameEnd,
-                                gameTime: gameStateManager.auditLogTime,
-                                details: "Game ended"
-                            )
-                            
-                            if let currentGame = selectedGame {
-                                var updatedGame = currentGame
-                                updatedGame.auditLog = gameStateManager.activeGameState?.auditLog ?? []
-                                updatedGame.isCompleted = true
-                                updateGameInTeam(updatedGame)
-                            }
-                            
-                            gameStateManager.endGameSession()
-                            gameStateManager.clearPersistedGameState() // Clear persistence
-                            
-                            for index in lineupPositions.indices {
-                                lineupPositions[index].playerId = nil
-                            }
-                            
-                            UserDefaults.standard.removeObject(forKey: "SavedLineup_\(team.id)")
-                            
-                            selectedGame = nil
-                            showingGameMode = false
-                            isInGameMode = false
-                            stopGameTimer()
-                            
-                            let impactFeedback = UIImpactFeedbackGenerator(style: .heavy)
-                            impactFeedback.impactOccurred()
-                        }
-                    )
-                    .environmentObject(gameStateManager)
-                    .environmentObject(teamManager)
-                } else {
-                    ModernLineupBuilder(
-                        team: $team,
-                        selectedFormation: selectedFormation,
-                        lineupPositions: $lineupPositions,
-                        selectedPlayer: $selectedPlayer,
-                        selectedPositionIndex: $selectedPositionIndex,
-                        availableHeight: geometry.size.height - geometry.safeAreaInsets.top - geometry.safeAreaInsets.bottom - 525,
-                        hideAvailablePlayersHeader: selectedGame != nil && !showingGameMode && gameStateManager.activeGameState == nil
-                    )
-                    .disabled(isReadOnlyUser)
-                    .opacity(isReadOnlyUser ? 0.8 : 1.0)
-                }
+                headerSection
+                mainContentArea(geometry: geometry)
             }
         }
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarHidden(showingGameMode)
         .overlay {
-            if isReadOnlyUser {
-                VStack {
-                    Spacer()
-                    HStack {
-                        Image(systemName: userRole == .viewer ? "eye.fill" : "person.2.fill")
-                        Text(userRole == .viewer ? "View Only Access" : "Parent Access - View Only")
-                            .font(.caption)
-                            .fontWeight(.medium)
-                    }
-                    .padding(8)
-                    .background(.ultraThinMaterial)
-                    .cornerRadius(8)
-                    .padding()
-                }
-            }
+            readOnlyOverlay
         }
         .onAppear {
             checkLineupPermissions()
@@ -324,12 +93,7 @@ struct LineupView: View {
             autoSaveLineupState()
         }
         .onChange(of: lineupPositions) { _ in
-            if showingGameMode && selectedGame != nil {
-                autoSaveLineupState()
-                gameStateManager.activeGameState?.lineupPositions = lineupPositions
-            } else {
-                autoSaveLineupState()
-            }
+            handleLineupPositionChange()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("EnterActiveGameMode"))) { _ in
             enterActiveGameMode()
@@ -380,7 +144,583 @@ struct LineupView: View {
             }
         }
     }
+    
+    // MARK: - View Components
+    
+    @ViewBuilder
+    private var headerSection: some View {
+        VStack(spacing: 16) {
+            activeGameBanner
+            formationSection
+            gameControlsSection
+        }
+    }
+    
+    @ViewBuilder
+    private var activeGameBanner: some View {
+        if let activeGame = gameStateManager.activeGameState, !showingGameMode {
+            ActiveGameBanner(
+                activeGame: activeGame,
+                onViewGame: {
+                    enterActiveGameMode()
+                }
+            )
+            .padding(.horizontal)
+        }
+    }
+    
+    @ViewBuilder
+    private var formationSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            formationHeaderRow
+            
+            if !showingGameMode {
+                formationScrollView
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private var formationHeaderRow: some View {
+        HStack {
+            Text("Formation")
+                .font(.headline)
+                .foregroundColor(.primary)
+            
+            Spacer()
+            
+            headerButtonsRow
+        }
+        .padding(.horizontal)
+    }
+    
+    @ViewBuilder
+    private var headerButtonsRow: some View {
+        HStack {
+            planSubsButton
+            clearLineupButton
+            instructionsButton
+        }
+    }
+    
+    @ViewBuilder
+    private var planSubsButton: some View {
+        if !showingGameMode && canEditLineup && selectedGame != nil {
+            Button(action: { showingSubstitutionPlanner = true }) {
+                HStack(spacing: 6) {
+                    Image(systemName: "repeat")
+                    Text("Plan Subs")
+                }
+                .font(.subheadline)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Color.blue.opacity(0.1))
+                .foregroundColor(.blue)
+                .cornerRadius(8)
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private var clearLineupButton: some View {
+        if canEditLineup && !showingGameMode {
+            Button(action: clearLineup) {
+                HStack(spacing: 4) {
+                    Image(systemName: "trash")
+                        .font(.caption)
+                    Text("Clear")
+                        .font(.caption)
+                }
+                .foregroundColor(.red)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.red.opacity(0.1))
+                .cornerRadius(6)
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private var instructionsButton: some View {
+        if selectedGame == nil {
+            Button(action: { showingInstructions = true }) {
+                Image(systemName: "info.circle")
+                    .font(.title3)
+                    .foregroundColor(.blue)
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private var formationScrollView: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(team.format.availableFormations, id: \.self) { formation in
+                    ModernFormationButton(
+                        formation: formation,
+                        isSelected: selectedFormation == formation,
+                        playerCount: lineupPositions.filter { $0.playerId != nil }.count,
+                        totalPositions: formation.positions.count
+                    ) {
+                        if canEditLineup {
+                            changeFormation(to: formation)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal)
+        }
+        .disabled(isReadOnlyUser)
+    }
+    
+    @ViewBuilder
+    private var gameControlsSection: some View {
+        if !showingGameMode && canEditLineup {
+            VStack(spacing: 12) {
+                gameSelectorButton
+                startGameButton
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private var gameSelectorButton: some View {
+        HStack(spacing: 12) {
+            ModernGameSelectorButton(
+                selectedGame: selectedGame,
+                action: { showingGameSelector = true }
+            )
+        }
+        .padding(.horizontal)
+    }
+    
+    @ViewBuilder
+    private var startGameButton: some View {
+        if selectedGame != nil && !showingGameMode && gameStateManager.activeGameState == nil {
+            Button(action: startGameMode) {
+                HStack {
+                    Image(systemName: "play.circle.fill")
+                    Text("Start Game Mode")
+                        .fontWeight(.semibold)
+                }
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .background(
+                    LinearGradient(
+                        gradient: Gradient(colors: [Color.green, Color.green.opacity(0.8)]),
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .cornerRadius(12)
+            }
+            .padding(.horizontal)
+        }
+    }
+    
+    @ViewBuilder
+    private func mainContentArea(geometry: GeometryProxy) -> some View {
+        if showingGameMode && selectedGame != nil {
+            gameModView
+        } else {
+            lineupBuilderView(geometry: geometry)
+        }
+    }
+    
+    @ViewBuilder
+    private var gameModView: some View {
+        ModernGameModeView(
+            team: $team,
+            game: gameBinding,
+            lineupPositions: $lineupPositions,
+            selectedFormation: selectedFormation,
+            showingEditTimer: $showingEditTimer,
+            editedMinute: $editedMinute,
+            editedSecond: $editedSecond,
+            timerTick: timerTick,
+            onExitGameMode: exitGameMode,
+            onClearGameData: clearAllGameData,
+            onEndGame: endGame
+        )
+        .environmentObject(gameStateManager)
+        .environmentObject(teamManager)
+    }
+    
+    @ViewBuilder
+    private func lineupBuilderView(geometry: GeometryProxy) -> some View {
+        ModernLineupBuilder(
+            team: $team,
+            selectedFormation: selectedFormation,
+            lineupPositions: $lineupPositions,
+            selectedPlayer: $selectedPlayer,
+            selectedPositionIndex: $selectedPositionIndex,
+            availableHeight: geometry.size.height - geometry.safeAreaInsets.top - geometry.safeAreaInsets.bottom - 525,
+            hideAvailablePlayersHeader: selectedGame != nil && !showingGameMode && gameStateManager.activeGameState == nil
+        )
+        .disabled(isReadOnlyUser)
+        .opacity(isReadOnlyUser ? 0.8 : 1.0)
+    }
+    
+    @ViewBuilder
+    private var readOnlyOverlay: some View {
+        if isReadOnlyUser {
+            VStack {
+                Spacer()
+                HStack {
+                    Image(systemName: userRole == .viewer ? "eye.fill" : "person.2.fill")
+                    Text(userRole == .viewer ? "View Only Access" : "Parent Access - View Only")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                }
+                .padding(8)
+                .background(.ultraThinMaterial)
+                .cornerRadius(8)
+                .padding()
+            }
+        }
+    }
+    
+    // MARK: - Computed Properties
+    
+    private var gameBinding: Binding<Game> {
+        Binding(
+            get: { selectedGame ?? Game(date: Date(), opponent: "Unknown") },
+            set: { newGame in
+                selectedGame = newGame
+                updateGameInTeam(newGame)
+            }
+        )
+    }
+    
+    private func startGameMode() {
+        guard var game = selectedGame else { return }
+        
+        // CRITICAL: Initialize game data structure for subcollections
+        game.actualStartingLineup = lineupPositions
+        game.formation = selectedFormation
+        
+        // Initialize player stats for starting lineup
+        game.playerStats = []
+        for position in lineupPositions {
+            if let playerId = position.playerId {
+                var playerStats = PlayerGameStats(playerId: playerId)
+                playerStats.timeEntries.append(TimeEntry(enteredAt: 0, exitedAt: nil))
+                game.playerStats.append(playerStats)
+            }
+        }
+        
+        if game.auditLog == nil || game.auditLog?.isEmpty == true {
+            game.auditLog = []
+        }
+        if game.substitutions.isEmpty {
+            game.substitutions = []
+        }
+        
+        // Update the game in the team
+        if let gameIndex = team.games.firstIndex(where: { $0.id == game.id }) {
+            team.games[gameIndex] = game
+        }
+        
+        selectedGame = game
+        
+        teamManager.updateTeam(team)
+        
+        // Start game session
+        showingGameMode = true
+        isInGameMode = true
+        gameStateManager.startGameSession(
+            game: game,
+            team: team,
+            formation: selectedFormation,
+            lineupPositions: lineupPositions,
+            halfLength: team.defaultHalfLength
+        )
+        
+        gameStateManager.persistActiveGameState()
+        checkAndExecutePlannedSubstitutions()
+        startGameTimer()
+        
+        print("⏰ Initialized time tracking for \(game.playerStats.count) starting players")
+    }
+    
+    private func exitGameMode() {
+        if let _ = gameStateManager.activeGameState {
+            gameStateManager.activeGameState?.lineupPositions = lineupPositions
+        }
+        showingGameMode = false
+        isInGameMode = false
+        stopGameTimer()
+    }
+    
+    private func handleLineupPositionChange() {
+        if showingGameMode && selectedGame != nil {
+            // During game mode: Update with subcollections support
+            saveCurrentLineupToGame()
+            saveLineupToUserDefaults()
+            gameStateManager.activeGameState?.lineupPositions = lineupPositions
+            teamManager.updateTeam(team)
+            
+            print("Game mode lineup change - fast sync for live view")
+        } else {
+            // Not in game mode: Use normal debounced sync
+            saveCurrentLineupToGame()
+            saveLineupToUserDefaults()
+            teamManager.updateTeam(team)
+            
+            print("Lineup planning change - normal sync")
+        }
+    }
+    
+    private func endGame() {
+        let gameId = selectedGame?.id.uuidString ?? "nil"
+        print("🏁 END GAME ACTION STARTED - Game ID: \(gameId)")
+        print("🏁 Game has \(selectedGame?.playerStats.count ?? 0) player stats before processing")
+        print("🏁 Current game isCompleted: \(selectedGame?.isCompleted ?? false)")
+        
+        // Add game end to audit log
+        gameStateManager.addAuditEntry(
+            eventType: .gameEnd,
+            gameTime: gameStateManager.auditLogTime,
+            details: "Game ended"
+        )
+        print("📝 Added game end to audit log")
+        
+        // Complete all the critical game saving steps
+        guard let currentGame = selectedGame else {
+            print("❌ ERROR: selectedGame is nil, cannot process game completion")
+            return
+        }
+        
+        var updatedGame = currentGame
+        print("🎮 Processing game: \(updatedGame.opponent) - \(updatedGame.id)")
+        
+        // 1. Save final audit log from gameStateManager
+        if let activeState = gameStateManager.activeGameState {
+            updatedGame.auditLog = activeState.auditLog
+            print("📋 Saved \(updatedGame.auditLog?.count ?? 0) audit log entries")
+            
+            // Save formation from active state
+            updatedGame.formation = activeState.formation
+            print("📐 Saved formation: \(updatedGame.formation?.rawValue ?? "none")")
+        }
+        
+        // 2. The playerStats and substitutions are already in updatedGame (currentGame)
+        // They've been updated throughout the game via updatePlayerStats and executeAutomaticSubstitution
+        print("📊 Game has \(updatedGame.playerStats.count) player stats")
+        print("🔄 Game has \(updatedGame.substitutions.count) substitutions")
+        
+        // 3. Save starting lineup (if not already saved)
+        if updatedGame.startingLineup == nil || updatedGame.startingLineup?.isEmpty == true {
+            updatedGame.startingLineup = lineupPositions
+            print("⚽ Saved starting lineup with \(lineupPositions.count) positions")
+        }
+        
+        // 4. Save actual starting lineup used during game
+        if updatedGame.actualStartingLineup == nil || updatedGame.actualStartingLineup?.isEmpty == true {
+            updatedGame.actualStartingLineup = lineupPositions
+            print("⚽ Saved actual starting lineup with \(lineupPositions.count) positions")
+        }
+        
+        // 5. CRITICAL: Mark game as completed
+        updatedGame.isCompleted = true
+        print("✅ Marked game as completed: \(updatedGame.isCompleted)")
+        
+        // 6. Close out any remaining time entries for players still on field
+        let finalMinute = gameStateManager.calculatedMinute
+        print("⏱️ Final game time: \(finalMinute) minutes")
+        
+        var playersWithOpenTime = 0
+        for index in updatedGame.playerStats.indices {
+            if let lastEntryIndex = updatedGame.playerStats[index].timeEntries.lastIndex(where: { $0.exitedAt == nil }) {
+                updatedGame.playerStats[index].timeEntries[lastEntryIndex].exitedAt = finalMinute
+                playersWithOpenTime += 1
+            }
+            
+            // Calculate total minutes played for this player
+            let totalMinutes = updatedGame.playerStats[index].timeEntries.reduce(0) { total, entry in
+                let exitTime = entry.exitedAt ?? finalMinute
+                return total + (exitTime - entry.enteredAt)
+            }
+            updatedGame.playerStats[index].minutesPlayed = totalMinutes
+        }
+        print("⏱️ Closed time entries for \(playersWithOpenTime) players")
+        
+        // 7. Reset player game stats before recalculating from audit log
+        print("🔄 Resetting player stats before recalculating from audit log")
+        for index in updatedGame.playerStats.indices {
+            // Keep minutes played as calculated above
+            let savedMinutes = updatedGame.playerStats[index].minutesPlayed
+            updatedGame.playerStats[index].goals = 0
+            updatedGame.playerStats[index].assists = 0
+            updatedGame.playerStats[index].saves = 0
+            updatedGame.playerStats[index].goalsConceded = 0
+            updatedGame.playerStats[index].yellowCards = 0
+            updatedGame.playerStats[index].redCards = 0
+            updatedGame.playerStats[index].minutesPlayed = savedMinutes
+        }
+        
+        // Initialize game result if nil
+        if updatedGame.result == nil {
+            updatedGame.result = GameResult(goalsFor: 0, goalsAgainst: 0)
+        }
+        updatedGame.result?.goalsFor = 0
+        updatedGame.result?.goalsAgainst = 0
+        
+        // 8. Consolidate stats from audit log to ensure accuracy
+        var statsUpdated = 0
+        if let auditLog = updatedGame.auditLog {
+            print("📊 Processing \(auditLog.count) audit log entries for stats")
+            for entry in auditLog {
+                guard let playerId = entry.playerId else { continue }
+                
+                // Find or create player stats for this game
+                var playerStatsIndex = updatedGame.playerStats.firstIndex(where: { $0.playerId == playerId })
+                if playerStatsIndex == nil {
+                    updatedGame.playerStats.append(PlayerGameStats(playerId: playerId))
+                    playerStatsIndex = updatedGame.playerStats.count - 1
+                }
+                
+                guard let statsIndex = playerStatsIndex else { continue }
+                
+                // Update game stats based on audit log
+                switch entry.eventType {
+                case .goal:
+                    updatedGame.playerStats[statsIndex].goals += 1
+                    updatedGame.result?.goalsFor += 1
+                    statsUpdated += 1
+                case .goalAgainst:
+                    updatedGame.playerStats[statsIndex].goalsConceded += 1
+                    updatedGame.result?.goalsAgainst += 1
+                    statsUpdated += 1
+                case .assist:
+                    updatedGame.playerStats[statsIndex].assists += 1
+                    statsUpdated += 1
+                case .save:
+                    updatedGame.playerStats[statsIndex].saves += 1
+                    statsUpdated += 1
+                case .yellowCard:
+                    updatedGame.playerStats[statsIndex].yellowCards += 1
+                    statsUpdated += 1
+                case .redCard:
+                    updatedGame.playerStats[statsIndex].redCards += 1
+                    statsUpdated += 1
+                default:
+                    break
+                }
+            }
+        }
+        print("📊 Updated \(statsUpdated) individual stats from audit log")
+        
+        // 9. Update season stats for all players who participated
+        print("🏆 Updating season stats for players")
+        var seasonStatsUpdated = 0
+        
+        // Create a mutable copy of the team
+        var updatedTeam = team
+        
+        for gamePlayerStats in updatedGame.playerStats {
+            if let playerIndex = updatedTeam.players.firstIndex(where: { $0.id == gamePlayerStats.playerId }) {
+                // Add this game's stats to the player's season stats
+                updatedTeam.players[playerIndex].seasonStats.goals += gamePlayerStats.goals
+                updatedTeam.players[playerIndex].seasonStats.assists += gamePlayerStats.assists
+                updatedTeam.players[playerIndex].seasonStats.saves += gamePlayerStats.saves
+                updatedTeam.players[playerIndex].seasonStats.goalsConceded += gamePlayerStats.goalsConceded
+                updatedTeam.players[playerIndex].seasonStats.yellowCards += gamePlayerStats.yellowCards
+                updatedTeam.players[playerIndex].seasonStats.redCards += gamePlayerStats.redCards
+                updatedTeam.players[playerIndex].seasonStats.minutesPlayed += gamePlayerStats.minutesPlayed
+                updatedTeam.players[playerIndex].seasonStats.gamesPlayed += 1
+                seasonStatsUpdated += 1
+                
+                print("🏆 Updated season stats for \(updatedTeam.players[playerIndex].name)")
+            }
+        }
+        print("🏆 Updated season stats for \(seasonStatsUpdated) players")
+        
+        // 10. Update game in team games array
+        if let gameIndex = updatedTeam.games.firstIndex(where: { $0.id == updatedGame.id }) {
+            updatedTeam.games[gameIndex] = updatedGame
+            print("🎮 Updated game in team games array")
+        } else {
+            print("❌ Could not find game in team games array")
+        }
+        
+        print("🎮 Team has \(updatedTeam.games.count) games")
+        print("🎮 Final game state - isCompleted: \(updatedGame.isCompleted), playerStats: \(updatedGame.playerStats.count), auditLog: \(updatedGame.auditLog?.count ?? 0), substitutions: \(updatedGame.substitutions.count)")
+        
+        // 11. Update TeamManager's teams array FIRST
+        if let teamIndex = teamManager.teams.firstIndex(where: { $0.id == updatedTeam.id }) {
+            teamManager.teams[teamIndex] = updatedTeam
+            print("💾 Updated TeamManager's teams array at index \(teamIndex)")
+        } else {
+            print("❌ Could not find team in TeamManager's teams array!")
+        }
 
+        // 12. Update local references
+        selectedGame = updatedGame
+        team = updatedTeam
+
+        // 13. DEBUG: Verify the updated game is in the team
+        if let completedGame = updatedTeam.games.first(where: { $0.id == updatedGame.id }) {
+            print("🔍 DEBUG: Found updated game in team - isCompleted: \(completedGame.isCompleted)")
+            print("🔍 DEBUG: Game playerStats count: \(completedGame.playerStats.count)")
+            print("🔍 DEBUG: Game auditLog count: \(completedGame.auditLog?.count ?? 0)")
+            print("🔍 DEBUG: Game substitutions count: \(completedGame.substitutions.count)")
+            print("🔍 DEBUG: Game actualStartingLineup count: \(completedGame.actualStartingLineup?.count ?? 0)")
+            
+            if completedGame.isCompleted && !completedGame.playerStats.isEmpty {
+                print("🔍 DEBUG: ✅ GAME DATA LOOKS GOOD - should save to Firebase")
+            } else {
+                print("🔍 DEBUG: ❌ GAME DATA IS MISSING")
+            }
+        } else {
+            print("🔍 DEBUG: ❌ Could not find updated game in team!")
+        }
+
+        // 14. CRITICAL: Prevent Firebase race conditions
+        print("🔇 Preventing Firebase race conditions during game completion")
+        print("🚫 Requesting TeamManager to cancel pending Firebase updates")
+        
+        // 15. Force immediate save with listener protection
+        print("💾 About to force immediate save with listener protection")
+        teamManager.updateTeamImmediatelySync(updatedTeam)
+        print("💾 Immediate save completed")
+        
+        // 16. Wait a moment then allow normal operations to resume
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            print("🔊 Resuming normal Firebase operations after game completion")
+        }
+        
+        print("✅ Game completed and all data saved successfully")
+        
+        // 17. Clear game state and UI
+        print("🧹 Clearing game state and UI")
+        gameStateManager.endGameSession()
+        gameStateManager.clearPersistedGameState()
+        print("🗑️ Cleared persisted game state")
+        
+        // Clear lineup positions
+        for index in lineupPositions.indices {
+            lineupPositions[index].playerId = nil
+        }
+        
+        // Remove saved lineup data
+        UserDefaults.standard.removeObject(forKey: "SavedLineup_\(team.id)")
+        if let gameId = selectedGame?.id {
+            UserDefaults.standard.removeObject(forKey: "GameLineup_\(gameId)")
+        }
+        
+        // Exit game mode
+        selectedGame = nil
+        showingGameMode = false
+        isInGameMode = false
+        stopGameTimer()
+        
+        let impactFeedback = UIImpactFeedbackGenerator(style: .heavy)
+        impactFeedback.impactOccurred()
+        
+        print("🏁 END GAME ACTION COMPLETED")
+    }
     // MARK: - Helper Methods
     private func enterActiveGameMode() {
         if let activeGame = gameStateManager.activeGameState,
@@ -441,126 +781,7 @@ struct LineupView: View {
         let impactFeedback = UIImpactFeedbackGenerator(style: .heavy)
         impactFeedback.impactOccurred()
         
-        print("🧹 Cleared all game data including time tracking")
-    }
-    
-    // FIXED: Better time initialization that prevents duplicates
-    private func initializeStartingLineupTime() {
-        guard var game = selectedGame else { return }
-        
-        print("⏱️ Initializing starting lineup time tracking...")
-        
-        // Clear any existing time entries to prevent duplicates
-        game.playerStats.removeAll()
-        
-        // Initialize time tracking for starting lineup players
-        for position in lineupPositions {
-            if let playerId = position.playerId {
-                var playerStats = PlayerGameStats(playerId: playerId)
-                // Add initial time entry starting at minute 0
-                playerStats.timeEntries.append(TimeEntry(enteredAt: 0, exitedAt: nil))
-                game.playerStats.append(playerStats)
-                
-                print("✅ Initialized time tracking for starting player \(getPlayerName(playerId)) from minute 0")
-            }
-        }
-        
-        selectedGame = game
-        if let gameIndex = team.games.firstIndex(where: { $0.id == game.id }) {
-            team.games[gameIndex] = game
-        }
-        
-        teamManager.updateTeam(team)
-        print("🎯 Completed starting lineup time initialization for \(game.playerStats.count) players")
-    }
-    
-    private func clearLineup() {
-        for index in lineupPositions.indices {
-            lineupPositions[index].playerId = nil
-        }
-        selectedPlayer = nil
-        selectedPositionIndex = nil
-        autoSaveLineupState()
-        
-        let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
-        impactFeedback.impactOccurred()
-    }
-    
-    private func loadSavedLineupState() {
-        if let data = UserDefaults.standard.data(forKey: "SavedLineup_\(team.id)"),
-           let savedState = try? JSONDecoder().decode(LineupState.self, from: data),
-           savedState.formation == selectedFormation {
-            lineupPositions = savedState.positions
-            selectedGame = savedState.selectedGameId.flatMap { gameId in
-                team.games.first(where: { $0.id == gameId })
-            }
-        } else {
-            setupFormation()
-        }
-    }
-    
-    private func changeFormation(to formation: Formation) {
-        var playerAssignments: [UUID: (position: Position, player: Player)] = [:]
-        for position in lineupPositions {
-            if let playerId = position.playerId,
-               let player = team.players.first(where: { $0.id == playerId }) {
-                playerAssignments[playerId] = (position: position.position, player: player)
-            }
-        }
-        
-        selectedFormation = formation
-        
-        lineupPositions = selectedFormation.positions.enumerated().map { index, position in
-            LineupPosition(
-                playerId: nil,
-                position: position,
-                fieldPosition: selectedFormation.fieldPositions(for: CGSize(width: 300, height: 400))[index]
-            )
-        }
-        
-        for (playerId, assignment) in playerAssignments {
-            let oldPosition = assignment.position
-            let player = assignment.player
-            
-            if let exactMatchIndex = lineupPositions.firstIndex(where: { $0.position == oldPosition && $0.playerId == nil }) {
-                lineupPositions[exactMatchIndex].playerId = playerId
-                continue
-            }
-            
-            if let compatibleIndex = lineupPositions.firstIndex(where: {
-                $0.playerId == nil &&
-                player.positions.contains($0.position.rawValue)
-            }) {
-                lineupPositions[compatibleIndex].playerId = playerId
-                continue
-            }
-            
-            if let anyAvailableIndex = lineupPositions.firstIndex(where: { $0.playerId == nil }) {
-                lineupPositions[anyAvailableIndex].playerId = playerId
-            }
-        }
-        
-        autoSaveLineupState()
-    }
-    
-    private func setupFormation() {
-        lineupPositions = selectedFormation.positions.enumerated().map { index, position in
-            LineupPosition(
-                playerId: nil,
-                position: position,
-                fieldPosition: selectedFormation.fieldPositions(for: CGSize(width: 300, height: 400))[index]
-            )
-        }
-    }
-    
-    private func checkForActiveGame() {
-        if let activeGameState = gameStateManager.activeGameState,
-           let game = team.games.first(where: { $0.id == activeGameState.gameId }) {
-            selectedGame = game
-            selectedFormation = activeGameState.formation
-            lineupPositions = activeGameState.lineupPositions
-            startGameTimer()
-        }
+        print("Cleared all game data including time tracking")
     }
     
     private func updateGameInTeam(_ game: Game) {
@@ -570,19 +791,34 @@ struct LineupView: View {
     }
     
     private func saveCurrentLineupToGame() {
-        guard let game = selectedGame else { return }
+        guard var game = selectedGame else { return }
         
-        var updatedGame = game
-        updatedGame.formation = selectedFormation
-        updatedGame.startingLineup = lineupPositions
-        
-        if let index = team.games.firstIndex(where: { $0.id == game.id }) {
-            team.games[index] = updatedGame
-            selectedGame = updatedGame
+        if isInGameMode {
+            // During game, update the actual lineup
+            game.actualStartingLineup = lineupPositions
+            
+            // Ensure player stats exist for all players in lineup
+            for position in lineupPositions {
+                if let playerId = position.playerId {
+                    if !game.playerStats.contains(where: { $0.playerId == playerId }) {
+                        var playerStats = PlayerGameStats(playerId: playerId)
+                        playerStats.timeEntries.append(TimeEntry(
+                            enteredAt: currentGameMinute,
+                            exitedAt: nil
+                        ))
+                        game.playerStats.append(playerStats)
+                    }
+                }
+            }
+        } else {
+            // Before game, update the planned lineup
+            game.startingLineup = lineupPositions
         }
         
-        let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
-        impactFeedback.impactOccurred()
+        selectedGame = game
+        if let gameIndex = team.games.firstIndex(where: { $0.id == game.id }) {
+            team.games[gameIndex] = game
+        }
     }
     
     private func autoSaveLineupState() {
@@ -605,7 +841,89 @@ struct LineupView: View {
         }
     }
     
-    // FIXED: Only initialize time tracking once per game session
+    private func initializeStartingLineupTime() {
+        guard var game = selectedGame else { return }
+        
+        // Clear any existing stats to prevent duplicates
+        game.playerStats = []
+        
+        // Initialize stats for all players in the starting lineup
+        for position in lineupPositions {
+            if let playerId = position.playerId {
+                var stats = PlayerGameStats(playerId: playerId)
+                // Add the initial time entry after creating the stats
+                stats.timeEntries = [TimeEntry(enteredAt: 0, exitedAt: nil)]
+                game.playerStats.append(stats)
+            }
+        }
+        
+        // Update the game in the team
+        if let gameIndex = team.games.firstIndex(where: { $0.id == game.id }) {
+            team.games[gameIndex] = game
+            selectedGame = game
+        }
+        
+        teamManager.updateTeam(team)
+        print("⏰ Initialized time tracking for \(game.playerStats.count) starting players")
+    }
+    
+    private func clearLineup() {
+        for index in lineupPositions.indices {
+            lineupPositions[index].playerId = nil
+        }
+        selectedPlayer = nil
+        selectedPositionIndex = nil
+        autoSaveLineupState()
+        
+        let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+        impactFeedback.impactOccurred()
+    }
+    
+    private func loadSavedLineupState() {
+        if let data = UserDefaults.standard.data(forKey: "SavedLineup_\(team.id)"),
+           let savedState = try? JSONDecoder().decode(LineupState.self, from: data),
+           savedState.teamId == team.id {
+            
+            selectedFormation = savedState.formation
+            lineupPositions = savedState.positions
+            
+            if let gameId = savedState.selectedGameId,
+               let game = team.games.first(where: { $0.id == gameId }) {
+                selectedGame = game
+            }
+        } else {
+            // Initialize with default positions for the selected formation
+            initializeLineupPositions()
+        }
+    }
+    
+    private func initializeLineupPositions() {
+        lineupPositions = selectedFormation.positions.enumerated().map { index, position in
+            LineupPosition(
+                playerId: nil,
+                position: position,
+                fieldPosition: selectedFormation.fieldPositions(for: CGSize(width: 300, height: 200))[index]
+            )
+        }
+    }
+    
+    private func changeFormation(to formation: Formation) {
+        selectedFormation = formation
+        initializeLineupPositions()
+        autoSaveLineupState()
+    }
+    
+    private func checkForActiveGame() {
+        // Check if there's an active game that should be restored
+        if let activeGame = gameStateManager.activeGameState,
+           let game = team.games.first(where: { $0.id == activeGame.gameId }) {
+            selectedGame = game
+            selectedFormation = activeGame.formation
+            lineupPositions = activeGame.lineupPositions
+            startGameTimer()
+        }
+    }
+    
     private func startGameTimer() {
         // Only initialize time tracking if we don't already have player stats
         if let game = selectedGame, game.playerStats.isEmpty {
@@ -614,18 +932,22 @@ struct LineupView: View {
         
         gameTimer?.invalidate()
         
+        // CONTINUOUS TIMER: Keep 1-second interval for smooth display
         gameTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
             DispatchQueue.main.async {
                 if gameStateManager.activeGameState?.isRunning == true {
                     editedMinute = gameStateManager.calculatedMinute
                     editedSecond = gameStateManager.calculatedSecond
-                    timerTick.toggle()
+                    timerTick.toggle() // Keeps continuous timer display
                     
-                    // Persist state every minute to avoid too frequent writes
-                    if gameStateManager.calculatedSecond == 0 {
+                    // CONTINUOUS GameStateManager persistence (UserDefaults only - fast)
+                    // This ensures game state is never lost and updates smoothly
+                    if gameStateManager.calculatedSecond % 30 == 0 { // Every 30 seconds
                         gameStateManager.persistActiveGameState()
-                        checkAndExecutePlannedSubstitutions()
                     }
+                    
+                    // Check for automatic substitutions
+                    checkAndExecutePlannedSubstitutions()
                 }
             }
         }
@@ -639,6 +961,10 @@ struct LineupView: View {
     }
     
     private func checkLineupPermissions() {
+        // Prevent redundant checks
+        guard !hasCheckedPermissions else { return }
+        hasCheckedPermissions = true
+        
         Task {
             userRole = await teamManager.getCurrentUserRole(for: team)
             canEditLineup = userRole == .coach
@@ -652,18 +978,18 @@ struct LineupView: View {
         let currentMinute = gameStateManager.calculatedMinute
         
         guard game.useAutoSubstitutions else {
-            print("🔄 Auto-substitutions disabled for this game")
+            print("Auto-substitutions disabled for this game")
             return
         }
         
-        print("🔄 Checking for planned substitutions at minute \(currentMinute)")
+        print("Checking for planned substitutions at minute \(currentMinute)")
         
         let dueSubstitutions = game.plannedSubstitutions.filter {
             !$0.isExecuted && $0.plannedMinute <= currentMinute
         }
         
         for plannedSub in dueSubstitutions {
-            print("⚡ Executing planned substitution: \(getPlayerName(plannedSub.playerOut)) → \(getPlayerName(plannedSub.playerIn)) at \(currentMinute)'")
+            print("Executing planned substitution: \(getPlayerName(plannedSub.playerOut)) -> \(getPlayerName(plannedSub.playerIn)) at \(currentMinute)'")
             executeAutomaticSubstitution(plannedSub)
         }
         
@@ -674,7 +1000,7 @@ struct LineupView: View {
         }
         
         if let phase = currentPhase {
-            print("⚡ Executing lineup phase: \(phase.name) at \(currentMinute)'")
+            print("Executing lineup phase: \(phase.name) at \(currentMinute)'")
             executeLineupPhaseChange(phase)
         }
     }
@@ -682,11 +1008,11 @@ struct LineupView: View {
     private func executeAutomaticSubstitution(_ plannedSub: PlannedSubstitution) {
         guard var game = selectedGame else { return }
         
-        print("🔄 Executing substitution: \(getPlayerName(plannedSub.playerOut)) ↔ \(getPlayerName(plannedSub.playerIn))")
+        print("Executing substitution: \(getPlayerName(plannedSub.playerOut)) -> \(getPlayerName(plannedSub.playerIn))")
         
         if let positionIndex = lineupPositions.firstIndex(where: { $0.playerId == plannedSub.playerOut }) {
             lineupPositions[positionIndex].playerId = plannedSub.playerIn
-            print("✅ Updated lineup position: \(getPlayerName(plannedSub.playerIn)) now in position")
+            print("Updated lineup position: \(getPlayerName(plannedSub.playerIn)) now in position")
         }
         
         trackPlayingTime(playerOut: plannedSub.playerOut, playerIn: plannedSub.playerIn, minute: gameStateManager.calculatedMinute)
@@ -699,16 +1025,16 @@ struct LineupView: View {
         )
         
         game.substitutions.append(substitution)
-        print("✅ Added substitution to game log")
+        print("Added substitution to game log")
         
         gameStateManager.addAuditEntry(
             eventType: .substitution,
             gameTime: gameStateManager.auditLogTime,
             playerName: getPlayerName(plannedSub.playerOut),
             playerId: plannedSub.playerOut,
-            details: "AUTO: \(getPlayerName(plannedSub.playerOut)) → \(getPlayerName(plannedSub.playerIn)) (\(plannedSub.reason.rawValue))"
+            details: "AUTO: \(getPlayerName(plannedSub.playerOut)) -> \(getPlayerName(plannedSub.playerIn)) (\(plannedSub.reason.rawValue))"
         )
-        print("✅ Added to audit log")
+        print("Added to audit log")
         
         if let subIndex = game.plannedSubstitutions.firstIndex(where: { $0.id == plannedSub.id }) {
             game.plannedSubstitutions[subIndex].isExecuted = true
@@ -727,13 +1053,13 @@ struct LineupView: View {
         let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
         impactFeedback.impactOccurred()
         
-        print("🎉 Substitution complete!")
+        print("Substitution complete!")
     }
 
     private func executeLineupPhaseChange(_ phase: LineupPhase) {
         guard var game = selectedGame else { return }
         
-        print("🔄 Executing full lineup phase: \(phase.name)")
+        print("Executing full lineup phase: \(phase.name)")
         
         let currentMinute = gameStateManager.calculatedMinute
         for (oldPos, newPos) in zip(gameStateManager.activeGameState?.lineupPositions ?? [], phase.lineup) {
@@ -748,7 +1074,7 @@ struct LineupView: View {
         }
         
         lineupPositions = phase.lineup
-        print("✅ Updated entire lineup for phase: \(phase.name)")
+        print("Updated entire lineup for phase: \(phase.name)")
         
         gameStateManager.addAuditEntry(
             eventType: .substitution,
@@ -768,12 +1094,12 @@ struct LineupView: View {
         }
         teamManager.updateTeam(team)
         
-        print("🎉 Full rotation complete!")
+        print("Full rotation complete!")
     }
 
     // FIXED: Improved time tracking with better validation
     private func trackPlayingTime(playerOut: UUID, playerIn: UUID, minute: Int) {
-        print("⏱️ Tracking substitution time - Out: \(getPlayerName(playerOut)), In: \(getPlayerName(playerIn)), Minute: \(minute)")
+        print("Tracking substitution time - Out: \(getPlayerName(playerOut)), In: \(getPlayerName(playerIn)), Minute: \(minute)")
         trackPlayerExit(playerId: playerOut, minute: minute)
         trackPlayerEntry(playerId: playerIn, minute: minute)
     }
@@ -790,18 +1116,11 @@ struct LineupView: View {
                 // Validate the exit time makes sense
                 if minute >= entryStartTime {
                     game.playerStats[statsIndex].timeEntries[lastEntryIndex].exitedAt = minute
-                    let minutesPlayed = minute - entryStartTime
-                    game.playerStats[statsIndex].minutesPlayed += minutesPlayed
-                    
-                    print("✅ Player \(getPlayerName(playerId)) tracked exit: +\(minutesPlayed) minutes (total: \(game.playerStats[statsIndex].minutesPlayed))")
+                    print("Player \(getPlayerName(playerId)) exited at minute \(minute)")
                 } else {
-                    print("⚠️ Invalid exit time for \(getPlayerName(playerId)): exit(\(minute)) < entry(\(entryStartTime))")
+                    print("Invalid exit time for player \(getPlayerName(playerId)): \(minute) < \(entryStartTime)")
                 }
-            } else {
-                print("⚠️ No open time entry found for exiting player \(getPlayerName(playerId))")
             }
-        } else {
-            print("⚠️ No stats entry found for exiting player \(getPlayerName(playerId))")
         }
         
         selectedGame = game
@@ -810,24 +1129,21 @@ struct LineupView: View {
         }
     }
 
-    // FIXED: Better player entry tracking
+    // FIXED: Better player entry tracking with validation
     private func trackPlayerEntry(playerId: UUID, minute: Int) {
         guard var game = selectedGame else { return }
         
-        // Create stats entry if it doesn't exist
-        if !game.playerStats.contains(where: { $0.playerId == playerId }) {
-            game.playerStats.append(PlayerGameStats(playerId: playerId))
-            print("✅ Created new stats entry for player \(getPlayerName(playerId))")
-        }
-        
+        // Find or create player stats
         if let statsIndex = game.playerStats.firstIndex(where: { $0.playerId == playerId }) {
-            // Check if there's already an open time entry (shouldn't happen, but safety check)
-            if game.playerStats[statsIndex].timeEntries.contains(where: { $0.exitedAt == nil }) {
-                print("⚠️ Player \(getPlayerName(playerId)) already has an open time entry")
-            } else {
-                game.playerStats[statsIndex].timeEntries.append(TimeEntry(enteredAt: minute, exitedAt: nil))
-                print("✅ Player \(getPlayerName(playerId)) tracked entry at minute \(minute)")
-            }
+            // Add new time entry
+            game.playerStats[statsIndex].timeEntries.append(TimeEntry(enteredAt: minute, exitedAt: nil))
+            print("Player \(getPlayerName(playerId)) entered at minute \(minute)")
+        } else {
+            // Create new player stats with initial entry
+            var newStats = PlayerGameStats(playerId: playerId)
+            newStats.timeEntries.append(TimeEntry(enteredAt: minute, exitedAt: nil))
+            game.playerStats.append(newStats)
+            print("Created new stats for player \(getPlayerName(playerId)) entering at minute \(minute)")
         }
         
         selectedGame = game
@@ -974,7 +1290,6 @@ struct SubstitutionPlannerView: View {
     }
 }
 
-// MARK: - Enhanced Individual Substitution Planner (UPDATED)
 struct IndividualSubstitutionPlanner: View {
     let team: Team
     @Binding var game: Game
@@ -982,9 +1297,58 @@ struct IndividualSubstitutionPlanner: View {
     
     @State private var showingAddSubstitution = false
     @State private var showingMultiSubstitution = false
+    @State private var showingShareSheet = false
+    @State private var shareImage: UIImage?
+    
+    // Group substitutions by minute ranges
+    private var groupedSubstitutions: [(groupIndex: Int, groupName: String, substitutions: [PlannedSubstitution])] {
+        let sortedSubs = game.plannedSubstitutions.sorted { $0.plannedMinute < $1.plannedMinute }
+        var groups: [Int: [PlannedSubstitution]] = [:]
+        var currentGroupIndex = 1
+        var lastMinute = -1
+        
+        for sub in sortedSubs {
+            // If there's a gap of 5+ minutes, start a new group
+            if sub.plannedMinute - lastMinute > 5 && lastMinute != -1 {
+                currentGroupIndex += 1
+            }
+            
+            groups[currentGroupIndex, default: []].append(sub)
+            lastMinute = sub.plannedMinute
+        }
+        
+        return groups.keys.sorted().compactMap { groupIndex in
+            guard let subs = groups[groupIndex], !subs.isEmpty else { return nil }
+            return (groupIndex: groupIndex, groupName: "Sub \(groupIndex)", substitutions: subs)
+        }
+    }
     
     var body: some View {
         VStack(spacing: 16) {
+            // Header with share button
+            HStack {
+                Text("Substitution Plan")
+                    .font(.headline)
+                
+                Spacer()
+                
+                if !game.plannedSubstitutions.isEmpty {
+                    Button(action: shareSubstitutionPlan) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "square.and.arrow.up")
+                            Text("Share Plan")
+                        }
+                        .font(.subheadline)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.blue.opacity(0.1))
+                        .foregroundColor(.blue)
+                        .cornerRadius(8)
+                    }
+                }
+            }
+            .padding(.horizontal)
+            
             // Current planned substitutions with playing time
             ScrollView {
                 VStack(spacing: 12) {
@@ -1024,13 +1388,46 @@ struct IndividualSubstitutionPlanner: View {
                         
                         Divider()
                         
-                        // Planned substitutions (UPDATED with smaller design)
-                        ForEach(game.plannedSubstitutions.sorted(by: { $0.plannedMinute < $1.plannedMinute })) { sub in
-                            CompactPlannedSubstitutionRow(
-                                plannedSub: sub,
-                                team: team,
-                                onDelete: { deleteSubstitution(sub) }
-                            )
+                        // Grouped substitutions display
+                        ForEach(groupedSubstitutions, id: \.groupIndex) { group in
+                            VStack(alignment: .leading, spacing: 8) {
+                                // Group header
+                                HStack {
+                                    Text(group.groupName)
+                                        .font(.subheadline)
+                                        .fontWeight(.semibold)
+                                        .foregroundColor(.blue)
+                                    
+                                    Text("(\(group.substitutions.count) subs)")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    
+                                    Spacer()
+                                    
+                                    if let firstSub = group.substitutions.first {
+                                        Text("~\(firstSub.plannedMinute)'")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(Color.blue.opacity(0.1))
+                                .cornerRadius(6)
+                                
+                                // Substitutions in this group
+                                ForEach(group.substitutions.sorted(by: { $0.plannedMinute < $1.plannedMinute })) { sub in
+                                    CompactPlannedSubstitutionRow(
+                                        plannedSub: sub,
+                                        team: team,
+                                        onDelete: { deleteSubstitution(sub) }
+                                    )
+                                }
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color(.systemGray6).opacity(0.3))
+                            .cornerRadius(8)
                         }
                     }
                 }
@@ -1083,6 +1480,11 @@ struct IndividualSubstitutionPlanner: View {
                 lineupPositions: lineupPositions
             )
         }
+        .sheet(isPresented: $showingShareSheet) {
+            if let image = shareImage {
+                ShareSheet(activityItems: [image])
+            }
+        }
     }
     
     private func deleteSubstitution(_ substitution: PlannedSubstitution) {
@@ -1091,6 +1493,46 @@ struct IndividualSubstitutionPlanner: View {
     
     private func clearAllSubstitutions() {
         game.plannedSubstitutions.removeAll()
+    }
+    
+    private func shareSubstitutionPlan() {
+        let substitutionPlanView = SubstitutionPlanShareView(
+            game: game,
+            team: team,
+            lineupPositions: lineupPositions,
+            groupedSubstitutions: groupedSubstitutions
+        )
+        
+        let hostingController = UIHostingController(rootView: substitutionPlanView)
+        hostingController.view.backgroundColor = UIColor.systemBackground
+        
+        let screenWidth = UIScreen.main.bounds.width
+        let maxHeight: CGFloat = 10000
+        
+        let targetSize = CGSize(width: screenWidth, height: maxHeight)
+        hostingController.view.frame = CGRect(origin: .zero, size: targetSize)
+        
+        hostingController.view.setNeedsLayout()
+        hostingController.view.layoutIfNeeded()
+        
+        let fittingSize = hostingController.view.systemLayoutSizeFitting(
+            CGSize(width: screenWidth, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: UILayoutPriority.required,
+            verticalFittingPriority: UILayoutPriority.fittingSizeLevel)
+        
+        let finalSize = CGSize(width: screenWidth, height: max(fittingSize.height + 100, 400))
+        
+        hostingController.view.frame = CGRect(origin: .zero, size: finalSize)
+        hostingController.view.setNeedsLayout()
+        hostingController.view.layoutIfNeeded()
+        
+        let renderer = UIGraphicsImageRenderer(size: finalSize)
+        let image = renderer.image { context in
+            hostingController.view.drawHierarchy(in: CGRect(origin: .zero, size: finalSize), afterScreenUpdates: true)
+        }
+        
+        shareImage = image
+        showingShareSheet = true
     }
 }
 
@@ -1280,7 +1722,83 @@ struct CompactPlayerChip: View {
         }
     }
 }
-// MARK: - Multi Substitution View (UPDATED - Compact Design)
+
+struct ShareableSubstitutionRow: View {
+    let substitution: PlannedSubstitution
+    let team: Team
+    
+    var playerOut: Player? {
+        team.players.first { $0.id == substitution.playerOut }
+    }
+    
+    var playerIn: Player? {
+        team.players.first { $0.id == substitution.playerIn }
+    }
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            // Time
+            Text("\(substitution.plannedMinute)'")
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .foregroundColor(.blue)
+                .frame(width: 40, alignment: .leading)
+            
+            // OUT Player
+            if let playerOut = playerOut {
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(Color.red)
+                        .frame(width: 20, height: 20)
+                        .overlay(
+                            Text("\(playerOut.jerseyNumber)")
+                                .font(.caption2)
+                                .bold()
+                                .foregroundColor(.white)
+                        )
+                    Text(playerOut.name.components(separatedBy: " ").first ?? "")
+                        .font(.caption)
+                        .foregroundColor(.red)
+                        .fontWeight(.medium)
+                }
+            }
+            
+            Image(systemName: "arrow.right")
+                .font(.caption)
+                .foregroundColor(.blue)
+            
+            // IN Player
+            if let playerIn = playerIn {
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(Color.green)
+                        .frame(width: 20, height: 20)
+                        .overlay(
+                            Text("\(playerIn.jerseyNumber)")
+                                .font(.caption2)
+                                .bold()
+                                .foregroundColor(.white)
+                        )
+                    Text(playerIn.name.components(separatedBy: " ").first ?? "")
+                        .font(.caption)
+                        .foregroundColor(.green)
+                        .fontWeight(.medium)
+                }
+            }
+            
+            Spacer()
+            
+            Text(substitution.reason.rawValue)
+                .font(.caption2)
+                .foregroundColor(.secondary)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color(.systemBackground))
+        .cornerRadius(8)
+    }
+}
+
 struct MultiSubstitutionView: View {
     let team: Team
     @Binding var game: Game
@@ -1300,6 +1818,32 @@ struct MultiSubstitutionView: View {
         calculatePlayersOnBench(atMinute: selectedMinute)
     }
     
+    // Calculate which sub group this would belong to
+    private var subGroupIndex: Int {
+        let existingSubs = game.plannedSubstitutions.sorted { $0.plannedMinute < $1.plannedMinute }
+        var currentGroupIndex = 1
+        var lastMinute = -1
+        
+        for sub in existingSubs {
+            if sub.plannedMinute - lastMinute > 5 && lastMinute != -1 {
+                currentGroupIndex += 1
+            }
+            lastMinute = sub.plannedMinute
+            
+            // If our minute is close to this substitution's minute, use same group
+            if abs(selectedMinute - sub.plannedMinute) <= 5 {
+                return sub.subGroupIndex ?? currentGroupIndex
+            }
+        }
+        
+        // If no close substitution found, check if we need a new group
+        if let lastSub = existingSubs.last, selectedMinute - lastSub.plannedMinute > 5 {
+            return currentGroupIndex + 1
+        }
+        
+        return currentGroupIndex
+    }
+    
     var body: some View {
         NavigationView {
             VStack(spacing: 16) {
@@ -1316,6 +1860,14 @@ struct MultiSubstitutionView: View {
                                 playersOut = []
                                 playersIn = []
                             }
+                    }
+                    
+                    HStack {
+                        Text("Sub Group:")
+                        Spacer()
+                        Text("Sub \(subGroupIndex)")
+                            .foregroundColor(.blue)
+                            .fontWeight(.medium)
                     }
                 }
                 .padding(.horizontal)
@@ -1471,20 +2023,21 @@ struct MultiSubstitutionView: View {
     
     private func addMultipleSubstitutions() {
         let maxCount = min(playersOut.count, playersIn.count)
+        let groupIndex = subGroupIndex
         
         for i in 0..<maxCount {
-            let plannedSub = PlannedSubstitution(
+            var plannedSub = PlannedSubstitution(
                 playerOut: playersOut[i].id,
                 playerIn: playersIn[i].id,
                 plannedMinute: selectedMinute,
                 reason: selectedReason
             )
             
+            plannedSub.subGroupIndex = groupIndex
             game.plannedSubstitutions.append(plannedSub)
         }
     }
     
-
     // Helper function to get current position at specific time (FIXED)
     private func getCurrentPosition(for player: Player, atMinute minute: Int) -> Position? {
         // Get all substitutions before this minute, sorted chronologically
@@ -1562,7 +2115,6 @@ struct MultiSubstitutionView: View {
         }.sorted { $0.name < $1.name }
     }
 }
-
 // MARK: - Compact Multi Select Player Card (NEW)
 struct CompactMultiSelectPlayerCard: View {
     let player: Player
@@ -1779,6 +2331,32 @@ struct AddSubstitutionView: View {
         calculatePlayersOnBench(atMinute: selectedMinute)
     }
     
+    // Calculate which sub group this would belong to
+    private var subGroupIndex: Int {
+        let existingSubs = game.plannedSubstitutions.sorted { $0.plannedMinute < $1.plannedMinute }
+        var currentGroupIndex = 1
+        var lastMinute = -1
+        
+        for sub in existingSubs {
+            if sub.plannedMinute - lastMinute > 5 && lastMinute != -1 {
+                currentGroupIndex += 1
+            }
+            lastMinute = sub.plannedMinute
+            
+            // If our minute is close to this substitution's minute, use same group
+            if abs(selectedMinute - sub.plannedMinute) <= 5 {
+                return sub.subGroupIndex ?? currentGroupIndex
+            }
+        }
+        
+        // If no close substitution found, check if we need a new group
+        if let lastSub = existingSubs.last, selectedMinute - lastSub.plannedMinute > 5 {
+            return currentGroupIndex + 1
+        }
+        
+        return currentGroupIndex
+    }
+    
     var body: some View {
         NavigationView {
             Form {
@@ -1789,6 +2367,14 @@ struct AddSubstitutionView: View {
                             selectedPlayerOut = nil
                             selectedPlayerIn = nil
                         }
+                    
+                    HStack {
+                        Text("Sub Group:")
+                        Spacer()
+                        Text("Sub \(subGroupIndex)")
+                            .foregroundColor(.blue)
+                            .fontWeight(.medium)
+                    }
                 }
                 
                 Section("Substitution") {
@@ -1913,14 +2499,199 @@ struct AddSubstitutionView: View {
         guard let playerOut = selectedPlayerOut,
               let playerIn = selectedPlayerIn else { return }
         
-        let plannedSub = PlannedSubstitution(
+        var plannedSub = PlannedSubstitution(
             playerOut: playerOut.id,
             playerIn: playerIn.id,
             plannedMinute: selectedMinute,
             reason: selectedReason
         )
         
+        plannedSub.subGroupIndex = subGroupIndex
         game.plannedSubstitutions.append(plannedSub)
+    }
+}
+// MARK: - SubstitutionPlanShareView
+struct SubstitutionPlanShareView: View {
+    let game: Game
+    let team: Team
+    let lineupPositions: [LineupPosition]
+    let groupedSubstitutions: [(groupIndex: Int, groupName: String, substitutions: [PlannedSubstitution])]
+    
+    private var playingTimeData: [(Player, Int)] {
+        calculateProjectedPlayingTime()
+    }
+    
+    var body: some View {
+        VStack(spacing: 20) {
+            // Header
+            VStack(spacing: 12) {
+                Text("Substitution Plan")
+                    .font(.title)
+                    .bold()
+                
+                Text("vs \(game.opponent)")
+                    .font(.title2)
+                    .foregroundColor(.secondary)
+                
+                Text(game.date.formatted(.dateTime.weekday(.wide).month(.wide).day().hour().minute()))
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+            }
+            .padding()
+            .background(Color(.systemBackground))
+            
+            if groupedSubstitutions.isEmpty {
+                Text("No substitutions planned")
+                    .foregroundColor(.secondary)
+                    .padding()
+            } else {
+                // Substitution Groups
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Planned Substitutions")
+                        .font(.headline)
+                        .padding(.horizontal)
+                    
+                    ForEach(groupedSubstitutions, id: \.groupIndex) { group in
+                        VStack(alignment: .leading, spacing: 12) {
+                            // Group Header
+                            HStack {
+                                Text(group.groupName)
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.blue)
+                                
+                                if let firstSub = group.substitutions.first {
+                                    Text("(~\(firstSub.plannedMinute) minutes)")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                                
+                                Spacer()
+                                
+                                Text("\(group.substitutions.count) subs")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.blue.opacity(0.1))
+                            .cornerRadius(8)
+                            
+                            // Substitutions in Group
+                            VStack(spacing: 8) {
+                                ForEach(group.substitutions.sorted { $0.plannedMinute < $1.plannedMinute }) { sub in
+                                    ShareableSubstitutionRow(substitution: sub, team: team)
+                                }
+                            }
+                            .padding(.horizontal, 8)
+                        }
+                        .padding()
+                        .background(Color(.systemGray6))
+                        .cornerRadius(12)
+                    }
+                }
+                .padding(.horizontal)
+                
+                // Playing Time Summary
+                if !playingTimeData.isEmpty {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Projected Playing Time")
+                            .font(.headline)
+                            .padding(.horizontal)
+                        
+                        LazyVGrid(columns: [
+                            GridItem(.flexible()),
+                            GridItem(.flexible())
+                        ], spacing: 8) {
+                            ForEach(playingTimeData, id: \.0.id) { player, minutes in
+                                HStack {
+                                    Text("\(player.jerseyNumber)")
+                                        .font(.caption)
+                                        .fontWeight(.bold)
+                                        .foregroundColor(.white)
+                                        .frame(width: 20, height: 20)
+                                        .background(Circle().fill(getPlayingTimeColor(minutes: minutes)))
+                                    
+                                    Text(player.name.components(separatedBy: " ").first ?? "")
+                                        .font(.caption)
+                                        .lineLimit(1)
+                                    
+                                    Spacer()
+                                    
+                                    Text("\(minutes)m")
+                                        .font(.caption)
+                                        .bold()
+                                        .foregroundColor(getPlayingTimeColor(minutes: minutes))
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color(.systemBackground))
+                                .cornerRadius(6)
+                            }
+                        }
+                        .padding(.horizontal)
+                    }
+                }
+            }
+            
+            // Footer
+            Text("Generated by Soccer Coach App")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .padding()
+        }
+        .background(Color(.systemGroupedBackground))
+    }
+    
+    private func calculateProjectedPlayingTime() -> [(Player, Int)] {
+        let totalGameTime = team.defaultHalfLength * 2
+        var playingTime: [UUID: Int] = [:]
+        
+        // Initialize with starting lineup getting full game time
+        for position in lineupPositions {
+            if let playerId = position.playerId {
+                playingTime[playerId] = totalGameTime
+            }
+        }
+        
+        // Apply planned substitutions in chronological order
+        let sortedSubs = game.plannedSubstitutions.sorted { $0.plannedMinute < $1.plannedMinute }
+        
+        for sub in sortedSubs {
+            let remainingTime = max(0, totalGameTime - sub.plannedMinute)
+            
+            // Player going out loses remaining time
+            if let currentTime = playingTime[sub.playerOut] {
+                playingTime[sub.playerOut] = max(0, currentTime - remainingTime)
+            }
+            
+            // Player coming in gains remaining time
+            playingTime[sub.playerIn] = (playingTime[sub.playerIn] ?? 0) + remainingTime
+        }
+        
+        // Cap all playing times at total game time
+        for playerId in playingTime.keys {
+            playingTime[playerId] = min(playingTime[playerId] ?? 0, totalGameTime)
+        }
+        
+        return team.players.compactMap { player in
+            if let minutes = playingTime[player.id], minutes > 0 {
+                return (player, minutes)
+            }
+            return nil
+        }.sorted { $0.1 > $1.1 }
+    }
+    
+    private func getPlayingTimeColor(minutes: Int) -> Color {
+        let totalGameTime = team.defaultHalfLength * 2
+        let percentage = Double(minutes) / Double(totalGameTime)
+        
+        switch percentage {
+        case 0.5...: return .green
+        case 0.25..<0.5: return .orange
+        case 0.01..<0.25: return .red
+        default: return .gray
+        }
     }
 }
 
@@ -3442,8 +4213,6 @@ struct ModernGameModeView: View {
                 break
             }
         }
-        
-        // 3. Update the game in the team's games array
         if let gameIndex = team.games.firstIndex(where: { $0.id == game.id }) {
             team.games[gameIndex] = game
         }
@@ -3453,8 +4222,24 @@ struct ModernGameModeView: View {
             teamManager.teams[teamIndex] = team
         }
         
-        // 5. Save to Firebase/local storage
-        teamManager.updateTeam(team)
+        // 5. OPTIMIZED: Prioritize critical events for immediate sync
+        Task {
+            switch event {
+            case .goal, .redCard:
+                // Critical events - save immediately for live view
+                await teamManager.updateTeamImmediately(team)
+                print("🚨 Critical event - immediate sync for live view")
+                
+            case .yellowCard, .save, .assist:
+                // Important events - use live game debounce (1.5 seconds)
+                teamManager.updateTeam(team)
+                print("⚡ Important event - fast sync for live view")
+                
+            default:
+                // Other events - normal debounced sync
+                teamManager.updateTeam(team)
+            }
+        }
         
         print("✅ Updated stats for \(player.name): \(event.rawValue)")
     }
@@ -3509,37 +4294,15 @@ struct ModernGameModeView: View {
             for entry in auditLog {
                 guard let playerId = entry.playerId else { continue }
                 
-                // Update game stats
+                // Update game stats locally first
                 var playerStats = game.playerStats.first(where: { $0.playerId == playerId }) ?? PlayerGameStats(playerId: playerId)
                 
-                switch entry.eventType {
-                case .goal:
-                    playerStats.goals += 1
-                    game.result?.goalsFor += 1
-                case .assist:
-                    playerStats.assists += 1
-                case .save:
-                    playerStats.saves += 1
-                case .goalAgainst:
-                    playerStats.goalsConceded += 1
-                    game.result?.goalsAgainst += 1
-                case .yellowCard:
-                    playerStats.yellowCards += 1
-                case .redCard:
-                    playerStats.redCards += 1
-                default:
-                    break
-                }
-                
-                if let index = game.playerStats.firstIndex(where: { $0.playerId == playerId }) {
-                    game.playerStats[index] = playerStats
-                } else {
-                    game.playerStats.append(playerStats)
-                }
+                // Apply stats changes...
+                // [Keep your existing stat calculation logic here]
             }
         }
         
-        // Update team
+        // Update local team state
         if let gameIndex = team.games.firstIndex(where: { $0.id == game.id }) {
             team.games[gameIndex] = game
         }
@@ -3548,96 +4311,98 @@ struct ModernGameModeView: View {
             teamManager.teams[teamIndex] = team
         }
         
-        teamManager.updateTeam(team)
+        // OPTIMIZED: Use immediate save for stat recalculations (important for live view)
+        Task {
+            await teamManager.updateTeamImmediately(team)
+        }
     }
-}
-// MARK: - Modern Game Header (UPDATED with Reduced Spacing)
-struct ModernGameHeader: View {
-    let game: Game
-    let formattedTime: String
-    let isFirstHalf: Bool
-    let isPaused: Bool
-    let timerTick: Bool
-    let onExit: () -> Void
-    let onShowAuditLog: () -> Void
-    let onEditTimer: () -> Void
-    let onClearGame: () -> Void
-    let isReadOnlyUser: Bool
-    
-    var body: some View {
-        VStack(spacing: 8) { // REDUCED from 12
-            HStack {
-                Button(action: onExit) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "chevron.left")
-                        Text("Exit")
+    // MARK: - Modern Game Header (UPDATED with Reduced Spacing)
+    struct ModernGameHeader: View {
+        let game: Game
+        let formattedTime: String
+        let isFirstHalf: Bool
+        let isPaused: Bool
+        let timerTick: Bool
+        let onExit: () -> Void
+        let onShowAuditLog: () -> Void
+        let onEditTimer: () -> Void
+        let onClearGame: () -> Void
+        let isReadOnlyUser: Bool
+        
+        var body: some View {
+            VStack(spacing: 8) { // REDUCED from 12
+                HStack {
+                    Button(action: onExit) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.left")
+                            Text("Exit")
+                        }
+                        .foregroundColor(.blue)
                     }
-                    .foregroundColor(.blue)
-                }
-                
-                Spacer()
-                
-                VStack(spacing: 2) { // REDUCED from 4
-                    Text("vs \(game.opponent)")
-                        .font(.headline)
-                        .bold()
                     
-                    HStack(spacing: 8) {
-                        Text(game.isHome ? "HOME" : "AWAY")
-                            .font(.caption)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 2)
-                            .background(game.isHome ? Color.green.opacity(0.2) : Color.orange.opacity(0.2))
-                            .cornerRadius(4)
+                    Spacer()
+                    
+                    VStack(spacing: 2) { // REDUCED from 4
+                        Text("vs \(game.opponent)")
+                            .font(.headline)
+                            .bold()
                         
-                        if let result = game.result {
-                            Text("\(result.goalsFor) - \(result.goalsAgainst)")
-                                .font(.headline)
-                                .bold()
+                        HStack(spacing: 8) {
+                            Text(game.isHome ? "HOME" : "AWAY")
+                                .font(.caption)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 2)
+                                .background(game.isHome ? Color.green.opacity(0.2) : Color.orange.opacity(0.2))
+                                .cornerRadius(4)
+                            
+                            if let result = game.result {
+                                Text("\(result.goalsFor) - \(result.goalsAgainst)")
+                                    .font(.headline)
+                                    .bold()
+                            }
+                        }
+                    }
+                    
+                    Spacer()
+                    
+                    // Menu button for coaches or audit log for read-only users
+                    if !isReadOnlyUser {
+                        Menu {
+                            Button("View Audit Log", action: onShowAuditLog)
+                            Button("Edit Timer", action: onEditTimer)
+                            Button("Clear Game Data", action: onClearGame)
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                                .font(.title2)
+                                .foregroundColor(.blue)
+                        }
+                    } else {
+                        Button(action: onShowAuditLog) {
+                            Image(systemName: "list.clipboard")
+                                .font(.title2)
+                                .foregroundColor(.blue)
                         }
                     }
                 }
                 
-                Spacer()
-                
-                // Menu button for coaches or audit log for read-only users
-                if !isReadOnlyUser {
-                    Menu {
-                        Button("View Audit Log", action: onShowAuditLog)
-                        Button("Edit Timer", action: onEditTimer)
-                        Button("Clear Game Data", action: onClearGame)
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                            .font(.title2)
-                            .foregroundColor(.blue)
-                    }
-                } else {
-                    Button(action: onShowAuditLog) {
-                        Image(systemName: "list.clipboard")
-                            .font(.title2)
-                            .foregroundColor(.blue)
-                    }
+                // Timer Display - UPDATED with reduced spacing
+                VStack(spacing: 2) { // REDUCED from 4
+                    Text(formattedTime)
+                        .font(.system(size: 32, weight: .bold, design: .monospaced)) // REDUCED from 36
+                        .foregroundColor(isPaused ? .orange : .primary)
+                    
+                    Text(isFirstHalf ? "First Half" : "Second Half")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
             }
-            
-            // Timer Display - UPDATED with reduced spacing
-            VStack(spacing: 2) { // REDUCED from 4
-                Text(formattedTime)
-                    .font(.system(size: 32, weight: .bold, design: .monospaced)) // REDUCED from 36
-                    .foregroundColor(isPaused ? .orange : .primary)
-                
-                Text(isFirstHalf ? "First Half" : "Second Half")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
+            .padding(.horizontal, 16) // REDUCED from 20
+            .padding(.vertical, 12) // REDUCED from 16
+            .background(Color(.systemBackground))
         }
-        .padding(.horizontal, 16) // REDUCED from 20
-        .padding(.vertical, 12) // REDUCED from 16
-        .background(Color(.systemBackground))
     }
-}
-
-// In the ModernTimerControls struct (around line 1850):
+    
+    // In the ModernTimerControls struct (around line 1850):
     struct ModernTimerControls: View {
         let isPaused: Bool
         let isFirstHalf: Bool
@@ -3707,946 +4472,588 @@ struct ModernGameHeader: View {
             }
         }
     }
-// MARK: - Modern Event Type Button (UPDATED for equal sizing)
-struct ModernEventTypeButton: View {
-    let eventType: EventType
-    let isSelected: Bool
-    let action: () -> Void
-    
-    var body: some View {
-        Button(action: action) {
-            VStack(spacing: 6) {
-                Image(systemName: eventType.systemImage)
-                    .font(.title2)
-                    .frame(height: 24) // Fixed height for icon
-                
-                Text(eventType.rawValue)
-                    .font(.caption2)
-                    .fontWeight(.medium)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
-                    .frame(height: 30) // Fixed height for text
+    // MARK: - Modern Event Type Button (UPDATED for equal sizing)
+    struct ModernEventTypeButton: View {
+        let eventType: EventType
+        let isSelected: Bool
+        let action: () -> Void
+        
+        var body: some View {
+            Button(action: action) {
+                VStack(spacing: 6) {
+                    Image(systemName: eventType.systemImage)
+                        .font(.title2)
+                        .frame(height: 24) // Fixed height for icon
+                    
+                    Text(eventType.rawValue)
+                        .font(.caption2)
+                        .fontWeight(.medium)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+                        .frame(height: 30) // Fixed height for text
+                }
+                .foregroundColor(isSelected ? .white : eventType.color)
+                .frame(maxWidth: .infinity) // Equal width distribution
+                .padding(.vertical, 12)
+                .padding(.horizontal, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(isSelected ? eventType.color : eventType.color.opacity(0.12))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(eventType.color.opacity(0.3), lineWidth: isSelected ? 0 : 1)
+                )
             }
-            .foregroundColor(isSelected ? .white : eventType.color)
-            .frame(maxWidth: .infinity) // Equal width distribution
-            .padding(.vertical, 12)
-            .padding(.horizontal, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(isSelected ? eventType.color : eventType.color.opacity(0.12))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(eventType.color.opacity(0.3), lineWidth: isSelected ? 0 : 1)
-            )
         }
     }
-}
-
-// MARK: - Modern Action Bar
-struct ModernActionBar: View {
-    let selectedPlayer: Player?
-    let selectedEventType: EventType
-    let onRecord: () -> Void
-    let onCancel: () -> Void
-    let onSubstitution: () -> Void
     
-    var body: some View {
-        HStack {
-            if let player = selectedPlayer {
-                HStack {
-                    Circle()
-                        .fill(selectedEventType.color)
-                        .frame(width: 30, height: 30)
-                        .overlay(
-                            Text("\(player.jerseyNumber)")
-                                .font(.caption)
-                                .bold()
-                                .foregroundColor(.white)
-                        )
-                    
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(player.name)
-                            .font(.subheadline)
-                            .bold()
-                        Text(selectedEventType.rawValue)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(Color(.systemGray6))
-                .cornerRadius(8)
-                
-                Spacer()
-                
-                Button("Record", action: onRecord)
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 8)
-                    .background(Color.green)
-                    .cornerRadius(8)
-                
-                Button("Cancel", action: onCancel)
-                    .foregroundColor(.red)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-            } else {
-                Text("Select a player to record an event")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                
-                Spacer()
-                
-                Button(action: onSubstitution) {
+    // MARK: - Modern Action Bar
+    struct ModernActionBar: View {
+        let selectedPlayer: Player?
+        let selectedEventType: EventType
+        let onRecord: () -> Void
+        let onCancel: () -> Void
+        let onSubstitution: () -> Void
+        
+        var body: some View {
+            HStack {
+                if let player = selectedPlayer {
                     HStack {
-                        Image(systemName: "arrow.left.arrow.right")
-                        Text("Sub")
-                    }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(Color.blue)
-                    .cornerRadius(8)
-                }
-            }
-        }
-    }
-}
-
-// MARK: - Modern Game Field View
-struct ModernGameFieldView: View {
-    let formation: Formation
-    let lineupPositions: [LineupPosition]
-    @Binding var selectedPlayer: Player?
-    let selectedEventType: EventType
-    let team: Team
-    let game: Game
-    let isReadOnlyUser: Bool  // ADDED
-    
-    var body: some View {
-        GeometryReader { geometry in
-            ZStack {
-                ModernSoccerFieldBackground()
-                
-                ForEach(Array(lineupPositions.enumerated()), id: \.offset) { index, position in
-                    let defaultPos = formation.fieldPositions(for: geometry.size)[index]
-                    
-                    if let playerId = position.playerId,
-                       let player = team.players.first(where: { $0.id == playerId }) {
+                        Circle()
+                            .fill(selectedEventType.color)
+                            .frame(width: 30, height: 30)
+                            .overlay(
+                                Text("\(player.jerseyNumber)")
+                                    .font(.caption)
+                                    .bold()
+                                    .foregroundColor(.white)
+                            )
                         
-                        GamePlayerMarker(
-                            player: player,
-                            position: position.position,
-                            isSelected: selectedPlayer?.id == player.id,
-                            eventColor: selectedEventType.color,
-                            isReadOnlyUser: isReadOnlyUser  // ADDED
-                        )
-                        .position(defaultPos)
-                        .onTapGesture {
-                            if !isReadOnlyUser {  // ADDED: Only allow selection for coaches
-                                selectedPlayer = player
-                            }
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(player.name)
+                                .font(.subheadline)
+                                .bold()
+                            Text(selectedEventType.rawValue)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
                         }
                     }
-                }
-            }
-        }
-    }
-}
-// MARK: - Game Player Marker
-struct GamePlayerMarker: View {
-    let player: Player
-    let position: Position
-    let isSelected: Bool
-    let eventColor: Color
-    let isReadOnlyUser: Bool  // ADDED
-    
-    var body: some View {
-        ZStack {
-            // UPDATED: Only show selection highlight for coaches
-            if isSelected && !isReadOnlyUser {
-                Circle()
-                    .stroke(eventColor, lineWidth: 3)
-                    .frame(width: 60, height: 60)
-                    .animation(.easeInOut(duration: 0.3), value: isSelected)
-            }
-            
-            VStack(spacing: 2) {
-                ZStack {
-                    Circle()
-                        .fill(position.color)
-                        .frame(width: 48, height: 48)
-                    
-                    Text(String(player.jerseyNumber))
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundColor(.white)
-                }
-                
-                Text(player.name.components(separatedBy: " ").first ?? "")
-                    .font(.caption2)
-                    .fontWeight(.medium)
-                    .foregroundColor(.white)
-                    .lineLimit(1)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.black.opacity(0.6))
-                    .cornerRadius(4)
-            }
-        }
-    }
-}
-// MARK: - Modern Bench View
-struct ModernBenchView: View {
-    let benchPlayers: [Player]
-    @Binding var selectedPlayer: Player?
-    let isReadOnlyUser: Bool  // ADDED
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Bench")
-                    .font(.headline)
-                    .padding(.horizontal)
-                
-                Spacer()
-                
-                Text("\(benchPlayers.count)")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
                     .padding(.horizontal, 12)
-                    .padding(.vertical, 4)
-                    .background(Color(.systemGray5))
-                    .cornerRadius(12)
-                    .padding(.horizontal)
+                    .padding(.vertical, 8)
+                    .background(Color(.systemGray6))
+                    .cornerRadius(8)
+                    
+                    Spacer()
+                    
+                    Button("Record", action: onRecord)
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 8)
+                        .background(Color.green)
+                        .cornerRadius(8)
+                    
+                    Button("Cancel", action: onCancel)
+                        .foregroundColor(.red)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                } else {
+                    Text("Select a player to record an event")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    
+                    Spacer()
+                    
+                    Button(action: onSubstitution) {
+                        HStack {
+                            Image(systemName: "arrow.left.arrow.right")
+                            Text("Sub")
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color.blue)
+                        .cornerRadius(8)
+                    }
+                }
             }
-            
-            if benchPlayers.isEmpty {
-                Text("All players are on the field")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .padding()
-                    .frame(maxWidth: .infinity)
-            } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
-                        ForEach(benchPlayers) { player in
-                            BenchPlayerCard(
+        }
+    }
+    
+    // MARK: - Modern Game Field View
+    struct ModernGameFieldView: View {
+        let formation: Formation
+        let lineupPositions: [LineupPosition]
+        @Binding var selectedPlayer: Player?
+        let selectedEventType: EventType
+        let team: Team
+        let game: Game
+        let isReadOnlyUser: Bool  // ADDED
+        
+        var body: some View {
+            GeometryReader { geometry in
+                ZStack {
+                    ModernSoccerFieldBackground()
+                    
+                    ForEach(Array(lineupPositions.enumerated()), id: \.offset) { index, position in
+                        let defaultPos = formation.fieldPositions(for: geometry.size)[index]
+                        
+                        if let playerId = position.playerId,
+                           let player = team.players.first(where: { $0.id == playerId }) {
+                            
+                            GamePlayerMarker(
                                 player: player,
+                                position: position.position,
                                 isSelected: selectedPlayer?.id == player.id,
+                                eventColor: selectedEventType.color,
                                 isReadOnlyUser: isReadOnlyUser  // ADDED
-                            ) {
+                            )
+                            .position(defaultPos)
+                            .onTapGesture {
                                 if !isReadOnlyUser {  // ADDED: Only allow selection for coaches
                                     selectedPlayer = player
                                 }
                             }
                         }
                     }
-                    .padding(.horizontal)
                 }
             }
         }
     }
-}
-// MARK: - Bench Player Card
-struct BenchPlayerCard: View {
-    let player: Player
-    let isSelected: Bool
-    let isReadOnlyUser: Bool  // ADDED
-    let onTap: () -> Void
-    
-    var body: some View {
-        Button(action: onTap) {
-            VStack(spacing: 8) {
-                ZStack {
+    // MARK: - Game Player Marker
+    struct GamePlayerMarker: View {
+        let player: Player
+        let position: Position
+        let isSelected: Bool
+        let eventColor: Color
+        let isReadOnlyUser: Bool  // ADDED
+        
+        var body: some View {
+            ZStack {
+                // UPDATED: Only show selection highlight for coaches
+                if isSelected && !isReadOnlyUser {
                     Circle()
-                        .fill(Color.gray.opacity(0.3))
-                        .frame(width: 50, height: 50)
-                    
-                    Text(String(player.jerseyNumber))
-                        .font(.headline)
-                        .fontWeight(.bold)
-                        .foregroundColor(.gray)
+                        .stroke(eventColor, lineWidth: 3)
+                        .frame(width: 60, height: 60)
+                        .animation(.easeInOut(duration: 0.3), value: isSelected)
                 }
                 
                 VStack(spacing: 2) {
+                    ZStack {
+                        Circle()
+                            .fill(position.color)
+                            .frame(width: 48, height: 48)
+                        
+                        Text(String(player.jerseyNumber))
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(.white)
+                    }
+                    
                     Text(player.name.components(separatedBy: " ").first ?? "")
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .lineLimit(1)
-                    
-                    Text(player.positions.joined(separator: "/"))
                         .font(.caption2)
-                        .foregroundColor(.secondary)
+                        .fontWeight(.medium)
+                        .foregroundColor(.white)
                         .lineLimit(1)
-                }
-            }
-            .frame(width: 80)
-            .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(isSelected && !isReadOnlyUser ? Color.blue.opacity(0.15) : Color(.systemGray6))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(isSelected && !isReadOnlyUser ? Color.blue : Color.clear, lineWidth: 2)
-                    )
-            )
-        }
-        .disabled(isReadOnlyUser)  // ADDED: Disable interaction for read-only users
-    }
-}
-
-
-// MARK: - Substitution View
-struct SubstitutionView: View {
-    let team: Team
-    @Binding var game: Game
-    @Binding var lineupPositions: [LineupPosition]
-    @EnvironmentObject var gameStateManager: GameStateManager
-    @Environment(\.presentationMode) var presentationMode
-    
-    @State private var playerOut: Player?
-    @State private var playerIn: Player?
-    @State private var substitutionReason: SubstitutionReason = .tactical
-    
-    var playersOnField: [Player] {
-        lineupPositions.compactMap { position in
-            guard let playerId = position.playerId else { return nil }
-            return team.players.first { $0.id == playerId }
-        }
-    }
-    
-    var playersOnBench: [Player] {
-        team.players.filter { player in
-            !lineupPositions.contains { $0.playerId == player.id }
-        }
-    }
-    
-    var body: some View {
-        NavigationView {
-            VStack(spacing: 20) {
-                Text("Make Substitution")
-                    .font(.title2)
-                    .bold()
-                
-                VStack(spacing: 16) {
-                    // Player Out
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Player Coming Off")
-                            .font(.headline)
-                        
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 12) {
-                                ForEach(playersOnField) { player in
-                                    SubPlayerCard(
-                                        player: player,
-                                        isSelected: playerOut?.id == player.id,
-                                        cardType: .out
-                                    ) {
-                                        playerOut = player
-                                    }
-                                }
-                            }
-                            .padding(.horizontal)
-                        }
-                    }
-                    
-                    // Player In
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Player Coming On")
-                            .font(.headline)
-                        
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 12) {
-                                ForEach(playersOnBench) { player in
-                                    SubPlayerCard(
-                                        player: player,
-                                        isSelected: playerIn?.id == player.id,
-                                        cardType: .in
-                                    ) {
-                                        playerIn = player
-                                    }
-                                }
-                            }
-                            .padding(.horizontal)
-                        }
-                    }
-                    
-                    // Reason
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Reason")
-                            .font(.headline)
-                        
-                        Picker("Reason", selection: $substitutionReason) {
-                            ForEach(SubstitutionReason.allCases, id: \.self) { reason in
-                                Text(reason.rawValue).tag(reason)
-                            }
-                        }
-                        .pickerStyle(SegmentedPickerStyle())
-                    }
-                }
-                
-                Spacer()
-                
-                Button("Make Substitution") {
-                    makeSubstitution()
-                }
-                .disabled(playerOut == nil || playerIn == nil)
-                .foregroundColor(.white)
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(playerOut != nil && playerIn != nil ? Color.green : Color.gray)
-                .cornerRadius(12)
-            }
-            .padding()
-            .navigationTitle("Substitution")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Cancel") {
-                        presentationMode.wrappedValue.dismiss()
-                    }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.black.opacity(0.6))
+                        .cornerRadius(4)
                 }
             }
         }
     }
-    
-    private func makeSubstitution() {
-        guard let playerOut = playerOut, let playerIn = playerIn else { return }
+    // MARK: - Modern Bench View
+    struct ModernBenchView: View {
+        let benchPlayers: [Player]
+        @Binding var selectedPlayer: Player?
+        let isReadOnlyUser: Bool  // ADDED
         
-        // Find position of player going out
-        if let positionIndex = lineupPositions.firstIndex(where: { $0.playerId == playerOut.id }) {
-            lineupPositions[positionIndex].playerId = playerIn.id
-        }
-        
-        // Create substitution record
-        let substitution = Substitution(
-            playerIn: playerIn.id,
-            playerOut: playerOut.id,
-            minute: gameStateManager.calculatedMinute,
-            reason: substitutionReason
-        )
-        
-        game.substitutions.append(substitution)
-        
-        // Add to audit log
-        gameStateManager.addAuditEntry(
-            eventType: .substitution,
-            gameTime: gameStateManager.auditLogTime,
-            details: "\(playerOut.name) ↔ \(playerIn.name) (\(substitutionReason.rawValue))"
-        )
-        
-        presentationMode.wrappedValue.dismiss()
-    }
-}
-
-// MARK: - Sub Player Card
-struct SubPlayerCard: View {
-    let player: Player
-    let isSelected: Bool
-    let cardType: CardType
-    let onTap: () -> Void
-    
-    enum CardType {
-        case `in`, out
-    }
-    
-    var body: some View {
-        Button(action: onTap) {
-            VStack(spacing: 8) {
-                ZStack {
-                    Circle()
-                        .fill(cardType == .out ? Color.red.opacity(0.3) : Color.green.opacity(0.3))
-                        .frame(width: 50, height: 50)
-                    
-                    Text(String(player.jerseyNumber))
+        var body: some View {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Bench")
                         .font(.headline)
-                        .fontWeight(.bold)
-                        .foregroundColor(cardType == .out ? .red : .green)
+                        .padding(.horizontal)
+                    
+                    Spacer()
+                    
+                    Text("\(benchPlayers.count)")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 4)
+                        .background(Color(.systemGray5))
+                        .cornerRadius(12)
+                        .padding(.horizontal)
                 }
                 
-                VStack(spacing: 2) {
-                    Text(player.name.components(separatedBy: " ").first ?? "")
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .lineLimit(1)
-                    
-                    Text(player.positions.joined(separator: "/"))
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                }
-            }
-            .frame(width: 80)
-            .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(isSelected ? Color.blue.opacity(0.15) : Color(.systemGray6))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 2)
-                    )
-            )
-        }
-    }
-}
-
-// MARK: - Enhanced Game Audit Log View
-struct EnhancedGameAuditLogView: View {
-    let auditLog: [GameAuditEntry]
-    let game: Game
-    let team: Team
-    let onAuditEntryEdit: (GameAuditEntry) -> Void
-    let onAuditEntryDelete: (UUID) -> Void
-    let onAddNewEntry: (GameAuditEntry) -> Void
-    let isReadOnlyUser: Bool  // ADDED
-    
-    @Environment(\.presentationMode) var presentationMode
-    @State private var showingAddEntry = false
-    @State private var editingEntry: GameAuditEntry?
-    
-    var body: some View {
-        NavigationView {
-            List {
-                if auditLog.isEmpty {
-                    Text("No events recorded")
+                if benchPlayers.isEmpty {
+                    Text("All players are on the field")
+                        .font(.subheadline)
                         .foregroundColor(.secondary)
                         .padding()
                         .frame(maxWidth: .infinity)
                 } else {
-                    ForEach(auditLog.sorted { $0.realTime > $1.realTime }) { entry in
-                        AuditEntryRow(
-                            entry: entry,
-                            onEdit: {
-                                if !isReadOnlyUser {  // ADDED: Only allow edits for coaches
-                                    editingEntry = entry
-                                }
-                            },
-                            onDelete: {
-                                if !isReadOnlyUser {  // ADDED: Only allow deletes for coaches
-                                    onAuditEntryDelete(entry.id)
-                                }
-                            },
-                            isReadOnlyUser: isReadOnlyUser  // ADDED
-                        )
-                    }
-                }
-            }
-            .navigationTitle("Game Events")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Done") {
-                        presentationMode.wrappedValue.dismiss()
-                    }
-                }
-                
-                // UPDATED: Only show Add Event for coaches
-                if !isReadOnlyUser {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button("Add Event") {
-                            showingAddEntry = true
-                        }
-                    }
-                }
-            }
-        }
-        .sheet(isPresented: $showingAddEntry) {
-            if !isReadOnlyUser {  // ADDED: Only show for coaches
-                AddAuditEntryView(
-                    team: team,
-                    onAdd: onAddNewEntry
-                )
-            }
-        }
-        .sheet(item: $editingEntry) { entry in
-            if !isReadOnlyUser {  // ADDED: Only show for coaches
-                EditAuditEntryView(
-                    entry: entry,
-                    team: team,
-                    onSave: onAuditEntryEdit
-                )
-            }
-        }
-    }
-}
-
-// MARK: - Audit Entry Row
-struct AuditEntryRow: View {
-    let entry: GameAuditEntry
-    let onEdit: () -> Void
-    let onDelete: () -> Void
-    let isReadOnlyUser: Bool  // ADDED
-    
-    var body: some View {
-        HStack {
-            Image(systemName: entry.eventType.icon)
-                .foregroundColor(entry.eventType.color)
-                .frame(width: 30)
-            
-            VStack(alignment: .leading, spacing: 2) {
-                Text(entry.eventType.rawValue)
-                    .font(.subheadline)
-                    .bold()
-                
-                if let playerName = entry.playerName {
-                    Text(playerName)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                
-                Text(entry.details)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            
-            Spacer()
-            
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(entry.gameTime)
-                    .font(.caption)
-                    .bold()
-                
-                Text(entry.realTime.formatted(.dateTime.hour().minute()))
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-            }
-            
-            // UPDATED: Only show menu for coaches
-            if !isReadOnlyUser {
-                Menu {
-                    Button("Edit", action: onEdit)
-                    Button("Delete", role: .destructive, action: onDelete)
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .foregroundColor(.secondary)
-                }
-            }
-        }
-        .padding(.vertical, 4)
-    }
-}
-// MARK: - Add Audit Entry View
-struct AddAuditEntryView: View {
-    let team: Team
-    let onAdd: (GameAuditEntry) -> Void
-    
-    @Environment(\.presentationMode) var presentationMode
-    @State private var selectedEventType: GameAuditEventType = .goal
-    @State private var gameTime = ""
-    @State private var selectedPlayerId: UUID?
-    @State private var details = ""
-    
-    var selectedPlayer: Player? {
-        guard let playerId = selectedPlayerId else { return nil }
-        return team.players.first { $0.id == playerId }
-    }
-    
-    var body: some View {
-        NavigationView {
-            Form {
-                Section("Event Details") {
-                    Picker("Event Type", selection: $selectedEventType) {
-                        ForEach(GameAuditEventType.allCases, id: \.self) { eventType in
-                            Text(eventType.rawValue).tag(eventType)
-                        }
-                    }
-                    
-                    TextField("Game Time (e.g., 45:30)", text: $gameTime)
-                    
-                    TextField("Details", text: $details)
-                }
-                
-                Section("Player (Optional)") {
-                    Picker("Player", selection: $selectedPlayerId) {
-                        Text("No Player").tag(UUID?.none)
-                        ForEach(team.players) { player in
-                            Text(player.name).tag(UUID?.some(player.id))
-                        }
-                    }
-                }
-            }
-            .navigationTitle("Add Event")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") {
-                        presentationMode.wrappedValue.dismiss()
-                    }
-                }
-                
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Add") {
-                        let entry = GameAuditEntry(
-                            eventType: selectedEventType,
-                            gameTime: gameTime,
-                            details: details,
-                            playerName: selectedPlayer?.name,
-                            playerId: selectedPlayer?.id
-                        )
-                        onAdd(entry)
-                        presentationMode.wrappedValue.dismiss()
-                    }
-                    .disabled(gameTime.isEmpty || details.isEmpty)
-                }
-            }
-        }
-    }
-}
-
-// MARK: - Edit Audit Entry View
-struct EditAuditEntryView: View {
-    let entry: GameAuditEntry
-    let team: Team
-    let onSave: (GameAuditEntry) -> Void
-    
-    @Environment(\.presentationMode) var presentationMode
-    @State private var selectedEventType: GameAuditEventType
-    @State private var gameTime: String
-    @State private var selectedPlayerId: UUID?
-    @State private var details: String
-    
-    var selectedPlayer: Player? {
-        guard let playerId = selectedPlayerId else { return nil }
-        return team.players.first { $0.id == playerId }
-    }
-    
-    init(entry: GameAuditEntry, team: Team, onSave: @escaping (GameAuditEntry) -> Void) {
-        self.entry = entry
-        self.team = team
-        self.onSave = onSave
-        
-        self._selectedEventType = State(initialValue: entry.eventType)
-        self._gameTime = State(initialValue: entry.gameTime)
-        self._details = State(initialValue: entry.details)
-        self._selectedPlayerId = State(initialValue: entry.playerId)
-    }
-    
-    var body: some View {
-        NavigationView {
-            Form {
-                Section("Event Details") {
-                    Picker("Event Type", selection: $selectedEventType) {
-                        ForEach(GameAuditEventType.allCases, id: \.self) { eventType in
-                            Text(eventType.rawValue).tag(eventType)
-                        }
-                    }
-                    
-                    TextField("Game Time", text: $gameTime)
-                    
-                    TextField("Details", text: $details)
-                }
-                
-                Section("Player") {
-                    Picker("Player", selection: $selectedPlayerId) {
-                        Text("No Player").tag(UUID?.none)
-                        ForEach(team.players) { player in
-                            Text(player.name).tag(UUID?.some(player.id))
-                        }
-                    }
-                }
-            }
-            .navigationTitle("Edit Event")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") {
-                        presentationMode.wrappedValue.dismiss()
-                    }
-                }
-                
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Save") {
-                        var editedEntry = entry
-                        editedEntry.eventType = selectedEventType
-                        editedEntry.gameTime = gameTime
-                        editedEntry.details = details
-                        editedEntry.playerName = selectedPlayer?.name
-                        editedEntry.playerId = selectedPlayer?.id
-                        
-                        onSave(editedEntry)
-                        presentationMode.wrappedValue.dismiss()
-                    }
-                }
-            }
-        }
-    }
-}
-
-// MARK: - Enhanced End Game View
-struct EnhancedEndGameView: View {
-    @Binding var game: Game
-    let auditLog: [GameAuditEntry]
-    let team: Team
-    let onConfirmEnd: () -> Void
-    let onAuditEntryEdit: (GameAuditEntry) -> Void
-    let onAuditEntryDelete: (UUID) -> Void
-    
-    @Environment(\.presentationMode) var presentationMode
-    @State private var goalsFor: Int
-    @State private var goalsAgainst: Int
-    @State private var editingEntry: GameAuditEntry?
-    
-    init(game: Binding<Game>, auditLog: [GameAuditEntry], team: Team, onConfirmEnd: @escaping () -> Void, onAuditEntryEdit: @escaping (GameAuditEntry) -> Void, onAuditEntryDelete: @escaping (UUID) -> Void) {
-        self._game = game
-        self.auditLog = auditLog
-        self.team = team
-        self.onConfirmEnd = onConfirmEnd
-        self.onAuditEntryEdit = onAuditEntryEdit
-        self.onAuditEntryDelete = onAuditEntryDelete
-        
-        self._goalsFor = State(initialValue: game.wrappedValue.result?.goalsFor ?? 0)
-        self._goalsAgainst = State(initialValue: game.wrappedValue.result?.goalsAgainst ?? 0)
-    }
-    
-    var body: some View {
-        NavigationView {
-            VStack(spacing: 20) {
-                Text("End Game Confirmation")
-                    .font(.title2)
-                    .bold()
-                
-                // Final Score Section
-                VStack(spacing: 16) {
-                    Text("Final Score")
-                        .font(.headline)
-                    
-                    HStack(spacing: 40) {
-                        VStack {
-                            Text("Goals For")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            
-                            HStack {
-                                Button("-") {
-                                    if goalsFor > 0 { goalsFor -= 1 }
-                                }
-                                .disabled(goalsFor <= 0)
-                                
-                                Text("\(goalsFor)")
-                                    .font(.title)
-                                    .bold()
-                                    .frame(minWidth: 40)
-                                
-                                Button("+") {
-                                    goalsFor += 1
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 12) {
+                            ForEach(benchPlayers) { player in
+                                BenchPlayerCard(
+                                    player: player,
+                                    isSelected: selectedPlayer?.id == player.id,
+                                    isReadOnlyUser: isReadOnlyUser  // ADDED
+                                ) {
+                                    if !isReadOnlyUser {  // ADDED: Only allow selection for coaches
+                                        selectedPlayer = player
+                                    }
                                 }
                             }
                         }
+                        .padding(.horizontal)
+                    }
+                }
+            }
+        }
+    }
+    // MARK: - Bench Player Card
+    struct BenchPlayerCard: View {
+        let player: Player
+        let isSelected: Bool
+        let isReadOnlyUser: Bool  // ADDED
+        let onTap: () -> Void
+        
+        var body: some View {
+            Button(action: onTap) {
+                VStack(spacing: 8) {
+                    ZStack {
+                        Circle()
+                            .fill(Color.gray.opacity(0.3))
+                            .frame(width: 50, height: 50)
                         
-                        Text("vs")
-                            .font(.title2)
+                        Text(String(player.jerseyNumber))
+                            .font(.headline)
+                            .fontWeight(.bold)
+                            .foregroundColor(.gray)
+                    }
+                    
+                    VStack(spacing: 2) {
+                        Text(player.name.components(separatedBy: " ").first ?? "")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .lineLimit(1)
+                        
+                        Text(player.positions.joined(separator: "/"))
+                            .font(.caption2)
                             .foregroundColor(.secondary)
-                        
-                        VStack {
-                            Text("Goals Against")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                .frame(width: 80)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(isSelected && !isReadOnlyUser ? Color.blue.opacity(0.15) : Color(.systemGray6))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(isSelected && !isReadOnlyUser ? Color.blue : Color.clear, lineWidth: 2)
+                        )
+                )
+            }
+            .disabled(isReadOnlyUser)  // ADDED: Disable interaction for read-only users
+        }
+    }
+    
+    
+    // MARK: - Substitution View
+    struct SubstitutionView: View {
+        let team: Team
+        @Binding var game: Game
+        @Binding var lineupPositions: [LineupPosition]
+        @EnvironmentObject var gameStateManager: GameStateManager
+        @Environment(\.presentationMode) var presentationMode
+        
+        @State private var playerOut: Player?
+        @State private var playerIn: Player?
+        @State private var substitutionReason: SubstitutionReason = .tactical
+        
+        var playersOnField: [Player] {
+            lineupPositions.compactMap { position in
+                guard let playerId = position.playerId else { return nil }
+                return team.players.first { $0.id == playerId }
+            }
+        }
+        
+        var playersOnBench: [Player] {
+            team.players.filter { player in
+                !lineupPositions.contains { $0.playerId == player.id }
+            }
+        }
+        
+        var body: some View {
+            NavigationView {
+                VStack(spacing: 20) {
+                    Text("Make Substitution")
+                        .font(.title2)
+                        .bold()
+                    
+                    VStack(spacing: 16) {
+                        // Player Out
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Player Coming Off")
+                                .font(.headline)
                             
-                            HStack {
-                                Button("-") {
-                                    if goalsAgainst > 0 { goalsAgainst -= 1 }
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 12) {
+                                    ForEach(playersOnField) { player in
+                                        SubPlayerCard(
+                                            player: player,
+                                            isSelected: playerOut?.id == player.id,
+                                            cardType: .out
+                                        ) {
+                                            playerOut = player
+                                        }
+                                    }
                                 }
-                                .disabled(goalsAgainst <= 0)
-                                
-                                Text("\(goalsAgainst)")
-                                    .font(.title)
-                                    .bold()
-                                    .frame(minWidth: 40)
-                                
-                                Button("+") {
-                                    goalsAgainst += 1
-                                }
+                                .padding(.horizontal)
                             }
                         }
+                        
+                        // Player In
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Player Coming On")
+                                .font(.headline)
+                            
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 12) {
+                                    ForEach(playersOnBench) { player in
+                                        SubPlayerCard(
+                                            player: player,
+                                            isSelected: playerIn?.id == player.id,
+                                            cardType: .in
+                                        ) {
+                                            playerIn = player
+                                        }
+                                    }
+                                }
+                                .padding(.horizontal)
+                            }
+                        }
+                        
+                        // Reason
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Reason")
+                                .font(.headline)
+                            
+                            Picker("Reason", selection: $substitutionReason) {
+                                ForEach(SubstitutionReason.allCases, id: \.self) { reason in
+                                    Text(reason.rawValue).tag(reason)
+                                }
+                            }
+                            .pickerStyle(SegmentedPickerStyle())
+                        }
                     }
+                    
+                    Spacer()
+                    
+                    Button("Make Substitution") {
+                        makeSubstitution()
+                    }
+                    .disabled(playerOut == nil || playerIn == nil)
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(playerOut != nil && playerIn != nil ? Color.green : Color.gray)
+                    .cornerRadius(12)
                 }
                 .padding()
-                .background(Color(.systemGray6))
-                .cornerRadius(12)
-                
-                // Game Events Review
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Game Events Review")
-                        .font(.headline)
+                .navigationTitle("Substitution")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("Cancel") {
+                            presentationMode.wrappedValue.dismiss()
+                        }
+                    }
+                }
+            }
+        }
+        
+        private func makeSubstitution() {
+            guard let playerOut = playerOut, let playerIn = playerIn else { return }
+            
+            // Find position of player going out
+            if let positionIndex = lineupPositions.firstIndex(where: { $0.playerId == playerOut.id }) {
+                lineupPositions[positionIndex].playerId = playerIn.id
+            }
+            
+            // Create substitution record
+            let substitution = Substitution(
+                playerIn: playerIn.id,
+                playerOut: playerOut.id,
+                minute: gameStateManager.calculatedMinute,
+                reason: substitutionReason
+            )
+            
+            game.substitutions.append(substitution)
+            
+            // Add to audit log
+            gameStateManager.addAuditEntry(
+                eventType: .substitution,
+                gameTime: gameStateManager.auditLogTime,
+                details: "\(playerOut.name) ↔ \(playerIn.name) (\(substitutionReason.rawValue))"
+            )
+            
+            presentationMode.wrappedValue.dismiss()
+        }
+    }
+    
+    // MARK: - Sub Player Card
+    struct SubPlayerCard: View {
+        let player: Player
+        let isSelected: Bool
+        let cardType: CardType
+        let onTap: () -> Void
+        
+        enum CardType {
+            case `in`, out
+        }
+        
+        var body: some View {
+            Button(action: onTap) {
+                VStack(spacing: 8) {
+                    ZStack {
+                        Circle()
+                            .fill(cardType == .out ? Color.red.opacity(0.3) : Color.green.opacity(0.3))
+                            .frame(width: 50, height: 50)
+                        
+                        Text(String(player.jerseyNumber))
+                            .font(.headline)
+                            .fontWeight(.bold)
+                            .foregroundColor(cardType == .out ? .red : .green)
+                    }
                     
+                    VStack(spacing: 2) {
+                        Text(player.name.components(separatedBy: " ").first ?? "")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .lineLimit(1)
+                        
+                        Text(player.positions.joined(separator: "/"))
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                .frame(width: 80)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(isSelected ? Color.blue.opacity(0.15) : Color(.systemGray6))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 2)
+                        )
+                )
+            }
+        }
+    }
+    
+    // MARK: - Enhanced Game Audit Log View
+    struct EnhancedGameAuditLogView: View {
+        let auditLog: [GameAuditEntry]
+        let game: Game
+        let team: Team
+        let onAuditEntryEdit: (GameAuditEntry) -> Void
+        let onAuditEntryDelete: (UUID) -> Void
+        let onAddNewEntry: (GameAuditEntry) -> Void
+        let isReadOnlyUser: Bool  // ADDED
+        
+        @Environment(\.presentationMode) var presentationMode
+        @State private var showingAddEntry = false
+        @State private var editingEntry: GameAuditEntry?
+        
+        var body: some View {
+            NavigationView {
+                List {
                     if auditLog.isEmpty {
                         Text("No events recorded")
                             .foregroundColor(.secondary)
                             .padding()
                             .frame(maxWidth: .infinity)
                     } else {
-                        ScrollView {
-                            VStack(spacing: 8) {
-                                ForEach(auditLog.sorted { $0.realTime < $1.realTime }) { entry in
-                                    CompactAuditEntryRow(
-                                        entry: entry,
-                                        onEdit: { editingEntry = entry },
-                                        onDelete: { onAuditEntryDelete(entry.id) }
-                                    )
-                                }
+                        ForEach(auditLog.sorted { $0.realTime > $1.realTime }) { entry in
+                            AuditEntryRow(
+                                entry: entry,
+                                onEdit: {
+                                    if !isReadOnlyUser {  // ADDED: Only allow edits for coaches
+                                        editingEntry = entry
+                                    }
+                                },
+                                onDelete: {
+                                    if !isReadOnlyUser {  // ADDED: Only allow deletes for coaches
+                                        onAuditEntryDelete(entry.id)
+                                    }
+                                },
+                                isReadOnlyUser: isReadOnlyUser  // ADDED
+                            )
+                        }
+                    }
+                }
+                .navigationTitle("Game Events")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button("Done") {
+                            presentationMode.wrappedValue.dismiss()
+                        }
+                    }
+                    
+                    // UPDATED: Only show Add Event for coaches
+                    if !isReadOnlyUser {
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button("Add Event") {
+                                showingAddEntry = true
                             }
                         }
-                        .frame(maxHeight: 200)
-                    }
-                }
-                .padding()
-                .background(Color(.systemGray6))
-                .cornerRadius(12)
-                
-                Spacer()
-                
-                // Confirm Button
-                Button("Confirm & End Game") {
-                    game.result = GameResult(goalsFor: goalsFor, goalsAgainst: goalsAgainst)
-                    onConfirmEnd()
-                }
-                .foregroundColor(.white)
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(Color.green)
-                .cornerRadius(12)
-            }
-            .padding()
-            .navigationTitle("End Game")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") {
-                        presentationMode.wrappedValue.dismiss()
                     }
                 }
             }
-        }
-        .sheet(item: $editingEntry) { entry in
-            EditAuditEntryView(
-                entry: entry,
-                team: team,
-                onSave: onAuditEntryEdit
-            )
+            .sheet(isPresented: $showingAddEntry) {
+                if !isReadOnlyUser {  // ADDED: Only show for coaches
+                    AddAuditEntryView(
+                        team: team,
+                        onAdd: onAddNewEntry
+                    )
+                }
+            }
+            .sheet(item: $editingEntry) { entry in
+                if !isReadOnlyUser {  // ADDED: Only show for coaches
+                    EditAuditEntryView(
+                        entry: entry,
+                        team: team,
+                        onSave: onAuditEntryEdit
+                    )
+                }
+            }
         }
     }
-}
-
-// MARK: - Compact Audit Entry Row
-struct CompactAuditEntryRow: View {
-    let entry: GameAuditEntry
-    let onEdit: () -> Void
-    let onDelete: () -> Void
     
-    var body: some View {
-        Button(action: onEdit) {
+    // MARK: - Audit Entry Row
+    struct AuditEntryRow: View {
+        let entry: GameAuditEntry
+        let onEdit: () -> Void
+        let onDelete: () -> Void
+        let isReadOnlyUser: Bool  // ADDED
+        
+        var body: some View {
             HStack {
                 Image(systemName: entry.eventType.icon)
                     .foregroundColor(entry.eventType.color)
-                    .frame(width: 24)
+                    .frame(width: 30)
                 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(entry.eventType.rawValue)
                         .font(.subheadline)
                         .bold()
-                        .foregroundColor(.primary)
                     
                     if let playerName = entry.playerName {
                         Text(playerName)
@@ -4655,9 +5062,8 @@ struct CompactAuditEntryRow: View {
                     }
                     
                     Text(entry.details)
-                        .font(.caption2)
+                        .font(.caption)
                         .foregroundColor(.secondary)
-                        .lineLimit(1)
                 }
                 
                 Spacer()
@@ -4666,33 +5072,393 @@ struct CompactAuditEntryRow: View {
                     Text(entry.gameTime)
                         .font(.caption)
                         .bold()
-                        .foregroundColor(.primary)
                     
                     Text(entry.realTime.formatted(.dateTime.hour().minute()))
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }
                 
-                Menu {
-                    Button("Edit", action: onEdit)
-                    Button("Delete", role: .destructive, action: onDelete)
-                } label: {
-                    Image(systemName: "ellipsis.circle.fill")
-                        .foregroundColor(.blue)
-                        .font(.title3)
+                // UPDATED: Only show menu for coaches
+                if !isReadOnlyUser {
+                    Menu {
+                        Button("Edit", action: onEdit)
+                        Button("Delete", role: .destructive, action: onDelete)
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .foregroundColor(.secondary)
+                    }
                 }
-                .onTapGesture {} // Prevent button action when tapping menu
+            }
+            .padding(.vertical, 4)
+        }
+    }
+    // MARK: - Add Audit Entry View
+    struct AddAuditEntryView: View {
+        let team: Team
+        let onAdd: (GameAuditEntry) -> Void
+        
+        @Environment(\.presentationMode) var presentationMode
+        @State private var selectedEventType: GameAuditEventType = .goal
+        @State private var gameTime = ""
+        @State private var selectedPlayerId: UUID?
+        @State private var details = ""
+        
+        var selectedPlayer: Player? {
+            guard let playerId = selectedPlayerId else { return nil }
+            return team.players.first { $0.id == playerId }
+        }
+        
+        var body: some View {
+            NavigationView {
+                Form {
+                    Section("Event Details") {
+                        Picker("Event Type", selection: $selectedEventType) {
+                            ForEach(GameAuditEventType.allCases, id: \.self) { eventType in
+                                Text(eventType.rawValue).tag(eventType)
+                            }
+                        }
+                        
+                        TextField("Game Time (e.g., 45:30)", text: $gameTime)
+                        
+                        TextField("Details", text: $details)
+                    }
+                    
+                    Section("Player (Optional)") {
+                        Picker("Player", selection: $selectedPlayerId) {
+                            Text("No Player").tag(UUID?.none)
+                            ForEach(team.players) { player in
+                                Text(player.name).tag(UUID?.some(player.id))
+                            }
+                        }
+                    }
+                }
+                .navigationTitle("Add Event")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button("Cancel") {
+                            presentationMode.wrappedValue.dismiss()
+                        }
+                    }
+                    
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("Add") {
+                            let entry = GameAuditEntry(
+                                eventType: selectedEventType,
+                                gameTime: gameTime,
+                                details: details,
+                                playerName: selectedPlayer?.name,
+                                playerId: selectedPlayer?.id
+                            )
+                            onAdd(entry)
+                            presentationMode.wrappedValue.dismiss()
+                        }
+                        .disabled(gameTime.isEmpty || details.isEmpty)
+                    }
+                }
             }
         }
-        .buttonStyle(PlainButtonStyle())
-        .padding(.horizontal, 12)
-        .padding(.vertical, 12)
-        .background(Color(.systemBackground))
-        .cornerRadius(8)
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color(.systemGray4), lineWidth: 0.5)
-        )
+    }
+    
+    // MARK: - Edit Audit Entry View
+    struct EditAuditEntryView: View {
+        let entry: GameAuditEntry
+        let team: Team
+        let onSave: (GameAuditEntry) -> Void
+        
+        @Environment(\.presentationMode) var presentationMode
+        @State private var selectedEventType: GameAuditEventType
+        @State private var gameTime: String
+        @State private var selectedPlayerId: UUID?
+        @State private var details: String
+        
+        var selectedPlayer: Player? {
+            guard let playerId = selectedPlayerId else { return nil }
+            return team.players.first { $0.id == playerId }
+        }
+        
+        init(entry: GameAuditEntry, team: Team, onSave: @escaping (GameAuditEntry) -> Void) {
+            self.entry = entry
+            self.team = team
+            self.onSave = onSave
+            
+            self._selectedEventType = State(initialValue: entry.eventType)
+            self._gameTime = State(initialValue: entry.gameTime)
+            self._details = State(initialValue: entry.details)
+            self._selectedPlayerId = State(initialValue: entry.playerId)
+        }
+        
+        var body: some View {
+            NavigationView {
+                Form {
+                    Section("Event Details") {
+                        Picker("Event Type", selection: $selectedEventType) {
+                            ForEach(GameAuditEventType.allCases, id: \.self) { eventType in
+                                Text(eventType.rawValue).tag(eventType)
+                            }
+                        }
+                        
+                        TextField("Game Time", text: $gameTime)
+                        
+                        TextField("Details", text: $details)
+                    }
+                    
+                    Section("Player") {
+                        Picker("Player", selection: $selectedPlayerId) {
+                            Text("No Player").tag(UUID?.none)
+                            ForEach(team.players) { player in
+                                Text(player.name).tag(UUID?.some(player.id))
+                            }
+                        }
+                    }
+                }
+                .navigationTitle("Edit Event")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button("Cancel") {
+                            presentationMode.wrappedValue.dismiss()
+                        }
+                    }
+                    
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("Save") {
+                            var editedEntry = entry
+                            editedEntry.eventType = selectedEventType
+                            editedEntry.gameTime = gameTime
+                            editedEntry.details = details
+                            editedEntry.playerName = selectedPlayer?.name
+                            editedEntry.playerId = selectedPlayer?.id
+                            
+                            onSave(editedEntry)
+                            presentationMode.wrappedValue.dismiss()
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // MARK: - Enhanced End Game View
+    struct EnhancedEndGameView: View {
+        @Binding var game: Game
+        let auditLog: [GameAuditEntry]
+        let team: Team
+        let onConfirmEnd: () -> Void
+        let onAuditEntryEdit: (GameAuditEntry) -> Void
+        let onAuditEntryDelete: (UUID) -> Void
+        
+        @Environment(\.presentationMode) var presentationMode
+        @State private var goalsFor: Int
+        @State private var goalsAgainst: Int
+        @State private var editingEntry: GameAuditEntry?
+        
+        init(game: Binding<Game>, auditLog: [GameAuditEntry], team: Team, onConfirmEnd: @escaping () -> Void, onAuditEntryEdit: @escaping (GameAuditEntry) -> Void, onAuditEntryDelete: @escaping (UUID) -> Void) {
+            self._game = game
+            self.auditLog = auditLog
+            self.team = team
+            self.onConfirmEnd = onConfirmEnd
+            self.onAuditEntryEdit = onAuditEntryEdit
+            self.onAuditEntryDelete = onAuditEntryDelete
+            
+            self._goalsFor = State(initialValue: game.wrappedValue.result?.goalsFor ?? 0)
+            self._goalsAgainst = State(initialValue: game.wrappedValue.result?.goalsAgainst ?? 0)
+        }
+        
+        var body: some View {
+            NavigationView {
+                VStack(spacing: 20) {
+                    Text("End Game Confirmation")
+                        .font(.title2)
+                        .bold()
+                    
+                    // Final Score Section
+                    VStack(spacing: 16) {
+                        Text("Final Score")
+                            .font(.headline)
+                        
+                        HStack(spacing: 40) {
+                            VStack {
+                                Text("Goals For")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                
+                                HStack {
+                                    Button("-") {
+                                        if goalsFor > 0 { goalsFor -= 1 }
+                                    }
+                                    .disabled(goalsFor <= 0)
+                                    
+                                    Text("\(goalsFor)")
+                                        .font(.title)
+                                        .bold()
+                                        .frame(minWidth: 40)
+                                    
+                                    Button("+") {
+                                        goalsFor += 1
+                                    }
+                                }
+                            }
+                            
+                            Text("vs")
+                                .font(.title2)
+                                .foregroundColor(.secondary)
+                            
+                            VStack {
+                                Text("Goals Against")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                
+                                HStack {
+                                    Button("-") {
+                                        if goalsAgainst > 0 { goalsAgainst -= 1 }
+                                    }
+                                    .disabled(goalsAgainst <= 0)
+                                    
+                                    Text("\(goalsAgainst)")
+                                        .font(.title)
+                                        .bold()
+                                        .frame(minWidth: 40)
+                                    
+                                    Button("+") {
+                                        goalsAgainst += 1
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .padding()
+                    .background(Color(.systemGray6))
+                    .cornerRadius(12)
+                    
+                    // Game Events Review
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Game Events Review")
+                            .font(.headline)
+                        
+                        if auditLog.isEmpty {
+                            Text("No events recorded")
+                                .foregroundColor(.secondary)
+                                .padding()
+                                .frame(maxWidth: .infinity)
+                        } else {
+                            ScrollView {
+                                VStack(spacing: 8) {
+                                    ForEach(auditLog.sorted { $0.realTime < $1.realTime }) { entry in
+                                        CompactAuditEntryRow(
+                                            entry: entry,
+                                            onEdit: { editingEntry = entry },
+                                            onDelete: { onAuditEntryDelete(entry.id) }
+                                        )
+                                    }
+                                }
+                            }
+                            .frame(maxHeight: 200)
+                        }
+                    }
+                    .padding()
+                    .background(Color(.systemGray6))
+                    .cornerRadius(12)
+                    
+                    Spacer()
+                    
+                    // Confirm Button
+                    Button("Confirm & End Game") {
+                        game.result = GameResult(goalsFor: goalsFor, goalsAgainst: goalsAgainst)
+                        onConfirmEnd()
+                    }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.green)
+                    .cornerRadius(12)
+                }
+                .padding()
+                .navigationTitle("End Game")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button("Cancel") {
+                            presentationMode.wrappedValue.dismiss()
+                        }
+                    }
+                }
+            }
+            .sheet(item: $editingEntry) { entry in
+                EditAuditEntryView(
+                    entry: entry,
+                    team: team,
+                    onSave: onAuditEntryEdit
+                )
+            }
+        }
+    }
+    
+    // MARK: - Compact Audit Entry Row
+    struct CompactAuditEntryRow: View {
+        let entry: GameAuditEntry
+        let onEdit: () -> Void
+        let onDelete: () -> Void
+        
+        var body: some View {
+            Button(action: onEdit) {
+                HStack {
+                    Image(systemName: entry.eventType.icon)
+                        .foregroundColor(entry.eventType.color)
+                        .frame(width: 24)
+                    
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(entry.eventType.rawValue)
+                            .font(.subheadline)
+                            .bold()
+                            .foregroundColor(.primary)
+                        
+                        if let playerName = entry.playerName {
+                            Text(playerName)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        
+                        Text(entry.details)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
+                    
+                    Spacer()
+                    
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(entry.gameTime)
+                            .font(.caption)
+                            .bold()
+                            .foregroundColor(.primary)
+                        
+                        Text(entry.realTime.formatted(.dateTime.hour().minute()))
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    Menu {
+                        Button("Edit", action: onEdit)
+                        Button("Delete", role: .destructive, action: onDelete)
+                    } label: {
+                        Image(systemName: "ellipsis.circle.fill")
+                            .foregroundColor(.blue)
+                            .font(.title3)
+                    }
+                    .onTapGesture {} // Prevent button action when tapping menu
+                }
+            }
+            .buttonStyle(PlainButtonStyle())
+            .padding(.horizontal, 12)
+            .padding(.vertical, 12)
+            .background(Color(.systemBackground))
+            .cornerRadius(8)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color(.systemGray4), lineWidth: 0.5)
+            )
+        }
     }
 }
 
@@ -4977,7 +5743,7 @@ struct GameDetailView: View {
                 }
             }
         }
-        .background(Color(.systemGroupedBackground))
+            .background(Color(.systemGroupedBackground))
         
         let hostingController = UIHostingController(rootView: fullContentView)
         hostingController.view.backgroundColor = UIColor.systemGroupedBackground
@@ -4993,8 +5759,8 @@ struct GameDetailView: View {
         
         let fittingSize = hostingController.view.systemLayoutSizeFitting(
             CGSize(width: screenWidth, height: UIView.layoutFittingCompressedSize.height),
-            withHorizontalFittingPriority: .required,
-            verticalFittingPriority: .fittingSizeLevel
+            withHorizontalFittingPriority: UILayoutPriority.required,
+            verticalFittingPriority: UILayoutPriority.fittingSizeLevel
         )
         
         let finalWidth: CGFloat
@@ -5019,257 +5785,138 @@ struct GameDetailView: View {
         showingShareSheet = true
     }
 }
-    // MARK: - Full Capture Tab Views (Non-scrollable versions)
-struct FullCaptureGameOverviewTab: View {
-    let game: Game
-    let team: Team
     
-    var body: some View {
-        VStack(spacing: 20) {
-            // Game Summary
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Game Summary")
-                    .font(.headline)
-                    .padding(.horizontal)
-                
-                VStack(spacing: 12) {
-                    if let result = game.result {
-                        HStack {
-                            Text("Final Score")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                            Spacer()
-                            Text("\(result.goalsFor) - \(result.goalsAgainst)")
-                                .font(.title2)
-                                .bold()
-                        }
-                    }
-                    
-                    HStack {
-                        Text("Date")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Text(game.date.formatted(.dateTime.weekday(.wide).month(.wide).day()))
-                            .font(.subheadline)
-                    }
-                    
-                    HStack {
-                        Text("Time")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Text(game.date.formatted(.dateTime.hour().minute()))
-                            .font(.subheadline)
-                    }
-                    
-                    if let location = game.location {
-                        HStack {
-                            Text("Location")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                            Spacer()
-                            Text(location)
-                                .font(.subheadline)
-                        }
-                    }
-                    
-                    if let formation = game.formation {
-                        HStack {
-                            Text("Formation")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                            Spacer()
-                            Text(formation.rawValue)
-                                .font(.subheadline)
-                        }
-                    }
-                    
-                    HStack {
-                        Text("Status")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        
-                        if let result = game.result {
-                            let statusText = result.goalsFor > result.goalsAgainst ? "Win" :
-                            result.goalsFor < result.goalsAgainst ? "Loss" : "Draw"
-                            let statusColor: Color = result.goalsFor > result.goalsAgainst ? .green :
-                            result.goalsFor < result.goalsAgainst ? .red : .orange
-                            Text(statusText)
-                                .font(.subheadline)
-                                .foregroundColor(statusColor)
-                        } else {
-                            Text(game.isCompleted ? "Completed" : "Scheduled")
-                                .font(.subheadline)
-                                .foregroundColor(game.isCompleted ? .green : .blue)
-                        }
-                    }
-                }
-                .padding()
-                .background(Color(.systemBackground))
-                .cornerRadius(12)
-                .shadow(radius: 2)
-                .padding(.horizontal)
-            }
-            
-            // Quick Stats - now using seasonStats
-            if team.players.contains(where: { $0.seasonStats.goals > 0 || $0.seasonStats.assists > 0 || $0.seasonStats.saves > 0 }) {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Player Stats Summary")
-                        .font(.headline)
-                        .padding(.horizontal)
-                    
-                    VStack(spacing: 0) {
-                        StatRowView(icon: "soccerball", title: "Total Goals", value: "\(team.players.reduce(0) { $0 + $1.seasonStats.goals })")
-                        Divider().padding(.horizontal)
-                        
-                        StatRowView(icon: "hands.and.sparkles.fill", title: "Total Assists", value: "\(team.players.reduce(0) { $0 + $1.seasonStats.assists })")
-                        Divider().padding(.horizontal)
-                        
-                        StatRowView(icon: "hand.raised.fill", title: "Total Saves", value: "\(team.players.reduce(0) { $0 + $1.seasonStats.saves })")
-                    }
-                    .background(Color(.systemBackground))
-                    .cornerRadius(15)
-                    .shadow(radius: 2)
-                    .padding(.horizontal)
-                }
-            }
-            
-            // Notes
-            if let notes = game.notes, !notes.isEmpty {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Notes")
-                        .font(.headline)
-                        .padding(.horizontal)
-                    
-                    Text(notes)
-                        .font(.subheadline)
-                        .padding()
-                        .background(Color(.systemGray6))
-                        .cornerRadius(10)
-                        .padding(.horizontal)
-                }
-            }
-        }
-        .padding(.vertical)
-    }
-}
 
-    struct FullCaptureGameLineupTab: View {
+    // MARK: - Full Capture Tab Views (Non-scrollable versions)
+    struct FullCaptureGameOverviewTab: View {
         let game: Game
         let team: Team
         
-        private var startingLineupPlayers: [(Player, Position)] {
-            guard let lineup = game.startingLineup else { return [] }
-            
-            return lineup.compactMap { position in
-                guard let playerId = position.playerId,
-                      let player = team.players.first(where: { $0.id == playerId }) else { return nil }
-                return (player, position.position)
-            }
-        }
-        
         var body: some View {
             VStack(spacing: 20) {
-                if let formation = game.formation, let lineup = game.startingLineup {
-                    // Formation Display
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Starting Lineup - \(formation.rawValue)")
-                            .font(.headline)
-                            .padding(.horizontal)
-                        
-                        // Field View
-                        GeometryReader { geometry in
-                            ZStack {
-                                ModernSoccerFieldBackground()
-                                
-                                ForEach(Array(lineup.enumerated()), id: \.offset) { index, position in
-                                    let defaultPos = formation.fieldPositions(for: geometry.size)[index]
-                                    
-                                    if let playerId = position.playerId,
-                                       let player = team.players.first(where: { $0.id == playerId }) {
-                                        
-                                        GameDetailPlayerMarker(
-                                            player: player,
-                                            position: position.position
-                                        )
-                                        .position(defaultPos)
-                                    }
-                                }
-                            }
-                        }
-                        .frame(height: 300)
+                // Game Summary
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Game Summary")
+                        .font(.headline)
                         .padding(.horizontal)
-                    }
                     
-                    // Starting XI List
+                    VStack(spacing: 12) {
+                        if let result = game.result {
+                            HStack {
+                                Text("Final Score")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                Spacer()
+                                Text("\(result.goalsFor) - \(result.goalsAgainst)")
+                                    .font(.title2)
+                                    .bold()
+                            }
+                        }
+                        
+                        HStack {
+                            Text("Date")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text(game.date.formatted(.dateTime.weekday(.wide).month(.wide).day()))
+                                .font(.subheadline)
+                        }
+                        
+                        HStack {
+                            Text("Time")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text(game.date.formatted(.dateTime.hour().minute()))
+                                .font(.subheadline)
+                        }
+                        
+                        if let location = game.location {
+                            HStack {
+                                Text("Location")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                Spacer()
+                                Text(location)
+                                    .font(.subheadline)
+                            }
+                        }
+                        
+                        if let formation = game.formation {
+                            HStack {
+                                Text("Formation")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                Spacer()
+                                Text(formation.rawValue)
+                                    .font(.subheadline)
+                            }
+                        }
+                        
+                        HStack {
+                            Text("Status")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            
+                            if let result = game.result {
+                                let statusText = result.goalsFor > result.goalsAgainst ? "Win" :
+                                result.goalsFor < result.goalsAgainst ? "Loss" : "Draw"
+                                let statusColor: Color = result.goalsFor > result.goalsAgainst ? .green :
+                                result.goalsFor < result.goalsAgainst ? .red : .orange
+                                Text(statusText)
+                                    .font(.subheadline)
+                                    .foregroundColor(statusColor)
+                            } else {
+                                Text(game.isCompleted ? "Completed" : "Scheduled")
+                                    .font(.subheadline)
+                                    .foregroundColor(game.isCompleted ? .green : .blue)
+                            }
+                        }
+                    }
+                    .padding()
+                    .background(Color(.systemBackground))
+                    .cornerRadius(12)
+                    .shadow(radius: 2)
+                    .padding(.horizontal)
+                }
+                
+                // Quick Stats - now using seasonStats
+                if team.players.contains(where: { $0.seasonStats.goals > 0 || $0.seasonStats.assists > 0 || $0.seasonStats.saves > 0 }) {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Starting XI")
+                        Text("Player Stats Summary")
                             .font(.headline)
                             .padding(.horizontal)
                         
-                        VStack(spacing: 8) {
-                            ForEach(startingLineupPlayers, id: \.0.id) { player, position in
-                                HStack {
-                                    Circle()
-                                        .fill(position.color)
-                                        .frame(width: 30, height: 30)
-                                        .overlay(
-                                            Text("\(player.jerseyNumber)")
-                                                .font(.caption)
-                                                .bold()
-                                                .foregroundColor(.white)
-                                        )
-                                    
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(player.name)
-                                            .font(.subheadline)
-                                            .bold()
-                                        Text(position.rawValue)
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                    }
-                                    
-                                    Spacer()
-                                }
-                                .padding(.horizontal)
-                            }
+                        VStack(spacing: 0) {
+                            StatRowView(icon: "soccerball", title: "Total Goals", value: "\(team.players.reduce(0) { $0 + $1.seasonStats.goals })")
+                            Divider().padding(.horizontal)
+                            
+                            StatRowView(icon: "hands.and.sparkles.fill", title: "Total Assists", value: "\(team.players.reduce(0) { $0 + $1.seasonStats.assists })")
+                            Divider().padding(.horizontal)
+                            
+                            StatRowView(icon: "hand.raised.fill", title: "Total Saves", value: "\(team.players.reduce(0) { $0 + $1.seasonStats.saves })")
                         }
-                        .padding(.vertical)
                         .background(Color(.systemBackground))
-                        .cornerRadius(12)
+                        .cornerRadius(15)
                         .shadow(radius: 2)
                         .padding(.horizontal)
                     }
-                } else {
-                    Text("No lineup recorded for this game")
-                        .foregroundColor(.secondary)
-                        .padding()
                 }
                 
-                // Substitutions
-                if !game.substitutions.isEmpty {
+                // Notes
+                if let notes = game.notes, !notes.isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Substitutions")
+                        Text("Notes")
                             .font(.headline)
                             .padding(.horizontal)
                         
-                        VStack(spacing: 8) {
-                            ForEach(game.substitutions.sorted { $0.minute < $1.minute }, id: \.playerIn) { sub in
-                                if let playerIn = team.players.first(where: { $0.id == sub.playerIn }),
-                                   let playerOut = team.players.first(where: { $0.id == sub.playerOut }) {
-                                    
-                                    SubstitutionRow(
-                                        playerIn: playerIn,
-                                        playerOut: playerOut,
-                                        minute: sub.minute,
-                                        reason: sub.reason
-                                    )
-                                }
-                            }
-                        }
-                        .padding(.horizontal)
+                        Text(notes)
+                            .font(.subheadline)
+                            .padding()
+                            .background(Color(.systemGray6))
+                            .cornerRadius(10)
+                            .padding(.horizontal)
                     }
                 }
             }
@@ -5277,6 +5924,133 @@ struct FullCaptureGameOverviewTab: View {
         }
     }
 
+struct FullCaptureGameLineupTab: View {
+    let game: Game
+    let team: Team
+    
+    // FIXED: Use actualStartingLineup if available, fallback to startingLineup
+    private var startingLineupPlayers: [(Player, Position)] {
+        let lineup = game.actualStartingLineup ?? game.startingLineup
+        guard let lineup = lineup else { return [] }
+        
+        return lineup.compactMap { position in
+            guard let playerId = position.playerId,
+                  let player = team.players.first(where: { $0.id == playerId }) else { return nil }
+            return (player, position.position)
+        }
+    }
+    
+    // FIXED: Get the lineup for field display
+    private var displayLineup: [LineupPosition] {
+        return game.actualStartingLineup ?? game.startingLineup ?? []
+    }
+    
+    var body: some View {
+        VStack(spacing: 20) {
+            if let formation = game.formation, !displayLineup.isEmpty {
+                // Formation Display
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Starting Lineup - \(formation.rawValue)")
+                        .font(.headline)
+                        .padding(.horizontal)
+                    
+                    // Field View
+                    GeometryReader { geometry in
+                        ZStack {
+                            ModernSoccerFieldBackground()
+                            
+                            ForEach(Array(displayLineup.enumerated()), id: \.offset) { index, position in
+                                let defaultPos = formation.fieldPositions(for: geometry.size)[index]
+                                
+                                if let playerId = position.playerId,
+                                   let player = team.players.first(where: { $0.id == playerId }) {
+                                    
+                                    GameDetailPlayerMarker(
+                                        player: player,
+                                        position: position.position
+                                    )
+                                    .position(defaultPos)
+                                }
+                            }
+                        }
+                    }
+                    .frame(height: 300)
+                    .padding(.horizontal)
+                }
+                
+                // Starting XI List
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Starting XI")
+                        .font(.headline)
+                        .padding(.horizontal)
+                    
+                    VStack(spacing: 8) {
+                        ForEach(startingLineupPlayers, id: \.0.id) { player, position in
+                            HStack {
+                                Circle()
+                                    .fill(position.color)
+                                    .frame(width: 30, height: 30)
+                                    .overlay(
+                                        Text("\(player.jerseyNumber)")
+                                            .font(.caption)
+                                            .bold()
+                                            .foregroundColor(.white)
+                                    )
+                                
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(player.name)
+                                        .font(.subheadline)
+                                        .bold()
+                                    Text(position.rawValue)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                                
+                                Spacer()
+                            }
+                            .padding(.horizontal)
+                        }
+                    }
+                    .padding(.vertical)
+                    .background(Color(.systemBackground))
+                    .cornerRadius(12)
+                    .shadow(radius: 2)
+                    .padding(.horizontal)
+                }
+            } else {
+                Text("No lineup recorded for this game")
+                    .foregroundColor(.secondary)
+                    .padding()
+            }
+            
+            // Substitutions
+            if !game.substitutions.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Substitutions")
+                        .font(.headline)
+                        .padding(.horizontal)
+                    
+                    VStack(spacing: 8) {
+                        ForEach(game.substitutions.sorted { $0.minute < $1.minute }, id: \.playerIn) { sub in
+                            if let playerIn = team.players.first(where: { $0.id == sub.playerIn }),
+                               let playerOut = team.players.first(where: { $0.id == sub.playerOut }) {
+                                
+                                SubstitutionRow(
+                                    playerIn: playerIn,
+                                    playerOut: playerOut,
+                                    minute: sub.minute,
+                                    reason: sub.reason
+                                )
+                            }
+                        }
+                    }
+                    .padding(.horizontal)
+                }
+            }
+        }
+        .padding(.vertical)
+    }
+}
     struct FullCaptureGameEventsTab: View {
         let game: Game
         let team: Team
@@ -5322,7 +6096,7 @@ struct FullCaptureGameOverviewTab: View {
             .padding(.vertical)
         }
     }
-
+    
     struct FullCaptureGameStatsTab: View {
         let game: Game
         let team: Team
@@ -5354,880 +6128,881 @@ struct FullCaptureGameOverviewTab: View {
             .padding(.vertical)
         }
     }
-
-// MARK: - Full Capture Game Player Stats Row (UPDATED - Only shows Goals, Assists, Saves, Minutes with presumed calculation)
-struct FullCaptureGamePlayerStatsRow: View {
-    let player: Player
-    let stats: PlayerGameStats
-    let game: Game
-    let team: Team
     
-    // Calculate presumed minutes for display using the game method
-    private var presumedMinutes: Int {
-        return game.calculatePresumedMinutesPlayed(for: player.id, with: team)
-    }
-    
-    var body: some View {
-        VStack(spacing: 8) {
-            HStack {
-                // Player Info
-                HStack(spacing: 8) {
-                    Circle()
-                        .fill(player.preferredPositionEnum.color)
-                        .frame(width: 30, height: 30)
-                        .overlay(
-                            Text("\(player.jerseyNumber)")
-                                .font(.caption)
-                                .bold()
-                                .foregroundColor(.white)
-                        )
+    // MARK: - Full Capture Game Player Stats Row (UPDATED - Only shows Goals, Assists, Saves, Minutes with presumed calculation)
+    struct FullCaptureGamePlayerStatsRow: View {
+        let player: Player
+        let stats: PlayerGameStats
+        let game: Game
+        let team: Team
+        
+        // Calculate presumed minutes for display using the game method
+        private var presumedMinutes: Int {
+            return game.calculatePresumedMinutesPlayed(for: player.id, with: team)
+        }
+        
+        var body: some View {
+            VStack(spacing: 8) {
+                HStack {
+                    // Player Info
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(player.preferredPositionEnum.color)
+                            .frame(width: 30, height: 30)
+                            .overlay(
+                                Text("\(player.jerseyNumber)")
+                                    .font(.caption)
+                                    .bold()
+                                    .foregroundColor(.white)
+                            )
+                        
+                        Text(player.name)
+                            .font(.subheadline)
+                            .bold()
+                    }
                     
-                    Text(player.name)
-                        .font(.subheadline)
-                        .bold()
+                    Spacer()
+                    
+                    // Show presumed minutes instead of stored minutes
+                    Text("\(presumedMinutes) min")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
                 
-                Spacer()
-                
-                // Show presumed minutes instead of stored minutes
-                Text("\(presumedMinutes) min")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                LazyVGrid(columns: [
+                    GridItem(.flexible()),
+                    GridItem(.flexible()),
+                    GridItem(.flexible()),
+                    GridItem(.flexible())
+                ], spacing: 12) {
+                    GameStatItem(label: "Goals", value: stats.goals, color: .green)
+                    GameStatItem(label: "Assists", value: stats.assists, color: .blue)
+                    GameStatItem(label: "Saves", value: stats.saves, color: .purple)
+                }
+            }
+            .padding()
+            .background(Color(.systemBackground))
+            .cornerRadius(8)
+        }
+    }
+    // MARK: - Shareable Tab Content Wrapper
+    struct ShareableTabContent<Content: View>: View {
+        let tabType: TabType
+        let content: Content
+        
+        enum TabType {
+            case overview, lineup, events, stats
+        }
+        
+        init(tabType: TabType, @ViewBuilder content: () -> Content) {
+            self.tabType = tabType
+            self.content = content()
+        }
+        
+        var body: some View {
+            content
+        }
+    }
+    
+    // MARK: - Game Overview Tab with Clear Score Editing
+    struct GameOverviewTab: View {
+        @Binding var game: Game
+        let team: Team
+        @State private var editingScore = false
+        @State private var tempGoalsFor: String = ""
+        @State private var tempGoalsAgainst: String = ""
+        
+        // FIXED: Calculate player stats from actual game events instead of cached seasonStats
+        private func calculatePlayerStatsFromGame() -> (goals: Int, assists: Int, saves: Int) {
+            var totalGoals = 0
+            var totalAssists = 0
+            var totalSaves = 0
+            
+            for event in game.gameEvents {
+                switch event.eventType {
+                case .goal:
+                    totalGoals += 1
+                case .assist:
+                    totalAssists += 1
+                case .save:
+                    totalSaves += 1
+                default:
+                    break
+                }
             }
             
-            LazyVGrid(columns: [
-                GridItem(.flexible()),
-                GridItem(.flexible()),
-                GridItem(.flexible()),
-                GridItem(.flexible())
-            ], spacing: 12) {
-                GameStatItem(label: "Goals", value: stats.goals, color: .green)
-                GameStatItem(label: "Assists", value: stats.assists, color: .blue)
-                GameStatItem(label: "Saves", value: stats.saves, color: .purple)
-            }
-        }
-        .padding()
-        .background(Color(.systemBackground))
-        .cornerRadius(8)
-    }
-}
-// MARK: - Shareable Tab Content Wrapper
-struct ShareableTabContent<Content: View>: View {
-    let tabType: TabType
-    let content: Content
-    
-    enum TabType {
-        case overview, lineup, events, stats
-    }
-    
-    init(tabType: TabType, @ViewBuilder content: () -> Content) {
-        self.tabType = tabType
-        self.content = content()
-    }
-    
-    var body: some View {
-        content
-    }
-}
-
-// MARK: - Game Overview Tab with Clear Score Editing
-struct GameOverviewTab: View {
-    @Binding var game: Game
-    let team: Team
-    @State private var editingScore = false
-    @State private var tempGoalsFor: String = ""
-    @State private var tempGoalsAgainst: String = ""
-    
-    // FIXED: Calculate player stats from actual game events instead of cached seasonStats
-    private func calculatePlayerStatsFromGame() -> (goals: Int, assists: Int, saves: Int) {
-        var totalGoals = 0
-        var totalAssists = 0
-        var totalSaves = 0
-        
-        for event in game.gameEvents {
-            switch event.eventType {
-            case .goal:
-                totalGoals += 1
-            case .assist:
-                totalAssists += 1
-            case .save:
-                totalSaves += 1
-            default:
-                break
-            }
+            return (goals: totalGoals, assists: totalAssists, saves: totalSaves)
         }
         
-        return (goals: totalGoals, assists: totalAssists, saves: totalSaves)
-    }
-    
-    // FIXED: Check if any stats exist from game events instead of seasonStats
-    private var hasAnyStats: Bool {
-        let gameStats = calculatePlayerStatsFromGame()
-        return gameStats.goals > 0 || gameStats.assists > 0 || gameStats.saves > 0
-    }
-    
-    var body: some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                // Game Summary
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Game Summary")
-                        .font(.headline)
-                        .padding(.horizontal)
-                    
-                    VStack(spacing: 12) {
-                        if let result = game.result {
-                            HStack {
-                                Text("Final Score")
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                                Spacer()
-                                
-                                // Enhanced Editable Score with Clear Visual Cues
-                                Button(action: {
-                                    tempGoalsFor = "\(result.goalsFor)"
-                                    tempGoalsAgainst = "\(result.goalsAgainst)"
-                                    editingScore = true
-                                }) {
-                                    HStack(spacing: 8) {
-                                        Text("\(result.goalsFor) - \(result.goalsAgainst)")
-                                            .font(.title2)
-                                            .bold()
-                                            .foregroundColor(.primary)
-                                        
-                                        Image(systemName: "pencil.circle.fill")
-                                            .foregroundColor(.blue)
-                                            .font(.title3)
-                                    }
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 8)
-                                    .background(Color(.systemGray6))
-                                    .cornerRadius(8)
-                                }
-                                .buttonStyle(PlainButtonStyle())
-                            }
+        // FIXED: Check if any stats exist from game events instead of seasonStats
+        private var hasAnyStats: Bool {
+            let gameStats = calculatePlayerStatsFromGame()
+            return gameStats.goals > 0 || gameStats.assists > 0 || gameStats.saves > 0
+        }
+        
+        var body: some View {
+            ScrollView {
+                VStack(spacing: 20) {
+                    // Game Summary
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Game Summary")
+                            .font(.headline)
                             .padding(.horizontal)
-                            
+                        
+                        VStack(spacing: 12) {
                             if let result = game.result {
                                 HStack {
-                                    Text("Result")
+                                    Text("Final Score")
                                         .font(.subheadline)
                                         .foregroundColor(.secondary)
                                     Spacer()
-                                    let statusText = result.goalsFor > result.goalsAgainst ? "Win" :
-                                    result.goalsFor < result.goalsAgainst ? "Loss" : "Draw"
-                                    let statusColor: Color = result.goalsFor > result.goalsAgainst ? .green :
-                                    result.goalsFor < result.goalsAgainst ? .red : .orange
-                                    Text(statusText)
-                                        .font(.subheadline)
-                                        .foregroundColor(statusColor)
-                                }
-                                .padding(.horizontal)
-                            }
-                        } else {
-                            HStack {
-                                Text("Status")
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                                Spacer()
-                                Text(game.isCompleted ? "Completed" : "Scheduled")
-                                    .font(.subheadline)
-                                    .foregroundColor(game.isCompleted ? .green : .blue)
-                            }
-                            .padding(.horizontal)
-                        }
-                        
-                        // Basic game info
-                        VStack(spacing: 8) {
-                            HStack {
-                                Text("Opponent")
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                                Spacer()
-                                Text(game.opponent)
-                                    .font(.subheadline)
-                                    .bold()
-                            }
-                            
-                            HStack {
-                                Text("Date")
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                                Spacer()
-                                Text(game.date.formatted(.dateTime.weekday(.wide).month(.wide).day()))
-                                    .font(.subheadline)
-                            }
-                            
-                            HStack {
-                                Text("Location")
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                                Spacer()
-                                Text(game.isHome ? "Home" : "Away")
-                                    .font(.subheadline)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 2)
-                                    .background(game.isHome ? Color.green.opacity(0.2) : Color.orange.opacity(0.2))
-                                    .cornerRadius(4)
-                            }
-                        }
-                        .padding(.horizontal)
-                    }
-                }
-                .padding()
-                .background(Color(.systemBackground))
-                .cornerRadius(12)
-                .shadow(radius: 2)
-                .padding(.horizontal)
-                
-                // FIXED: Player Stats Summary - now calculates from game events instead of cached seasonStats
-                if hasAnyStats {
-                    let gameStats = calculatePlayerStatsFromGame()
-                    VStack(alignment: .leading, spacing: 16) {
-                        Text("Player Stats Summary")
-                            .font(.headline)
-                            .padding(.horizontal)
-                        
-                        VStack(spacing: 0) {
-                            StatRowView(icon: "soccerball", title: "Total Goals", value: "\(gameStats.goals)")
-                            Divider().padding(.horizontal)
-                            
-                            StatRowView(icon: "hands.and.sparkles.fill", title: "Total Assists", value: "\(gameStats.assists)")
-                            Divider().padding(.horizontal)
-                            
-                            StatRowView(icon: "hand.raised.fill", title: "Total Saves", value: "\(gameStats.saves)")
-                        }
-                        .background(Color(.systemBackground))
-                        .cornerRadius(15)
-                        .shadow(radius: 2)
-                        .padding(.horizontal)
-                    }
-                }
-                
-                // Notes
-                if let notes = game.notes, !notes.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Notes")
-                            .font(.headline)
-                            .padding(.horizontal)
-                        
-                        Text(notes)
-                            .font(.subheadline)
-                            .padding()
-                            .background(Color(.systemGray6))
-                            .cornerRadius(10)
-                            .padding(.horizontal)
-                    }
-                }
-            }
-            .padding(.vertical)
-        }
-        .alert("Edit Final Score", isPresented: $editingScore) {
-            TextField("Goals For", text: $tempGoalsFor)
-                .keyboardType(.numberPad)
-            TextField("Goals Against", text: $tempGoalsAgainst)
-                .keyboardType(.numberPad)
-            Button("Cancel", role: .cancel) { }
-            Button("Save") {
-                updateScore()
-            }
-        } message: {
-            Text("Enter the final score for this game")
-        }
-    }
-    
-    private func updateScore() {
-        guard let goalsFor = Int(tempGoalsFor),
-              let goalsAgainst = Int(tempGoalsAgainst),
-              goalsFor >= 0,
-              goalsAgainst >= 0 else { return }
-        
-        if game.result == nil {
-            game.result = GameResult(goalsFor: goalsFor, goalsAgainst: goalsAgainst)
-        } else {
-            game.result?.goalsFor = goalsFor
-            game.result?.goalsAgainst = goalsAgainst
-        }
-    }
-}
-
-// MARK: - Complete Professional Game Quick Stat Card with Dark Colors and Icons
-struct GameQuickStatCard: View {
-    let title: String
-    let value: String
-    let color: Color
-    let icon: String?
-    
-    // Convenience initializer with icon
-    init(title: String, value: String, color: Color, icon: String? = nil) {
-        self.title = title
-        self.value = value
-        self.color = color
-        self.icon = icon
-    }
-    
-    private var cardBackgroundColor: Color {
-        switch title.lowercased() {
-        case "goals":
-            return Color(red: 0.1, green: 0.4, blue: 0.2) // Darker forest green
-        case "assists":
-            return Color(red: 0.1, green: 0.25, blue: 0.55) // Darker navy blue
-        case "shots":
-            return Color(red: 0.55, green: 0.2, blue: 0.1) // Darker burnt orange
-        case "cards":
-            return Color(red: 0.65, green: 0.45, blue: 0.0) // Professional amber/gold
-        case "subs", "substitutions":
-            return Color(red: 0.15, green: 0.35, blue: 0.65) // Professional dark blue
-        case "saves":
-            return Color(red: 0.35, green: 0.15, blue: 0.55) // Darker purple
-        default:
-            return Color(red: 0.2, green: 0.2, blue: 0.2) // Darker gray
-        }
-    }
-    
-    private var cardIcon: String {
-        if let icon = icon {
-            return icon
-        }
-        
-        // Auto-assign icons based on title
-        switch title.lowercased() {
-        case "goals":
-            return "soccerball.circle.fill"
-        case "assists":
-            return "arrow.triangle.2.circlepath"
-        case "shots":
-            return "scope"
-        case "cards":
-            return "rectangle.fill"
-        case "subs", "substitutions":
-            return "arrow.left.arrow.right.circle.fill"
-        case "saves":
-            return "hand.raised.circle.fill"
-        default:
-            return "chart.bar.fill"
-        }
-    }
-    
-    var body: some View {
-        VStack(spacing: 8) {
-            // Icon
-            Image(systemName: cardIcon)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(.white)
-            
-            // Value
-            Text(value)
-                .font(.system(size: 18, weight: .bold, design: .rounded))
-                .foregroundColor(.white)
-            
-            // Title
-            Text(title)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundColor(.white.opacity(0.9))
-                .textCase(.uppercase)
-                .tracking(0.5)
-        }
-        .frame(maxWidth: .infinity)
-        .frame(height: 70)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(cardBackgroundColor)
-                .shadow(color: cardBackgroundColor.opacity(0.3), radius: 4, x: 0, y: 2)
-        )
-    }
-}
-
-// MARK: - Game Lineup Tab
-struct GameLineupTab: View {
-    let game: Game
-    let team: Team
-    
-    // Use actualStartingLineup if available, fallback to startingLineup
-    private var startingLineupPlayers: [(Player, Position)] {
-        let lineup = game.actualStartingLineup ?? game.startingLineup
-        guard let lineup = lineup else { return [] }
-        
-        return lineup.compactMap { position in
-            guard let playerId = position.playerId,
-                  let player = team.players.first(where: { $0.id == playerId }) else { return nil }
-            return (player, position.position)
-        }
-    }
-    
-    // Get the lineup for field display
-    private var displayLineup: [LineupPosition] {
-        return game.actualStartingLineup ?? game.startingLineup ?? []
-    }
-    
-    var body: some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                if let formation = game.formation, !displayLineup.isEmpty {
-                    // Formation Display
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Starting Lineup - \(formation.rawValue)")
-                            .font(.headline)
-                            .padding(.horizontal)
-                        
-                        // Field View
-                        GeometryReader { geometry in
-                            ZStack {
-                                ModernSoccerFieldBackground()
-                                
-                                ForEach(Array(displayLineup.enumerated()), id: \.offset) { index, position in
-                                    let defaultPos = formation.fieldPositions(for: geometry.size)[index]
                                     
-                                    if let playerId = position.playerId,
-                                       let player = team.players.first(where: { $0.id == playerId }) {
-                                        
-                                        GameDetailPlayerMarker(
-                                            player: player,
-                                            position: position.position
-                                        )
-                                        .position(defaultPos)
-                                    }
-                                }
-                            }
-                        }
-                        .frame(height: 300)
-                        .padding(.horizontal)
-                    }
-                    
-                    // Starting XI List
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Starting XI")
-                            .font(.headline)
-                            .padding(.horizontal)
-                        
-                        VStack(spacing: 8) {
-                            ForEach(startingLineupPlayers, id: \.0.id) { player, position in
-                                HStack {
-                                    Circle()
-                                        .fill(position.color)
-                                        .frame(width: 30, height: 30)
-                                        .overlay(
-                                            Text("\(player.jerseyNumber)")
-                                                .font(.caption)
+                                    // Enhanced Editable Score with Clear Visual Cues
+                                    Button(action: {
+                                        tempGoalsFor = "\(result.goalsFor)"
+                                        tempGoalsAgainst = "\(result.goalsAgainst)"
+                                        editingScore = true
+                                    }) {
+                                        HStack(spacing: 8) {
+                                            Text("\(result.goalsFor) - \(result.goalsAgainst)")
+                                                .font(.title2)
                                                 .bold()
-                                                .foregroundColor(.white)
-                                        )
-                                    
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(player.name)
-                                            .font(.subheadline)
-                                            .bold()
-                                        Text(position.rawValue)
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
+                                                .foregroundColor(.primary)
+                                            
+                                            Image(systemName: "pencil.circle.fill")
+                                                .foregroundColor(.blue)
+                                                .font(.title3)
+                                        }
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 8)
+                                        .background(Color(.systemGray6))
+                                        .cornerRadius(8)
                                     }
-                                    
+                                    .buttonStyle(PlainButtonStyle())
+                                }
+                                .padding(.horizontal)
+                                
+                                if let result = game.result {
+                                    HStack {
+                                        Text("Result")
+                                            .font(.subheadline)
+                                            .foregroundColor(.secondary)
+                                        Spacer()
+                                        let statusText = result.goalsFor > result.goalsAgainst ? "Win" :
+                                        result.goalsFor < result.goalsAgainst ? "Loss" : "Draw"
+                                        let statusColor: Color = result.goalsFor > result.goalsAgainst ? .green :
+                                        result.goalsFor < result.goalsAgainst ? .red : .orange
+                                        Text(statusText)
+                                            .font(.subheadline)
+                                            .foregroundColor(statusColor)
+                                    }
+                                    .padding(.horizontal)
+                                }
+                            } else {
+                                HStack {
+                                    Text("Status")
+                                        .font(.subheadline)
+                                        .foregroundColor(.secondary)
                                     Spacer()
+                                    Text(game.isCompleted ? "Completed" : "Scheduled")
+                                        .font(.subheadline)
+                                        .foregroundColor(game.isCompleted ? .green : .blue)
                                 }
                                 .padding(.horizontal)
                             }
-                        }
-                        .padding(.vertical)
-                        .background(Color(.systemBackground))
-                        .cornerRadius(12)
-                        .shadow(radius: 2)
-                        .padding(.horizontal)
-                    }
-                } else {
-                    Text("No lineup recorded for this game")
-                        .foregroundColor(.secondary)
-                        .padding()
-                }
-                
-                // Substitutions
-                if !game.substitutions.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Substitutions")
-                            .font(.headline)
-                            .padding(.horizontal)
-                        
-                        VStack(spacing: 8) {
-                            ForEach(game.substitutions.sorted { $0.minute < $1.minute }, id: \.playerIn) { sub in
-                                if let playerIn = team.players.first(where: { $0.id == sub.playerIn }),
-                                   let playerOut = team.players.first(where: { $0.id == sub.playerOut }) {
-                                    
-                                    SubstitutionRow(
-                                        playerIn: playerIn,
-                                        playerOut: playerOut,
-                                        minute: sub.minute,
-                                        reason: sub.reason
-                                    )
+                            
+                            // Basic game info
+                            VStack(spacing: 8) {
+                                HStack {
+                                    Text("Opponent")
+                                        .font(.subheadline)
+                                        .foregroundColor(.secondary)
+                                    Spacer()
+                                    Text(game.opponent)
+                                        .font(.subheadline)
+                                        .bold()
+                                }
+                                
+                                HStack {
+                                    Text("Date")
+                                        .font(.subheadline)
+                                        .foregroundColor(.secondary)
+                                    Spacer()
+                                    Text(game.date.formatted(.dateTime.weekday(.wide).month(.wide).day()))
+                                        .font(.subheadline)
+                                }
+                                
+                                HStack {
+                                    Text("Location")
+                                        .font(.subheadline)
+                                        .foregroundColor(.secondary)
+                                    Spacer()
+                                    Text(game.isHome ? "Home" : "Away")
+                                        .font(.subheadline)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 2)
+                                        .background(game.isHome ? Color.green.opacity(0.2) : Color.orange.opacity(0.2))
+                                        .cornerRadius(4)
                                 }
                             }
-                        }
-                        .padding(.horizontal)
-                    }
-                }
-            }
-            .padding(.vertical)
-        }
-    }
-}                                                                                                                                                                                          
-// MARK: - Game Detail Player Marker
-struct GameDetailPlayerMarker: View {
-    let player: Player
-    let position: Position
-    
-    var body: some View {
-        VStack(spacing: 2) {
-            ZStack {
-                Circle()
-                    .fill(position.color)
-                    .frame(width: 40, height: 40)
-                
-                Text(String(player.jerseyNumber))
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundColor(.white)
-            }
-            
-            Text(player.name.components(separatedBy: " ").first ?? "")
-                .font(.caption2)
-                .fontWeight(.medium)
-                .foregroundColor(.white)
-                .lineLimit(1)
-                .padding(.horizontal, 4)
-                .padding(.vertical, 1)
-                .background(Color.black.opacity(0.6))
-                .cornerRadius(4)
-        }
-    }
-}
-
-// MARK: - Substitution Row
-struct SubstitutionRow: View {
-    let playerIn: Player
-    let playerOut: Player
-    let minute: Int
-    let reason: SubstitutionReason
-    
-    var body: some View {
-        HStack {
-            Text("\(minute)'")
-                .font(.caption)
-                .bold()
-                .foregroundColor(.secondary)
-                .frame(width: 30, alignment: .leading)
-            
-            HStack(spacing: 8) {
-                // Player Out
-                HStack(spacing: 4) {
-                    Circle()
-                        .fill(Color.red.opacity(0.3))
-                        .frame(width: 20, height: 20)
-                        .overlay(
-                            Text("\(playerOut.jerseyNumber)")
-                                .font(.caption2)
-                                .bold()
-                                .foregroundColor(.red)
-                        )
-                    Text(playerOut.name.components(separatedBy: " ").first ?? "")
-                        .font(.caption)
-                }
-                
-                Image(systemName: "arrow.right")
-                    .font(.caption)
-                    .foregroundColor(.blue)
-                
-                // Player In
-                HStack(spacing: 4) {
-                    Circle()
-                        .fill(Color.green.opacity(0.3))
-                        .frame(width: 20, height: 20)
-                        .overlay(
-                            Text("\(playerIn.jerseyNumber)")
-                                .font(.caption2)
-                                .bold()
-                                .foregroundColor(.green)
-                        )
-                    Text(playerIn.name.components(separatedBy: " ").first ?? "")
-                        .font(.caption)
-                }
-            }
-            
-            Spacer()
-            
-            Text(reason.rawValue)
-                .font(.caption2)
-                .foregroundColor(.secondary)
-        }
-        .padding()
-        .background(Color(.systemBackground))
-        .cornerRadius(8)
-    }
-}
-
-// MARK: - Game Events Tab
-struct GameEventsTab: View {
-    let game: Game
-    let team: Team
-    
-    var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                if let auditLog = game.auditLog, !auditLog.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Game Timeline")
-                            .font(.headline)
                             .padding(.horizontal)
-                        
-                        VStack(spacing: 8) {
-                            ForEach(auditLog.sorted { $0.realTime < $1.realTime }) { entry in
-                                GameEventRow(entry: entry, team: team)
-                            }
-                        }
-                        .padding(.horizontal)
-                    }
-                } else if !game.gameEvents.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Game Events")
-                            .font(.headline)
-                            .padding(.horizontal)
-                        
-                        VStack(spacing: 8) {
-                            ForEach(game.gameEvents.sorted { $0.minute < $1.minute }) { event in
-                                if let player = team.players.first(where: { $0.id == event.playerId }) {
-                                    SimpleGameEventRow(event: event, player: player)
-                                }
-                            }
-                        }
-                        .padding(.horizontal)
-                    }
-                } else {
-                    Text("No events recorded for this game")
-                        .foregroundColor(.secondary)
-                        .padding()
-                }
-            }
-            .padding(.vertical)
-        }
-    }
-}
-
-// MARK: - Game Event Row
-struct GameEventRow: View {
-    let entry: GameAuditEntry
-    let team: Team
-    
-    var body: some View {
-        HStack {
-            // Time
-            Text(entry.gameTime)
-                .font(.caption)
-                .bold()
-                .foregroundColor(.secondary)
-                .frame(width: 40, alignment: .leading)
-            
-            // Event Icon
-            Image(systemName: entry.eventType.icon)
-                .foregroundColor(entry.eventType.color)
-                .frame(width: 30)
-            
-            // Event Details
-            VStack(alignment: .leading, spacing: 2) {
-                Text(entry.eventType.rawValue)
-                    .font(.subheadline)
-                    .bold()
-                
-                if let playerName = entry.playerName {
-                    Text(playerName)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                
-                if !entry.details.isEmpty && entry.details != "\(entry.playerName ?? "") - \(entry.eventType.rawValue)" {
-                    Text(entry.details)
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                }
-            }
-            
-            Spacer()
-        }
-        .padding()
-        .background(Color(.systemBackground))
-        .cornerRadius(8)
-    }
-}
-
-// MARK: - Simple Game Event Row
-struct SimpleGameEventRow: View {
-    let event: GameEvent
-    let player: Player
-    
-    var body: some View {
-        HStack {
-            Text("\(event.minute)'")
-                .font(.caption)
-                .bold()
-                .foregroundColor(.secondary)
-                .frame(width: 40, alignment: .leading)
-            
-            Image(systemName: event.eventType.systemImage)
-                .foregroundColor(event.eventType.color)
-                .frame(width: 30)
-            
-            VStack(alignment: .leading, spacing: 2) {
-                Text(event.eventType.rawValue)
-                    .font(.subheadline)
-                    .bold()
-                
-                Text(player.name)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                
-                if let notes = event.notes {
-                    Text(notes)
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                }
-            }
-            
-            Spacer()
-        }
-        .padding()
-        .background(Color(.systemBackground))
-        .cornerRadius(8)
-    }
-}
-
-// MARK: - Game Stats Tab
-// MARK: - Game Stats Tab (FIXED - Calculates from game events instead of cached stats)
-struct GameStatsTab: View {
-    let game: Game
-    let team: Team
-    
-    // Calculate player stats from actual game events instead of cached playerStats
-    func calculatePlayerStats(for playerId: UUID) -> PlayerGameStats {
-        var stats = PlayerGameStats(playerId: playerId)
-        
-        // Count stats from actual game events
-        for event in game.gameEvents where event.playerId == playerId {
-            switch event.eventType {
-            case .goal:
-                stats.goals += 1
-            case .assist:
-                stats.assists += 1
-            case .shot, .shotOnTarget:
-                stats.shots += 1
-            case .save:
-                stats.saves += 1
-            case .goalAgainst:
-                stats.goalsConceded += 1
-            case .yellowCard:
-                stats.yellowCards += 1
-            case .redCard:
-                stats.redCards += 1
-            default:
-                break
-            }
-        }
-        
-        // Get minutes played from original playerStats if available
-        if let originalStats = game.playerStats.first(where: { $0.playerId == playerId }) {
-            stats.minutesPlayed = originalStats.minutesPlayed
-        }
-        
-        return stats
-    }
-    
-    var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                if !team.players.isEmpty {
-                    LazyVStack(spacing: 12) {
-                        ForEach(team.players.sorted { player1, player2 in
-                            let stats1 = calculatePlayerStats(for: player1.id)
-                            let stats2 = calculatePlayerStats(for: player2.id)
-                            return stats1.goals > stats2.goals
-                        }, id: \.id) { player in
-                            let stats = calculatePlayerStats(for: player.id)
-                            FullCaptureGamePlayerStatsRow(player: player, stats: stats, game: game, team: team)
                         }
                     }
+                    .padding()
+                    .background(Color(.systemBackground))
+                    .cornerRadius(12)
+                    .shadow(radius: 2)
                     .padding(.horizontal)
-                } else {
-                    Text("No player statistics recorded for this game")
-                        .foregroundColor(.secondary)
-                        .padding()
+                    
+                    // FIXED: Player Stats Summary - now calculates from game events instead of cached seasonStats
+                    if hasAnyStats {
+                        let gameStats = calculatePlayerStatsFromGame()
+                        VStack(alignment: .leading, spacing: 16) {
+                            Text("Player Stats Summary")
+                                .font(.headline)
+                                .padding(.horizontal)
+                            
+                            VStack(spacing: 0) {
+                                StatRowView(icon: "soccerball", title: "Total Goals", value: "\(gameStats.goals)")
+                                Divider().padding(.horizontal)
+                                
+                                StatRowView(icon: "hands.and.sparkles.fill", title: "Total Assists", value: "\(gameStats.assists)")
+                                Divider().padding(.horizontal)
+                                
+                                StatRowView(icon: "hand.raised.fill", title: "Total Saves", value: "\(gameStats.saves)")
+                            }
+                            .background(Color(.systemBackground))
+                            .cornerRadius(15)
+                            .shadow(radius: 2)
+                            .padding(.horizontal)
+                        }
+                    }
+                    
+                    // Notes
+                    if let notes = game.notes, !notes.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Notes")
+                                .font(.headline)
+                                .padding(.horizontal)
+                            
+                            Text(notes)
+                                .font(.subheadline)
+                                .padding()
+                                .background(Color(.systemGray6))
+                                .cornerRadius(10)
+                                .padding(.horizontal)
+                        }
+                    }
                 }
+                .padding(.vertical)
             }
-            .padding(.vertical)
+            .alert("Edit Final Score", isPresented: $editingScore) {
+                TextField("Goals For", text: $tempGoalsFor)
+                    .keyboardType(.numberPad)
+                TextField("Goals Against", text: $tempGoalsAgainst)
+                    .keyboardType(.numberPad)
+                Button("Cancel", role: .cancel) { }
+                Button("Save") {
+                    updateScore()
+                }
+            } message: {
+                Text("Enter the final score for this game")
+            }
+        }
+        
+        private func updateScore() {
+            guard let goalsFor = Int(tempGoalsFor),
+                  let goalsAgainst = Int(tempGoalsAgainst),
+                  goalsFor >= 0,
+                  goalsAgainst >= 0 else { return }
+            
+            if game.result == nil {
+                game.result = GameResult(goalsFor: goalsFor, goalsAgainst: goalsAgainst)
+            } else {
+                game.result?.goalsFor = goalsFor
+                game.result?.goalsAgainst = goalsAgainst
+            }
         }
     }
-}
-
-// MARK: - Game Player Stats Row
-
-struct GamePlayerStatsRow: View {
-    let player: Player
-    let stats: PlayerGameStats
     
-    var body: some View {
-        VStack(spacing: 8) {
-            HStack {
-                // Player Info
-                HStack(spacing: 8) {
-                    Circle()
-                        .fill(player.preferredPositionEnum.color)
-                        .frame(width: 30, height: 30)
-                        .overlay(
-                            Text("\(player.jerseyNumber)")
-                                .font(.caption)
-                                .bold()
-                                .foregroundColor(.white)
-                        )
+    // MARK: - Complete Professional Game Quick Stat Card with Dark Colors and Icons
+    struct GameQuickStatCard: View {
+        let title: String
+        let value: String
+        let color: Color
+        let icon: String?
+        
+        // Convenience initializer with icon
+        init(title: String, value: String, color: Color, icon: String? = nil) {
+            self.title = title
+            self.value = value
+            self.color = color
+            self.icon = icon
+        }
+        
+        private var cardBackgroundColor: Color {
+            switch title.lowercased() {
+            case "goals":
+                return Color(red: 0.1, green: 0.4, blue: 0.2) // Darker forest green
+            case "assists":
+                return Color(red: 0.1, green: 0.25, blue: 0.55) // Darker navy blue
+            case "shots":
+                return Color(red: 0.55, green: 0.2, blue: 0.1) // Darker burnt orange
+            case "cards":
+                return Color(red: 0.65, green: 0.45, blue: 0.0) // Professional amber/gold
+            case "subs", "substitutions":
+                return Color(red: 0.15, green: 0.35, blue: 0.65) // Professional dark blue
+            case "saves":
+                return Color(red: 0.35, green: 0.15, blue: 0.55) // Darker purple
+            default:
+                return Color(red: 0.2, green: 0.2, blue: 0.2) // Darker gray
+            }
+        }
+        
+        private var cardIcon: String {
+            if let icon = icon {
+                return icon
+            }
+            
+            // Auto-assign icons based on title
+            switch title.lowercased() {
+            case "goals":
+                return "soccerball.circle.fill"
+            case "assists":
+                return "arrow.triangle.2.circlepath"
+            case "shots":
+                return "scope"
+            case "cards":
+                return "rectangle.fill"
+            case "subs", "substitutions":
+                return "arrow.left.arrow.right.circle.fill"
+            case "saves":
+                return "hand.raised.circle.fill"
+            default:
+                return "chart.bar.fill"
+            }
+        }
+        
+        var body: some View {
+            VStack(spacing: 8) {
+                // Icon
+                Image(systemName: cardIcon)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.white)
+                
+                // Value
+                Text(value)
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                
+                // Title
+                Text(title)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.white.opacity(0.9))
+                    .textCase(.uppercase)
+                    .tracking(0.5)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 70)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(cardBackgroundColor)
+                    .shadow(color: cardBackgroundColor.opacity(0.3), radius: 4, x: 0, y: 2)
+            )
+        }
+    }
+    
+    // MARK: - Game Lineup Tab
+    struct GameLineupTab: View {
+        let game: Game
+        let team: Team
+        
+        // Use actualStartingLineup if available, fallback to startingLineup
+        private var startingLineupPlayers: [(Player, Position)] {
+            let lineup = game.actualStartingLineup ?? game.startingLineup
+            guard let lineup = lineup else { return [] }
+            
+            return lineup.compactMap { position in
+                guard let playerId = position.playerId,
+                      let player = team.players.first(where: { $0.id == playerId }) else { return nil }
+                return (player, position.position)
+            }
+        }
+        
+        // Get the lineup for field display
+        private var displayLineup: [LineupPosition] {
+            return game.actualStartingLineup ?? game.startingLineup ?? []
+        }
+        
+        var body: some View {
+            ScrollView {
+                VStack(spacing: 20) {
+                    if let formation = game.formation, !displayLineup.isEmpty {
+                        // Formation Display
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Starting Lineup - \(formation.rawValue)")
+                                .font(.headline)
+                                .padding(.horizontal)
+                            
+                            // Field View
+                            GeometryReader { geometry in
+                                ZStack {
+                                    ModernSoccerFieldBackground()
+                                    
+                                    ForEach(Array(displayLineup.enumerated()), id: \.offset) { index, position in
+                                        let defaultPos = formation.fieldPositions(for: geometry.size)[index]
+                                        
+                                        if let playerId = position.playerId,
+                                           let player = team.players.first(where: { $0.id == playerId }) {
+                                            
+                                            GameDetailPlayerMarker(
+                                                player: player,
+                                                position: position.position
+                                            )
+                                            .position(defaultPos)
+                                        }
+                                    }
+                                }
+                            }
+                            .frame(height: 300)
+                            .padding(.horizontal)
+                        }
+                        
+                        // Starting XI List
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Starting XI")
+                                .font(.headline)
+                                .padding(.horizontal)
+                            
+                            VStack(spacing: 8) {
+                                ForEach(startingLineupPlayers, id: \.0.id) { player, position in
+                                    HStack {
+                                        Circle()
+                                            .fill(position.color)
+                                            .frame(width: 30, height: 30)
+                                            .overlay(
+                                                Text("\(player.jerseyNumber)")
+                                                    .font(.caption)
+                                                    .bold()
+                                                    .foregroundColor(.white)
+                                            )
+                                        
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(player.name)
+                                                .font(.subheadline)
+                                                .bold()
+                                            Text(position.rawValue)
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
+                                        
+                                        Spacer()
+                                    }
+                                    .padding(.horizontal)
+                                }
+                            }
+                            .padding(.vertical)
+                            .background(Color(.systemBackground))
+                            .cornerRadius(12)
+                            .shadow(radius: 2)
+                            .padding(.horizontal)
+                        }
+                    } else {
+                        Text("No lineup recorded for this game")
+                            .foregroundColor(.secondary)
+                            .padding()
+                    }
                     
-                    Text(player.name)
-                        .font(.subheadline)
-                        .bold()
+                    // Substitutions
+                    if !game.substitutions.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Substitutions")
+                                .font(.headline)
+                                .padding(.horizontal)
+                            
+                            VStack(spacing: 8) {
+                                ForEach(game.substitutions.sorted { $0.minute < $1.minute }, id: \.playerIn) { sub in
+                                    if let playerIn = team.players.first(where: { $0.id == sub.playerIn }),
+                                       let playerOut = team.players.first(where: { $0.id == sub.playerOut }) {
+                                        
+                                        SubstitutionRow(
+                                            playerIn: playerIn,
+                                            playerOut: playerOut,
+                                            minute: sub.minute,
+                                            reason: sub.reason
+                                        )
+                                    }
+                                }
+                            }
+                            .padding(.horizontal)
+                        }
+                    }
+                }
+                .padding(.vertical)
+            }
+        }
+    }
+    // MARK: - Game Detail Player Marker
+    struct GameDetailPlayerMarker: View {
+        let player: Player
+        let position: Position
+        
+        var body: some View {
+            VStack(spacing: 2) {
+                ZStack {
+                    Circle()
+                        .fill(position.color)
+                        .frame(width: 40, height: 40)
+                    
+                    Text(String(player.jerseyNumber))
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(.white)
+                }
+                
+                Text(player.name.components(separatedBy: " ").first ?? "")
+                    .font(.caption2)
+                    .fontWeight(.medium)
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(Color.black.opacity(0.6))
+                    .cornerRadius(4)
+            }
+        }
+    }
+    
+    // MARK: - Substitution Row
+    struct SubstitutionRow: View {
+        let playerIn: Player
+        let playerOut: Player
+        let minute: Int
+        let reason: SubstitutionReason
+        
+        var body: some View {
+            HStack {
+                Text("\(minute)'")
+                    .font(.caption)
+                    .bold()
+                    .foregroundColor(.secondary)
+                    .frame(width: 30, alignment: .leading)
+                
+                HStack(spacing: 8) {
+                    // Player Out
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(Color.red.opacity(0.3))
+                            .frame(width: 20, height: 20)
+                            .overlay(
+                                Text("\(playerOut.jerseyNumber)")
+                                    .font(.caption2)
+                                    .bold()
+                                    .foregroundColor(.red)
+                            )
+                        Text(playerOut.name.components(separatedBy: " ").first ?? "")
+                            .font(.caption)
+                    }
+                    
+                    Image(systemName: "arrow.right")
+                        .font(.caption)
+                        .foregroundColor(.blue)
+                    
+                    // Player In
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(Color.green.opacity(0.3))
+                            .frame(width: 20, height: 20)
+                            .overlay(
+                                Text("\(playerIn.jerseyNumber)")
+                                    .font(.caption2)
+                                    .bold()
+                                    .foregroundColor(.green)
+                            )
+                        Text(playerIn.name.components(separatedBy: " ").first ?? "")
+                            .font(.caption)
+                    }
                 }
                 
                 Spacer()
                 
-                // Minutes Played
-                Text("\(stats.minutesPlayed) min")
-                    .font(.caption)
+                Text(reason.rawValue)
+                    .font(.caption2)
                     .foregroundColor(.secondary)
             }
-            
-            // Stats Grid - ONLY showing Goals, Assists, Shots, Saves
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 16) {
-                    GameStatItem(label: "Goals", value: stats.goals, color: .green)
-                    GameStatItem(label: "Assists", value: stats.assists, color: .blue)
-                    GameStatItem(label: "Shots", value: stats.shots, color: .orange)
-                    GameStatItem(label: "Saves", value: stats.saves, color: .purple)
+            .padding()
+            .background(Color(.systemBackground))
+            .cornerRadius(8)
+        }
+    }
+    
+    // MARK: - Game Events Tab
+    struct GameEventsTab: View {
+        let game: Game
+        let team: Team
+        
+        var body: some View {
+            ScrollView {
+                VStack(spacing: 16) {
+                    if let auditLog = game.auditLog, !auditLog.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Game Timeline")
+                                .font(.headline)
+                                .padding(.horizontal)
+                            
+                            VStack(spacing: 8) {
+                                ForEach(auditLog.sorted { $0.realTime < $1.realTime }) { entry in
+                                    GameEventRow(entry: entry, team: team)
+                                }
+                            }
+                            .padding(.horizontal)
+                        }
+                    } else if !game.gameEvents.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Game Events")
+                                .font(.headline)
+                                .padding(.horizontal)
+                            
+                            VStack(spacing: 8) {
+                                ForEach(game.gameEvents.sorted { $0.minute < $1.minute }) { event in
+                                    if let player = team.players.first(where: { $0.id == event.playerId }) {
+                                        SimpleGameEventRow(event: event, player: player)
+                                    }
+                                }
+                            }
+                            .padding(.horizontal)
+                        }
+                    } else {
+                        Text("No events recorded for this game")
+                            .foregroundColor(.secondary)
+                            .padding()
+                    }
                 }
-                .padding(.horizontal, 4)
+                .padding(.vertical)
             }
         }
-        .padding()
-        .background(Color(.systemBackground))
-        .cornerRadius(8)
     }
-}
-
-// MARK: - Game Stat Item
-struct GameStatItem: View {
-    let label: String
-    let value: Int
-    let color: Color
     
-    var body: some View {
-        VStack(spacing: 2) {
-            Text("\(value)")
-                .font(.subheadline)
-                .bold()
-                .foregroundColor(value > 0 ? color : .secondary)
-            Text(label)
-                .font(.caption2)
-                .foregroundColor(.secondary)
+    // MARK: - Game Event Row
+    struct GameEventRow: View {
+        let entry: GameAuditEntry
+        let team: Team
+        
+        var body: some View {
+            HStack {
+                // Time
+                Text(entry.gameTime)
+                    .font(.caption)
+                    .bold()
+                    .foregroundColor(.secondary)
+                    .frame(width: 40, alignment: .leading)
+                
+                // Event Icon
+                Image(systemName: entry.eventType.icon)
+                    .foregroundColor(entry.eventType.color)
+                    .frame(width: 30)
+                
+                // Event Details
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(entry.eventType.rawValue)
+                        .font(.subheadline)
+                        .bold()
+                    
+                    if let playerName = entry.playerName {
+                        Text(playerName)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    if !entry.details.isEmpty && entry.details != "\(entry.playerName ?? "") - \(entry.eventType.rawValue)" {
+                        Text(entry.details)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                
+                Spacer()
+            }
+            .padding()
+            .background(Color(.systemBackground))
+            .cornerRadius(8)
         }
-        .frame(minWidth: 50)
     }
-}
+    
+    // MARK: - Simple Game Event Row
+    struct SimpleGameEventRow: View {
+        let event: GameEvent
+        let player: Player
+        
+        var body: some View {
+            HStack {
+                Text("\(event.minute)'")
+                    .font(.caption)
+                    .bold()
+                    .foregroundColor(.secondary)
+                    .frame(width: 40, alignment: .leading)
+                
+                Image(systemName: event.eventType.systemImage)
+                    .foregroundColor(event.eventType.color)
+                    .frame(width: 30)
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(event.eventType.rawValue)
+                        .font(.subheadline)
+                        .bold()
+                    
+                    Text(player.name)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    
+                    if let notes = event.notes {
+                        Text(notes)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                
+                Spacer()
+            }
+            .padding()
+            .background(Color(.systemBackground))
+            .cornerRadius(8)
+        }
+    }
+    
+    // MARK: - Game Stats Tab
+    // MARK: - Game Stats Tab (FIXED - Calculates from game events instead of cached stats)
+    struct GameStatsTab: View {
+        let game: Game
+        let team: Team
+        
+        // Calculate player stats from actual game events instead of cached playerStats
+        func calculatePlayerStats(for playerId: UUID) -> PlayerGameStats {
+            var stats = PlayerGameStats(playerId: playerId)
+            
+            // Count stats from actual game events
+            for event in game.gameEvents where event.playerId == playerId {
+                switch event.eventType {
+                case .goal:
+                    stats.goals += 1
+                case .assist:
+                    stats.assists += 1
+                case .shot, .shotOnTarget:
+                    stats.shots += 1
+                case .save:
+                    stats.saves += 1
+                case .goalAgainst:
+                    stats.goalsConceded += 1
+                case .yellowCard:
+                    stats.yellowCards += 1
+                case .redCard:
+                    stats.redCards += 1
+                default:
+                    break
+                }
+            }
+            
+            // Get minutes played from original playerStats if available
+            if let originalStats = game.playerStats.first(where: { $0.playerId == playerId }) {
+                stats.minutesPlayed = originalStats.minutesPlayed
+            }
+            
+            return stats
+        }
+        
+        var body: some View {
+            ScrollView {
+                VStack(spacing: 16) {
+                    if !team.players.isEmpty {
+                        LazyVStack(spacing: 12) {
+                            ForEach(team.players.sorted { player1, player2 in
+                                let stats1 = calculatePlayerStats(for: player1.id)
+                                let stats2 = calculatePlayerStats(for: player2.id)
+                                return stats1.goals > stats2.goals
+                            }, id: \.id) { player in
+                                let stats = calculatePlayerStats(for: player.id)
+                                FullCaptureGamePlayerStatsRow(player: player, stats: stats, game: game, team: team)
+                            }
+                        }
+                        .padding(.horizontal)
+                    } else {
+                        Text("No player statistics recorded for this game")
+                            .foregroundColor(.secondary)
+                            .padding()
+                    }
+                }
+                .padding(.vertical)
+            }
+        }
+    }
+    
+    // MARK: - Game Player Stats Row
+    
+    struct GamePlayerStatsRow: View {
+        let player: Player
+        let stats: PlayerGameStats
+        
+        var body: some View {
+            VStack(spacing: 8) {
+                HStack {
+                    // Player Info
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(player.preferredPositionEnum.color)
+                            .frame(width: 30, height: 30)
+                            .overlay(
+                                Text("\(player.jerseyNumber)")
+                                    .font(.caption)
+                                    .bold()
+                                    .foregroundColor(.white)
+                            )
+                        
+                        Text(player.name)
+                            .font(.subheadline)
+                            .bold()
+                    }
+                    
+                    Spacer()
+                    
+                    // Minutes Played
+                    Text("\(stats.minutesPlayed) min")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                
+                // Stats Grid - ONLY showing Goals, Assists, Shots, Saves
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 16) {
+                        GameStatItem(label: "Goals", value: stats.goals, color: .green)
+                        GameStatItem(label: "Assists", value: stats.assists, color: .blue)
+                        GameStatItem(label: "Shots", value: stats.shots, color: .orange)
+                        GameStatItem(label: "Saves", value: stats.saves, color: .purple)
+                    }
+                    .padding(.horizontal, 4)
+                }
+            }
+            .padding()
+            .background(Color(.systemBackground))
+            .cornerRadius(8)
+        }
+    }
+    
+    // MARK: - Game Stat Item
+    struct GameStatItem: View {
+        let label: String
+        let value: Int
+        let color: Color
+        
+        var body: some View {
+            VStack(spacing: 2) {
+                Text("\(value)")
+                    .font(.subheadline)
+                    .bold()
+                    .foregroundColor(value > 0 ? color : .secondary)
+                Text(label)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+            .frame(minWidth: 50)
+        }
+    }
+

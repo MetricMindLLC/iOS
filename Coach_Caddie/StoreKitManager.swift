@@ -10,7 +10,11 @@ class StoreKitManager: ObservableObject {
     @Published var purchaseInProgress = false
     
     // Reference to your auth manager for subscription updates
-    private weak var authManager: FirebaseAuthManager?  // CHANGED: Made weak to avoid retain cycles
+    private weak var authManager: FirebaseAuthManager?
+    
+    // CRITICAL FIX: Track processed transactions PER USER to prevent cross-user conflicts
+    private var processedTransactionsForCurrentUser: Set<UInt64> = []
+    private var currentUserUID: String?
     
     // Updated with Club subscription product IDs
     private let productIDs = [
@@ -18,8 +22,8 @@ class StoreKitManager: ObservableObject {
         "com.coachcaddie.pro.yearly",
         "com.coachcaddie.premium.monthly",
         "com.coachcaddie.premium.yearly",
-        "com.coachcaddie.club.monthly",        // NEW: Club monthly
-        "com.coachcaddie.club.yearly"          // NEW: Club yearly
+        "com.coachcaddie.club.monthly",
+        "com.coachcaddie.club.yearly"
     ]
     
     private var updateListenerTask: Task<Void, Error>?
@@ -41,6 +45,14 @@ class StoreKitManager: ObservableObject {
     
     func setAuthManager(_ authManager: FirebaseAuthManager) {
         self.authManager = authManager
+        
+        // CRITICAL FIX: Reset processed transactions when user changes
+        let newUserUID = authManager.currentUser?.firebaseUID
+        if newUserUID != currentUserUID {
+            print("🔄 User changed from \(currentUserUID ?? "none") to \(newUserUID ?? "none") - clearing processed transactions")
+            processedTransactionsForCurrentUser.removeAll()
+            currentUserUID = newUserUID
+        }
     }
     
     func loadProducts() async {
@@ -48,16 +60,13 @@ class StoreKitManager: ObservableObject {
         errorMessage = nil
         
         do {
-            // Try to load real products from App Store Connect
             let loadedProducts = try await Product.products(for: productIDs)
             
             if loadedProducts.isEmpty {
-                // No products configured yet - show development message
                 products = []
                 errorMessage = "Subscription products not yet configured in App Store Connect"
             } else {
                 products = loadedProducts.sorted { product1, product2 in
-                    // Sort by subscription level (pro < premium < club), then by duration (monthly < yearly)
                     let level1 = getSubscriptionLevel(for: product1.id) ?? .trial
                     let level2 = getSubscriptionLevel(for: product2.id) ?? .trial
                     
@@ -65,7 +74,6 @@ class StoreKitManager: ObservableObject {
                         return level1.sortOrder < level2.sortOrder
                     }
                     
-                    // Same level - sort monthly before yearly
                     if product1.id.contains("monthly") && product2.id.contains("yearly") {
                         return true
                     }
@@ -106,17 +114,18 @@ class StoreKitManager: ObservableObject {
                 
                 let transaction = try checkVerified(verification)
                 
-                // CHANGED: Update Firebase subscription status BEFORE finishing transaction
-                await handleSuccessfulPurchase(transaction)
+                // CRITICAL FIX: Use the original product ID instead of transaction's product ID
+                // This fixes sandbox issues where Apple returns wrong product IDs
+                print("💳 Processing purchase: intended=\(product.id), transaction=\(transaction.productID)")
+                await handleSuccessfulPurchaseWithCorrectProduct(transaction, intendedProductID: product.id)
+                processedTransactionsForCurrentUser.insert(transaction.id)
                 
-                // Finish the transaction
                 await transaction.finish()
-                
                 print("🎉 Purchase completed successfully!")
                 
             case .userCancelled:
                 print("🚫 User cancelled purchase")
-                errorMessage = nil // Don't show error for user cancellation
+                errorMessage = nil
                 
             case .pending:
                 print("⏳ Purchase is pending approval")
@@ -145,8 +154,6 @@ class StoreKitManager: ObservableObject {
         do {
             try await AppStore.sync()
             await updatePurchasedProducts()
-            
-            // Check for any active subscriptions and update Firebase
             await syncSubscriptionStatus()
             
             print("✅ Purchases restored successfully")
@@ -168,10 +175,18 @@ class StoreKitManager: ObservableObject {
             for await result in StoreKit.Transaction.updates {
                 do {
                     let transaction = try self.checkVerified(result)
-                    print("📬 Received transaction update: \(transaction.productID)")
+                    print("📬 Received transaction update: \(transaction.productID) (ID: \(transaction.id))")
                     
-                    await self.handleSuccessfulPurchase(transaction)
-                    await transaction.finish()
+                    // FIXED: Only process if not already processed for CURRENT USER
+                    if !self.processedTransactionsForCurrentUser.contains(transaction.id) {
+                        print("🔄 Processing new transaction for current user: \(transaction.id)")
+                        await self.handleSuccessfulPurchase(transaction)
+                        self.processedTransactionsForCurrentUser.insert(transaction.id)
+                        await transaction.finish()
+                    } else {
+                        print("⚠️ Transaction \(transaction.id) already processed for current user, skipping")
+                        await transaction.finish()
+                    }
                     
                 } catch {
                     print("❌ Transaction verification failed: \(error)")
@@ -183,16 +198,15 @@ class StoreKitManager: ObservableObject {
     private func checkVerified<T>(_ result: VerificationResult<T>) throws -> T {
         switch result {
         case .unverified:
-            print("❌ Transaction verification failed")
             throw StoreError.failedVerification
         case .verified(let safe):
-            print("✅ Transaction verified successfully")
             return safe
         }
     }
     
     private func updatePurchasedProducts() async {
         var purchasedIDs: Set<String> = []
+        var seenTransactionIDs: Set<UInt64> = []
         
         print("🔍 Checking current entitlements...")
         
@@ -203,20 +217,27 @@ class StoreKitManager: ObservableObject {
                 // Only include non-revoked transactions
                 if transaction.revocationDate == nil {
                     purchasedIDs.insert(transaction.productID)
-                    print("📦 Found active entitlement: \(transaction.productID)")
+                    seenTransactionIDs.insert(transaction.id)
+                    print("📦 Found active entitlement: \(transaction.productID) (ID: \(transaction.id))")
                 }
             } catch {
                 print("❌ Failed to verify entitlement: \(error)")
             }
         }
         
+        // FIXED: Only update processed transactions for current user
+        if !seenTransactionIDs.isEmpty {
+            processedTransactionsForCurrentUser.formUnion(seenTransactionIDs)
+        }
+        
         self.purchasedProductIDs = purchasedIDs
         print("✅ Updated purchased product IDs: \(purchasedIDs)")
+        print("📝 Tracking \(processedTransactionsForCurrentUser.count) processed transactions for current user")
     }
     
-    // CHANGED: Enhanced to properly update Firebase subscription
-    private func handleSuccessfulPurchase(_ transaction: StoreKit.Transaction) async {
-        print("🎯 Processing successful purchase: \(transaction.productID)")
+    // FIXED: New method that uses the correct product ID instead of transaction's product ID
+    private func handleSuccessfulPurchaseWithCorrectProduct(_ transaction: StoreKit.Transaction, intendedProductID: String) async {
+        print("🎯 Processing purchase: intended=\(intendedProductID), transaction=\(transaction.productID) (ID: \(transaction.id))")
         
         guard let authManager = self.authManager else {
             print("❌ No auth manager available - cannot update subscription")
@@ -225,18 +246,42 @@ class StoreKitManager: ObservableObject {
         }
         
         do {
-            // CHANGED: Get the subscription level from the product ID
+            // CRITICAL FIX: Use the intended product ID, not the transaction's product ID
+            guard let subscriptionLevel = getSubscriptionLevel(for: intendedProductID) else {
+                print("❌ Unknown intended product ID: \(intendedProductID)")
+                return
+            }
+            
+            print("⬆️ Setting subscription to \(subscriptionLevel.rawValue) based on intended purchase: \(intendedProductID)")
+            try await authManager.updateSubscriptionLevel(subscriptionLevel, transactionId: String(transaction.id))
+            await updatePurchasedProducts()
+            print("✅ Successfully updated subscription to \(subscriptionLevel.rawValue) in Firebase")
+            
+        } catch {
+            print("❌ Failed to update subscription in Firebase: \(error)")
+            errorMessage = "Purchase successful but failed to update account. Please contact support."
+        }
+    }
+    
+    // Keep the original method for background transaction updates
+    private func handleSuccessfulPurchase(_ transaction: StoreKit.Transaction) async {
+        print("🎯 Processing successful purchase: \(transaction.productID) (Transaction ID: \(transaction.id))")
+        
+        guard let authManager = self.authManager else {
+            print("❌ No auth manager available - cannot update subscription")
+            errorMessage = "Unable to update subscription. Please restart the app and restore purchases."
+            return
+        }
+        
+        do {
             guard let subscriptionLevel = getSubscriptionLevel(for: transaction.productID) else {
                 print("❌ Unknown product ID: \(transaction.productID)")
                 return
             }
             
-            // CHANGED: Update Firebase with the new subscription level directly
+            print("⬆️ Setting subscription to \(subscriptionLevel.rawValue) for current user")
             try await authManager.updateSubscriptionLevel(subscriptionLevel, transactionId: String(transaction.id))
-            
-            // Update local purchased products
             await updatePurchasedProducts()
-            
             print("✅ Successfully updated subscription to \(subscriptionLevel.rawValue) in Firebase")
             
         } catch {
@@ -263,7 +308,6 @@ class StoreKitManager: ObservableObject {
                 
                 if transaction.revocationDate == nil {
                     if let level = getSubscriptionLevel(for: transaction.productID) {
-                        // CHANGED: Better priority checking
                         if highestLevel == nil || level.sortOrder > (highestLevel?.sortOrder ?? 0) {
                             activeSubscription = transaction
                             highestLevel = level
@@ -278,7 +322,6 @@ class StoreKitManager: ObservableObject {
         if let subscription = activeSubscription, let level = highestLevel {
             print("🎯 Found active subscription: \(subscription.productID) - Level: \(level.rawValue)")
             do {
-                // CHANGED: Update with the specific subscription level
                 try await authManager.updateSubscriptionLevel(level, transactionId: String(subscription.id))
                 print("✅ Synced subscription status: \(level.rawValue)")
             } catch {
@@ -297,36 +340,23 @@ class StoreKitManager: ObservableObject {
     
     func getSubscriptionLevel(for productID: String) -> SubscriptionLevel? {
         switch productID {
-        case let id where id.contains("pro"):
+        case "com.coachcaddie.pro.monthly", "com.coachcaddie.pro.yearly":
             return .pro
-        case let id where id.contains("premium"):
+        case "com.coachcaddie.premium.monthly", "com.coachcaddie.premium.yearly":
             return .premium
-        case let id where id.contains("club"):
+        case "com.coachcaddie.club.monthly", "com.coachcaddie.club.yearly":
             return .club
         default:
             return nil
         }
     }
-    
-    func canUpgrade(from currentLevel: SubscriptionLevel, to product: Product) -> Bool {
-        guard let targetLevel = getSubscriptionLevel(for: product.id) else { return false }
-        
-        switch currentLevel {
-        case .trial, .cancelled, .expired:
-            return true
-        case .pro:
-            return targetLevel == .premium || targetLevel == .club
-        case .premium:
-            return targetLevel == .club
-        case .club, .free:
-            return false
-        case .sharedAccess:
-            return targetLevel == .pro || targetLevel == .premium || targetLevel == .club
-        }
-    }
 }
 
-// MARK: - Subscription Level Extensions for Sorting
+// MARK: - Store Errors
+enum StoreError: Error {
+    case failedVerification
+}
+
 extension SubscriptionLevel {
     var sortOrder: Int {
         switch self {
@@ -338,23 +368,6 @@ extension SubscriptionLevel {
         case .sharedAccess: return 5
         case .cancelled: return 6
         case .expired: return 7
-        }
-    }
-}
-
-enum StoreError: Error {
-    case failedVerification
-    case productsNotFound
-    case authManagerNotSet
-    
-    var localizedDescription: String {
-        switch self {
-        case .failedVerification:
-            return "Transaction verification failed"
-        case .productsNotFound:
-            return "No subscription products found"
-        case .authManagerNotSet:
-            return "Authentication manager not configured"
         }
     }
 }

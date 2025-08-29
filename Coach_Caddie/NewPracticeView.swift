@@ -50,8 +50,8 @@ struct ImprovedNewPracticeView: View {
     var filteredDrills: [Drill] {
         let allDrills = DrillLibrary.shared.getAllDrills()
         let categoryFiltered = selectedCategory == "All" ?
-            allDrills :
-            allDrills.filter { $0.category == selectedCategory }
+        allDrills :
+        allDrills.filter { $0.category == selectedCategory }
         
         if searchText.isEmpty {
             return categoryFiltered
@@ -358,7 +358,7 @@ struct ImprovedNewPracticeView: View {
                             title: category,
                             isSelected: selectedCategory == category,
                             count: category == "All" ?
-                                DrillLibrary.shared.getAllDrills().count :
+                            DrillLibrary.shared.getAllDrills().count :
                                 DrillLibrary.shared.getDrills(for: category).count
                         ) {
                             selectedCategory = category
@@ -444,13 +444,13 @@ struct ImprovedNewPracticeView: View {
             location: location.isEmpty ? nil : location,
             notes: notes.isEmpty ? nil : notes,
             attendees: [],
-            drills: selectedDrills.map { $0.drill }, // Convert back to regular drills
+            drills: selectedDrills.map { $0.drill },
             attendance: Dictionary(uniqueKeysWithValues: team.players.map { ($0.id, false) }),
             weather: weather
         )
         
-        team.practices.append(practice)
-        teamManager.updateTeam(team)
+        // Use TeamManager method instead of binding manipulation
+        teamManager.addPractice(to: team, practice: practice)
         
         presentationMode.wrappedValue.dismiss()
     }
@@ -957,8 +957,8 @@ struct DrillPickerView: View {
     var filteredDrills: [Drill] {
         let allDrills = DrillLibrary.shared.getAllDrills()
         let categoryFiltered = selectedCategory == "All" ?
-            allDrills :
-            allDrills.filter { $0.category == selectedCategory }
+        allDrills :
+        allDrills.filter { $0.category == selectedCategory }
         
         if searchText.isEmpty {
             return categoryFiltered
@@ -1014,7 +1014,7 @@ struct DrillPickerView: View {
                                     title: category,
                                     isSelected: selectedCategory == category,
                                     count: category == "All" ?
-                                        DrillLibrary.shared.getAllDrills().count :
+                                    DrillLibrary.shared.getAllDrills().count :
                                         DrillLibrary.shared.getDrills(for: category).count
                                 ) {
                                     selectedCategory = category
@@ -1482,11 +1482,12 @@ struct PracticeDetailView: View {
     }
     
     private func deletePractice() {
-        if let index = team.practices.firstIndex(where: { $0.id == practice.id }) {
-            team.practices.remove(at: index)
-            teamManager.updateTeam(team)
-            presentationMode.wrappedValue.dismiss()
-        }
+        print("🗑️ Attempting to delete practice with ID: \(practice.id)")
+        
+        // Use TeamManager method instead of direct binding manipulation
+        teamManager.deletePractice(from: team, practiceId: practice.id)
+        
+        presentationMode.wrappedValue.dismiss()
     }
     
     private func weatherIcon(for weather: String) -> String {
@@ -1538,7 +1539,7 @@ struct PracticeDetailView: View {
             
             FullCapturePracticeContent(practice: practice, team: team)
         }
-        .background(Color(.systemGroupedBackground))
+            .background(Color(.systemGroupedBackground))
         
         let hostingController = UIHostingController(rootView: fullContentView)
         hostingController.view.backgroundColor = UIColor.systemGroupedBackground
@@ -1573,6 +1574,7 @@ struct PracticeDetailView: View {
         showingShareSheet = true
     }
 }
+
 // MARK: - Full Capture Practice Content (Non-scrollable version for sharing)
 struct FullCapturePracticeContent: View {
     let practice: Practice
@@ -1631,7 +1633,7 @@ struct FullCapturePracticeContent: View {
                         }
                     }
                     
-
+                    
                 }
                 .padding()
                 .background(Color(.systemBackground))
@@ -1657,7 +1659,7 @@ struct FullCapturePracticeContent: View {
                 }
             }
             
-
+            
             
             // Notes
             if let notes = practice.notes, !notes.isEmpty {
@@ -1803,231 +1805,261 @@ struct FullCapturePracticeDrillRow: View {
                 "Scale intensity based on fitness levels"
             ]
         default:
-            return [
-                "Set up the drill according to description",
-                "Ensure all players understand their roles",
-                "Focus on technique and safety",
-                "Provide feedback and encouragement",
-                "Adapt difficulty based on skill level"
-            ]
-        }
-    }
-}
-
-// MARK: - Enhanced Practice Drill Row with Always-Visible Expand
-struct PracticeDrillRow: View {
-    let drill: Drill
-    let index: Int
-    @State private var isExpanded = false
-    
-    private var displayInstructions: [String] {
-        if !drill.instructions.isEmpty {
-            return drill.instructions
-        } else {
-            return getDefaultInstructions(for: drill)
-        }
-    }
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top) {
-                Text("\(index)")
-                    .font(.caption)
-                    .foregroundColor(.white)
-                    .frame(width: 24, height: 24)
-                    .background(Circle().fill(Color.blue))
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(drill.name)
-                        .font(.subheadline)
-                        .bold()
-                    
-                    HStack {
-                        Label("\(drill.duration) min", systemImage: "clock")
-                        Text("•")
-                        Text(drill.category)
-                        Text("•")
-                        Text(drill.difficulty)
-                    }
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    
-                    Button(action: {
-                        withAnimation(.easeInOut(duration: 0.3)) {
-                            isExpanded.toggle()
-                        }
-                    }) {
-                        HStack(spacing: 4) {
-                            Text("\(displayInstructions.count) steps")
-                                .font(.caption2)
-                                .foregroundColor(.blue)
-                            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                                .font(.caption2)
-                                .foregroundColor(.blue)
-                        }
-                    }
-                }
-                
-                Spacer()
-            }
-            
-            if isExpanded {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(Array(displayInstructions.enumerated()), id: \.offset) { stepIndex, instruction in
-                        HStack(alignment: .top, spacing: 8) {
-                            Text("\(stepIndex + 1).")
-                                .font(.caption)
-                                .fontWeight(.medium)
-                                .foregroundColor(.secondary)
-                                .frame(width: 20, alignment: .trailing)
-                            
-                            Text(instruction)
-                                .font(.caption)
-                                .foregroundColor(.primary)
-                                .fixedSize(horizontal: false, vertical: true)
-                            
-                            Spacer()
-                        }
-                        .padding(.leading, 32)
-                    }
-                }
-                .padding(.top, 4)
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                return [
+                    "Set up the drill according to description",
+                    "Ensure all players understand their roles",
+                    "Focus on technique and safety",
+                    "Provide feedback and encouragement",
+                    "Adapt difficulty based on skill level"
+                ]
             }
         }
-        .padding()
-        .background(Color(.systemBackground))
-        .cornerRadius(10)
     }
-    
-    private func getDefaultInstructions(for drill: Drill) -> [String] {
-        switch drill.category.lowercased() {
-        case "warm-up":
-            return [
-                "Start with light jogging to warm up muscles",
-                "Perform dynamic stretches focusing on legs and core",
-                "Gradually increase intensity with movement exercises",
-                "Ensure all players are properly warmed up before continuing"
-            ]
-        case "passing":
-            return [
-                "Set up players in pairs or small groups",
-                "Focus on accuracy over power",
-                "Use both feet when passing",
-                "Encourage communication between players",
-                "Progress from stationary to moving passes"
-            ]
-        case "shooting":
-            return [
-                "Set up shooting stations with proper angles",
-                "Practice with both feet",
-                "Focus on placement before power",
-                "Work on different types of shots (low, high, side-foot)",
-                "Include shots under pressure"
-            ]
-        case "defending":
-            return [
-                "Practice proper defensive stance",
-                "Focus on staying between player and goal",
-                "Work on timing of challenges",
-                "Practice communication with teammates",
-                "Emphasize patience and positioning"
-            ]
-        case "dribbling":
-            return [
-                "Set up cones or markers for direction changes",
-                "Practice with both feet",
-                "Keep ball close to body",
-                "Focus on head up while dribbling",
-                "Vary pace and direction"
-            ]
-        case "fitness":
-            return [
-                "Ensure proper form throughout exercise",
-                "Monitor players for fatigue",
-                "Provide adequate rest between sets",
-                "Encourage proper breathing technique",
-                "Scale intensity based on fitness levels"
-            ]
-        default:
-            return [
-                "Set up the drill according to description",
-                "Ensure all players understand their roles",
-                "Focus on technique and safety",
-                "Provide feedback and encouragement",
-                "Adapt difficulty based on skill level"
-            ]
-        }
-    }
-}
 
-// MARK: - Drill Detail View
-struct DrillDetailView: View {
-    let drill: Drill
-    @State private var showingEditDrill = false
-    @Environment(\.presentationMode) var presentationMode
-    
-    var canEdit: Bool {
-        DrillLibrary.shared.canEditDrill(drill)
-    }
-    
-    var body: some View {
-        NavigationView {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    // Header
-                    VStack(alignment: .leading, spacing: 12) {
+    // MARK: - Enhanced Practice Drill Row with Always-Visible Expand
+    struct PracticeDrillRow: View {
+        let drill: Drill
+        let index: Int
+        @State private var isExpanded = false
+        
+        private var displayInstructions: [String] {
+            if !drill.instructions.isEmpty {
+                return drill.instructions
+            } else {
+                return getDefaultInstructions(for: drill)
+            }
+        }
+        
+        var body: some View {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top) {
+                    Text("\(index)")
+                        .font(.caption)
+                        .foregroundColor(.white)
+                        .frame(width: 24, height: 24)
+                        .background(Circle().fill(Color.blue))
+                    
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(drill.name)
+                            .font(.subheadline)
+                            .bold()
+                        
                         HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(drill.name)
-                                    .font(.largeTitle)
-                                    .bold()
+                            Label("\(drill.duration) min", systemImage: "clock")
+                            Text("•")
+                            Text(drill.category)
+                            Text("•")
+                            Text(drill.difficulty)
+                        }
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        
+                        Button(action: {
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                isExpanded.toggle()
+                            }
+                        }) {
+                            HStack(spacing: 4) {
+                                Text("\(displayInstructions.count) steps")
+                                    .font(.caption2)
+                                    .foregroundColor(.blue)
+                                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                                    .font(.caption2)
+                                    .foregroundColor(.blue)
+                            }
+                        }
+                    }
+                    
+                    Spacer()
+                }
+                
+                if isExpanded {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(Array(displayInstructions.enumerated()), id: \.offset) { stepIndex, instruction in
+                            HStack(alignment: .top, spacing: 8) {
+                                Text("\(stepIndex + 1).")
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(.secondary)
+                                    .frame(width: 20, alignment: .trailing)
                                 
-                                HStack(spacing: 12) {
-                                    Label("\(drill.duration) min", systemImage: "clock")
-                                        .font(.subheadline)
+                                Text(instruction)
+                                    .font(.caption)
+                                    .foregroundColor(.primary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                
+                                Spacer()
+                            }
+                            .padding(.leading, 32)
+                        }
+                    }
+                    .padding(.top, 4)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+            .padding()
+            .background(Color(.systemBackground))
+            .cornerRadius(10)
+        }
+        
+        private func getDefaultInstructions(for drill: Drill) -> [String] {
+            switch drill.category.lowercased() {
+            case "warm-up":
+                return [
+                    "Start with light jogging to warm up muscles",
+                    "Perform dynamic stretches focusing on legs and core",
+                    "Gradually increase intensity with movement exercises",
+                    "Ensure all players are properly warmed up before continuing"
+                ]
+            case "passing":
+                return [
+                    "Set up players in pairs or small groups",
+                    "Focus on accuracy over power",
+                    "Use both feet when passing",
+                    "Encourage communication between players",
+                    "Progress from stationary to moving passes"
+                ]
+            case "shooting":
+                return [
+                    "Set up shooting stations with proper angles",
+                    "Practice with both feet",
+                    "Focus on placement before power",
+                    "Work on different types of shots (low, high, side-foot)",
+                    "Include shots under pressure"
+                ]
+            case "defending":
+                return [
+                    "Practice proper defensive stance",
+                    "Focus on staying between player and goal",
+                    "Work on timing of challenges",
+                    "Practice communication with teammates",
+                    "Emphasize patience and positioning"
+                ]
+            case "dribbling":
+                return [
+                    "Set up cones or markers for direction changes",
+                    "Practice with both feet",
+                    "Keep ball close to body",
+                    "Focus on head up while dribbling",
+                    "Vary pace and direction"
+                ]
+            case "fitness":
+                return [
+                    "Ensure proper form throughout exercise",
+                    "Monitor players for fatigue",
+                    "Provide adequate rest between sets",
+                    "Encourage proper breathing technique",
+                    "Scale intensity based on fitness levels"
+                ]
+            default:
+                return [
+                    "Set up the drill according to description",
+                    "Ensure all players understand their roles",
+                    "Focus on technique and safety",
+                    "Provide feedback and encouragement",
+                    "Adapt difficulty based on skill level"
+                ]
+            }
+        }
+    }
+
+    // MARK: - Drill Detail View
+    struct DrillDetailView: View {
+        let drill: Drill
+        @State private var showingEditDrill = false
+        @Environment(\.presentationMode) var presentationMode
+        
+        var canEdit: Bool {
+            DrillLibrary.shared.canEditDrill(drill)
+        }
+        
+        var body: some View {
+            NavigationView {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        // Header
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(drill.name)
+                                        .font(.largeTitle)
+                                        .bold()
                                     
-                                    Text(drill.category)
-                                        .font(.subheadline)
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 4)
-                                        .background(Color.blue.opacity(0.1))
-                                        .cornerRadius(8)
-                                    
-                                    Text(drill.difficulty)
-                                        .font(.subheadline)
-                                        .foregroundColor(difficultyColor(for: drill.difficulty))
+                                    HStack(spacing: 12) {
+                                        Label("\(drill.duration) min", systemImage: "clock")
+                                            .font(.subheadline)
+                                        
+                                        Text(drill.category)
+                                            .font(.subheadline)
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 4)
+                                            .background(Color.blue.opacity(0.1))
+                                            .cornerRadius(8)
+                                        
+                                        Text(drill.difficulty)
+                                            .font(.subheadline)
+                                            .foregroundColor(difficultyColor(for: drill.difficulty))
+                                    }
+                                }
+                                
+                                Spacer()
+                            }
+                        }
+                        .padding()
+                        
+                        // Description
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Description")
+                                .font(.headline)
+                            Text(drill.description)
+                                .font(.body)
+                                .foregroundColor(.secondary)
+                        }
+                        .padding()
+                        .background(Color(.systemBackground))
+                        .cornerRadius(12)
+                        .padding(.horizontal)
+                        
+                        // Equipment
+                        if !drill.equipment.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Equipment Needed")
+                                    .font(.headline)
+                                ForEach(drill.equipment, id: \.self) { item in
+                                    HStack {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .foregroundColor(.green)
+                                        Text(item)
+                                    }
                                 }
                             }
-                            
-                            Spacer()
+                            .padding()
+                            .background(Color(.systemBackground))
+                            .cornerRadius(12)
+                            .padding(.horizontal)
                         }
-                    }
-                    .padding()
-                    
-                    // Description
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Description")
-                            .font(.headline)
-                        Text(drill.description)
-                            .font(.body)
-                            .foregroundColor(.secondary)
-                    }
-                    .padding()
-                    .background(Color(.systemBackground))
-                    .cornerRadius(12)
-                    .padding(.horizontal)
-                    
-                    // Equipment
-                    if !drill.equipment.isEmpty {
+                        
+                        // Instructions
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Equipment Needed")
+                            Text("Instructions")
                                 .font(.headline)
-                            ForEach(drill.equipment, id: \.self) { item in
-                                HStack {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundColor(.green)
-                                    Text(item)
+                            
+                            let instructions = drill.instructions.isEmpty ?
+                            getDefaultInstructions(for: drill.category) :
+                            drill.instructions
+                            
+                            ForEach(Array(instructions.enumerated()), id: \.offset) { index, step in
+                                HStack(alignment: .top, spacing: 12) {
+                                    Text("\(index + 1)")
+                                        .font(.caption)
+                                        .fontWeight(.bold)
+                                        .foregroundColor(.white)
+                                        .frame(width: 24, height: 24)
+                                        .background(Circle().fill(Color.blue))
+                                    
+                                    Text(step)
+                                        .font(.body)
+                                        .fixedSize(horizontal: false, vertical: true)
                                 }
                             }
                         }
@@ -2035,506 +2067,476 @@ struct DrillDetailView: View {
                         .background(Color(.systemBackground))
                         .cornerRadius(12)
                         .padding(.horizontal)
-                    }
-                    
-                    // Instructions
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Instructions")
-                            .font(.headline)
                         
-                        let instructions = drill.instructions.isEmpty ?
-                            getDefaultInstructions(for: drill.category) :
-                            drill.instructions
-                        
-                        ForEach(Array(instructions.enumerated()), id: \.offset) { index, step in
-                            HStack(alignment: .top, spacing: 12) {
-                                Text("\(index + 1)")
-                                    .font(.caption)
-                                    .fontWeight(.bold)
-                                    .foregroundColor(.white)
-                                    .frame(width: 24, height: 24)
-                                    .background(Circle().fill(Color.blue))
-                                
-                                Text(step)
-                                    .font(.body)
-                                    .fixedSize(horizontal: false, vertical: true)
+                        Color.clear.frame(height: 40)
+                    }
+                }
+                .background(Color(.systemGroupedBackground))
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button("Done") {
+                            presentationMode.wrappedValue.dismiss()
+                        }
+                    }
+                    
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        if canEdit {
+                            Button("Edit") {
+                                showingEditDrill = true
                             }
                         }
                     }
-                    .padding()
-                    .background(Color(.systemBackground))
-                    .cornerRadius(12)
-                    .padding(.horizontal)
-                    
-                    Color.clear.frame(height: 40)
                 }
-            }
-            .background(Color(.systemGroupedBackground))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Done") {
-                        presentationMode.wrappedValue.dismiss()
-                    }
-                }
-                
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    if canEdit {
-                        Button("Edit") {
-                            showingEditDrill = true
-                        }
-                    }
-                }
-            }
-            .sheet(isPresented: $showingEditDrill) {
-                EditCustomDrillView(drill: drill)
-            }
-        }
-    }
-    
-    private func difficultyColor(for difficulty: String) -> Color {
-        switch difficulty {
-        case "Easy": return .green
-        case "Medium": return .orange
-        case "Hard": return .red
-        default: return .gray
-        }
-    }
-    
-    private func getDefaultInstructions(for category: String) -> [String] {
-        switch category.lowercased() {
-        case "warm-up":
-            return [
-                "Start with light jogging",
-                "Perform dynamic stretches",
-                "Gradually increase intensity",
-                "Ensure all players are properly warmed up"
-            ]
-        case "passing":
-            return [
-                "Set up players in appropriate formation",
-                "Focus on accuracy and weight of pass",
-                "Use both feet",
-                "Progress from stationary to moving"
-            ]
-        default:
-            return [
-                "Set up drill as described",
-                "Demonstrate proper technique",
-                "Provide feedback and encouragement",
-                "Adapt difficulty as needed"
-            ]
-        }
-    }
-}
-
-// MARK: - Edit Custom Drill View
-struct EditCustomDrillView: View {
-    let drill: Drill
-    @State private var name: String
-    @State private var description: String
-    @State private var duration: Int
-    @State private var category: String
-    @State private var difficulty: String
-    @State private var equipment: [String]
-    @State private var newEquipment = ""
-    @State private var instructions: [String]
-    @State private var newInstruction = ""
-    @Environment(\.presentationMode) var presentationMode
-    
-    let categories = DrillLibrary.categories
-    let difficulties = ["Easy", "Medium", "Hard"]
-    let durationOptions = [5, 10, 15, 20, 25, 30, 45, 60]
-    
-    init(drill: Drill) {
-        self.drill = drill
-        self._name = State(initialValue: drill.name)
-        self._description = State(initialValue: drill.description)
-        self._duration = State(initialValue: drill.duration)
-        self._category = State(initialValue: drill.category)
-        self._difficulty = State(initialValue: drill.difficulty)
-        self._equipment = State(initialValue: drill.equipment)
-        self._instructions = State(initialValue: drill.instructions)
-    }
-    
-    var body: some View {
-        NavigationView {
-            Form {
-                Section("Basic Information") {
-                    TextField("Drill Name", text: $name)
-                    
-                    TextEditor(text: $description)
-                        .frame(minHeight: 80)
-                }
-                
-                Section("Details") {
-                    Picker("Duration", selection: $duration) {
-                        ForEach(durationOptions, id: \.self) { minutes in
-                            Text("\(minutes) minutes").tag(minutes)
-                        }
-                    }
-                    
-                    Picker("Category", selection: $category) {
-                        ForEach(categories, id: \.self) { cat in
-                            Text(cat).tag(cat)
-                        }
-                    }
-                    
-                    Picker("Difficulty", selection: $difficulty) {
-                        ForEach(difficulties, id: \.self) { diff in
-                            Text(diff).tag(diff)
-                        }
-                    }
-                }
-                
-                Section("Equipment") {
-                    ForEach(equipment, id: \.self) { item in
-                        HStack {
-                            Text(item)
-                            Spacer()
-                            Button(action: {
-                                equipment.removeAll { $0 == item }
-                            }) {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundColor(.red)
-                            }
-                        }
-                    }
-                    
-                    HStack {
-                        TextField("Add equipment...", text: $newEquipment)
-                        Button("Add") {
-                            if !newEquipment.isEmpty {
-                                equipment.append(newEquipment)
-                                newEquipment = ""
-                            }
-                        }
-                        .disabled(newEquipment.isEmpty)
-                    }
-                }
-                
-                Section("Instructions") {
-                    ForEach(Array(instructions.enumerated()), id: \.offset) { index, instruction in
-                        HStack {
-                            Text("\(index + 1).")
-                                .fontWeight(.medium)
-                                .frame(width: 25, alignment: .leading)
-                            Text(instruction)
-                            Spacer()
-                            Button(action: {
-                                instructions.remove(at: index)
-                            }) {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundColor(.red)
-                            }
-                        }
-                    }
-                    
-                    HStack {
-                        TextField("Add instruction step...", text: $newInstruction)
-                        Button("Add") {
-                            if !newInstruction.isEmpty {
-                                instructions.append(newInstruction)
-                                newInstruction = ""
-                            }
-                        }
-                        .disabled(newInstruction.isEmpty)
-                    }
-                }
-            }
-            .navigationTitle("Edit Drill")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") {
-                        presentationMode.wrappedValue.dismiss()
-                    }
-                }
-                
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Save") {
-                        updateDrill()
-                    }
-                    .disabled(name.isEmpty || description.isEmpty)
+                .sheet(isPresented: $showingEditDrill) {
+                    EditCustomDrillView(drill: drill)
                 }
             }
         }
-    }
-    
-    private func updateDrill() {
-        var updatedDrill = drill
-        updatedDrill.name = name
-        updatedDrill.description = description
-        updatedDrill.duration = duration
-        updatedDrill.category = category
-        updatedDrill.difficulty = difficulty
-        updatedDrill.equipment = equipment
-        updatedDrill.instructions = instructions
         
-        DrillLibrary.shared.updateCustomDrill(updatedDrill)
-        presentationMode.wrappedValue.dismiss()
+        private func difficultyColor(for difficulty: String) -> Color {
+            switch difficulty {
+            case "Easy": return .green
+            case "Medium": return .orange
+            case "Hard": return .red
+            default: return .gray
+            }
+        }
+        
+        private func getDefaultInstructions(for category: String) -> [String] {
+            switch category.lowercased() {
+            case "warm-up":
+                return [
+                    "Start with light jogging",
+                    "Perform dynamic stretches",
+                    "Gradually increase intensity",
+                    "Ensure all players are properly warmed up"
+                ]
+            case "passing":
+                return [
+                    "Set up players in appropriate formation",
+                    "Focus on accuracy and weight of pass",
+                    "Use both feet",
+                    "Progress from stationary to moving"
+                ]
+            default:
+                return [
+                    "Set up drill as described",
+                    "Demonstrate proper technique",
+                    "Provide feedback and encouragement",
+                    "Adapt difficulty as needed"
+                ]
+            }
+        }
     }
-}
 
-// MARK: - Location Picker View
-struct LocationPickerView: View {
-    @Binding var selectedMapItem: MKMapItem?
-    @State private var searchText = ""
-    @State private var searchResults: [MKMapItem] = []
-    @State private var isSearching = false
-    @Environment(\.presentationMode) var presentationMode
-    
-    let commonLocations = [
-        "Main Field",
-        "Training Ground",
-        "School Field",
-        "Community Center",
-        "Sports Complex",
-        "Park Field"
-    ]
-    
-    var body: some View {
-        NavigationView {
-            VStack {
-                // Search Bar
-                HStack {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundColor(.secondary)
-                    TextField("Search for a location...", text: $searchText)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .onSubmit {
-                            searchLocations()
-                        }
-                    
-                    if isSearching {
-                        ProgressView()
+    // MARK: - Edit Custom Drill View
+    struct EditCustomDrillView: View {
+        let drill: Drill
+        @State private var name: String
+        @State private var description: String
+        @State private var duration: Int
+        @State private var category: String
+        @State private var difficulty: String
+        @State private var equipment: [String]
+        @State private var newEquipment = ""
+        @State private var instructions: [String]
+        @State private var newInstruction = ""
+        @Environment(\.presentationMode) var presentationMode
+        
+        let categories = DrillLibrary.categories
+        let difficulties = ["Easy", "Medium", "Hard"]
+        let durationOptions = [5, 10, 15, 20, 25, 30, 45, 60]
+        
+        init(drill: Drill) {
+            self.drill = drill
+            self._name = State(initialValue: drill.name)
+            self._description = State(initialValue: drill.description)
+            self._duration = State(initialValue: drill.duration)
+            self._category = State(initialValue: drill.category)
+            self._difficulty = State(initialValue: drill.difficulty)
+            self._equipment = State(initialValue: drill.equipment)
+            self._instructions = State(initialValue: drill.instructions)
+        }
+        
+        var body: some View {
+            NavigationView {
+                Form {
+                    Section("Basic Information") {
+                        TextField("Drill Name", text: $name)
+                        
+                        TextEditor(text: $description)
+                            .frame(minHeight: 80)
                     }
-                }
-                .padding()
-                
-                List {
-                    // Common Locations
-                    Section("Common Locations") {
-                        ForEach(commonLocations, id: \.self) { location in
-                            Button(action: {
-                                let item = MKMapItem()
-                                item.name = location
-                                selectedMapItem = item
-                                presentationMode.wrappedValue.dismiss()
-                            }) {
-                                HStack {
-                                    Image(systemName: "location.circle.fill")
-                                        .foregroundColor(.blue)
-                                    Text(location)
-                                        .foregroundColor(.primary)
-                                    Spacer()
+                    
+                    Section("Details") {
+                        Picker("Duration", selection: $duration) {
+                            ForEach(durationOptions, id: \.self) { minutes in
+                                Text("\(minutes) minutes").tag(minutes)
+                            }
+                        }
+                        
+                        Picker("Category", selection: $category) {
+                            ForEach(categories, id: \.self) { cat in
+                                Text(cat).tag(cat)
+                            }
+                        }
+                        
+                        Picker("Difficulty", selection: $difficulty) {
+                            ForEach(difficulties, id: \.self) { diff in
+                                Text(diff).tag(diff)
+                            }
+                        }
+                    }
+                    
+                    Section("Equipment") {
+                        ForEach(equipment, id: \.self) { item in
+                            HStack {
+                                Text(item)
+                                Spacer()
+                                Button(action: {
+                                    equipment.removeAll { $0 == item }
+                                }) {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(.red)
                                 }
                             }
                         }
+                        
+                        HStack {
+                            TextField("Add equipment...", text: $newEquipment)
+                            Button("Add") {
+                                if !newEquipment.isEmpty {
+                                    equipment.append(newEquipment)
+                                    newEquipment = ""
+                                }
+                            }
+                            .disabled(newEquipment.isEmpty)
+                        }
                     }
                     
-                    // Search Results
-                    if !searchResults.isEmpty {
-                        Section("Search Results") {
-                            ForEach(searchResults, id: \.self) { item in
+                    Section("Instructions") {
+                        ForEach(Array(instructions.enumerated()), id: \.offset) { index, instruction in
+                            HStack {
+                                Text("\(index + 1).")
+                                    .fontWeight(.medium)
+                                    .frame(width: 25, alignment: .leading)
+                                Text(instruction)
+                                Spacer()
                                 Button(action: {
+                                    instructions.remove(at: index)
+                                }) {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(.red)
+                                }
+                            }
+                        }
+                        
+                        HStack {
+                            TextField("Add instruction step...", text: $newInstruction)
+                            Button("Add") {
+                                if !newInstruction.isEmpty {
+                                    instructions.append(newInstruction)
+                                    newInstruction = ""
+                                }
+                            }
+                            .disabled(newInstruction.isEmpty)
+                        }
+                    }
+                }
+                .navigationTitle("Edit Drill")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button("Cancel") {
+                            presentationMode.wrappedValue.dismiss()
+                        }
+                    }
+                    
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("Save") {
+                            updateDrill()
+                        }
+                        .disabled(name.isEmpty || description.isEmpty)
+                    }
+                }
+            }
+        }
+        
+        private func updateDrill() {
+            var updatedDrill = drill
+            updatedDrill.name = name
+            updatedDrill.description = description
+            updatedDrill.duration = duration
+            updatedDrill.category = category
+            updatedDrill.difficulty = difficulty
+            updatedDrill.equipment = equipment
+            updatedDrill.instructions = instructions
+            
+            DrillLibrary.shared.updateCustomDrill(updatedDrill)
+            presentationMode.wrappedValue.dismiss()
+        }
+    }
+
+    // MARK: - Location Picker View
+    struct LocationPickerView: View {
+        @Binding var selectedMapItem: MKMapItem?
+        @State private var searchText = ""
+        @State private var searchResults: [MKMapItem] = []
+        @State private var isSearching = false
+        @Environment(\.presentationMode) var presentationMode
+        
+        let commonLocations = [
+            "Main Field",
+            "Training Ground",
+            "School Field",
+            "Community Center",
+            "Sports Complex",
+            "Park Field"
+        ]
+        
+        var body: some View {
+            NavigationView {
+                VStack {
+                    // Search Bar
+                    HStack {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundColor(.secondary)
+                        TextField("Search for a location...", text: $searchText)
+                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                            .onSubmit {
+                                searchLocations()
+                            }
+                        
+                        if isSearching {
+                            ProgressView()
+                        }
+                    }
+                    .padding()
+                    
+                    List {
+                        // Common Locations
+                        Section("Common Locations") {
+                            ForEach(commonLocations, id: \.self) { location in
+                                Button(action: {
+                                    let item = MKMapItem()
+                                    item.name = location
                                     selectedMapItem = item
                                     presentationMode.wrappedValue.dismiss()
                                 }) {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(item.name ?? "Unknown Location")
+                                    HStack {
+                                        Image(systemName: "location.circle.fill")
+                                            .foregroundColor(.blue)
+                                        Text(location)
                                             .foregroundColor(.primary)
-                                        if let address = item.placemark.title {
-                                            Text(address)
-                                                .font(.caption)
-                                                .foregroundColor(.secondary)
+                                        Spacer()
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Search Results
+                        if !searchResults.isEmpty {
+                            Section("Search Results") {
+                                ForEach(searchResults, id: \.self) { item in
+                                    Button(action: {
+                                        selectedMapItem = item
+                                        presentationMode.wrappedValue.dismiss()
+                                    }) {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(item.name ?? "Unknown Location")
+                                                .foregroundColor(.primary)
+                                            if let address = item.placemark.title {
+                                                Text(address)
+                                                    .font(.caption)
+                                                    .foregroundColor(.secondary)
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
                     }
+                    .listStyle(InsetGroupedListStyle())
                 }
-                .listStyle(InsetGroupedListStyle())
+                .navigationTitle("Select Location")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("Cancel") {
+                            presentationMode.wrappedValue.dismiss()
+                        }
+                    }
+                }
             }
-            .navigationTitle("Select Location")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Cancel") {
-                        presentationMode.wrappedValue.dismiss()
+        }
+        
+        private func searchLocations() {
+            isSearching = true
+            
+            let request = MKLocalSearch.Request()
+            request.naturalLanguageQuery = searchText
+            
+            let search = MKLocalSearch(request: request)
+            search.start { response, error in
+                DispatchQueue.main.async {
+                    self.isSearching = false
+                    if let response = response {
+                        self.searchResults = response.mapItems
                     }
                 }
             }
         }
     }
-    
-    private func searchLocations() {
-        isSearching = true
-        
-        let request = MKLocalSearch.Request()
-        request.naturalLanguageQuery = searchText
-        
-        let search = MKLocalSearch(request: request)
-        search.start { response, error in
-            DispatchQueue.main.async {
-                self.isSearching = false
-                if let response = response {
-                    self.searchResults = response.mapItems
-                }
-            }
-        }
-    }
-}
 
-// MARK: - Improved Custom Drill Creation
-struct ImprovedCustomDrillView: View {
-    @State private var name = ""
-    @State private var description = ""
-    @State private var duration = 15
-    @State private var category = "Technical"
-    @State private var difficulty = "Medium"
-    @State private var equipment: [String] = []
-    @State private var newEquipment = ""
-    @State private var instructions: [String] = []
-    @State private var newInstruction = ""
-    @Environment(\.presentationMode) var presentationMode
-    
-    let categories = DrillLibrary.categories
-    let difficulties = ["Easy", "Medium", "Hard"]
-    let durationOptions = [5, 10, 15, 20, 25, 30, 45, 60]
-    
-    let onSave: (Drill) -> Void
-    
-    var body: some View {
-        NavigationView {
-            Form {
-                Section("Basic Information") {
-                    TextField("Drill Name", text: $name)
+    // MARK: - Improved Custom Drill Creation
+    struct ImprovedCustomDrillView: View {
+        @State private var name = ""
+        @State private var description = ""
+        @State private var duration = 15
+        @State private var category = "Technical"
+        @State private var difficulty = "Medium"
+        @State private var equipment: [String] = []
+        @State private var newEquipment = ""
+        @State private var instructions: [String] = []
+        @State private var newInstruction = ""
+        @Environment(\.presentationMode) var presentationMode
+        
+        let categories = DrillLibrary.categories
+        let difficulties = ["Easy", "Medium", "Hard"]
+        let durationOptions = [5, 10, 15, 20, 25, 30, 45, 60]
+        
+        let onSave: (Drill) -> Void
+        
+        var body: some View {
+            NavigationView {
+                Form {
+                    Section("Basic Information") {
+                        TextField("Drill Name", text: $name)
+                        
+                        TextEditor(text: $description)
+                            .frame(minHeight: 80)
+                            .overlay(
+                                Text("Describe the drill objectives and key points...")
+                                    .foregroundColor(.secondary)
+                                    .opacity(description.isEmpty ? 1 : 0)
+                                    .padding(.horizontal, 4)
+                                    .padding(.vertical, 8)
+                                    .allowsHitTesting(false),
+                                alignment: .topLeading
+                            )
+                    }
                     
-                    TextEditor(text: $description)
-                        .frame(minHeight: 80)
-                        .overlay(
-                            Text("Describe the drill objectives and key points...")
-                                .foregroundColor(.secondary)
-                                .opacity(description.isEmpty ? 1 : 0)
-                                .padding(.horizontal, 4)
-                                .padding(.vertical, 8)
-                                .allowsHitTesting(false),
-                            alignment: .topLeading
-                        )
-                }
-                
-                Section("Details") {
-                    Picker("Duration", selection: $duration) {
-                        ForEach(durationOptions, id: \.self) { minutes in
-                            Text("\(minutes) minutes").tag(minutes)
+                    Section("Details") {
+                        Picker("Duration", selection: $duration) {
+                            ForEach(durationOptions, id: \.self) { minutes in
+                                Text("\(minutes) minutes").tag(minutes)
+                            }
+                        }
+                        
+                        Picker("Category", selection: $category) {
+                            ForEach(categories, id: \.self) { cat in
+                                Text(cat).tag(cat)
+                            }
+                        }
+                        
+                        Picker("Difficulty", selection: $difficulty) {
+                            ForEach(difficulties, id: \.self) { diff in
+                                Text(diff).tag(diff)
+                            }
                         }
                     }
                     
-                    Picker("Category", selection: $category) {
-                        ForEach(categories, id: \.self) { cat in
-                            Text(cat).tag(cat)
+                    Section("Equipment") {
+                        ForEach(equipment, id: \.self) { item in
+                            HStack {
+                                Text(item)
+                                Spacer()
+                                Button(action: {
+                                    equipment.removeAll { $0 == item }
+                                }) {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(.red)
+                                }
+                            }
                         }
-                    }
-                    
-                    Picker("Difficulty", selection: $difficulty) {
-                        ForEach(difficulties, id: \.self) { diff in
-                            Text(diff).tag(diff)
-                        }
-                    }
-                }
-                
-                Section("Equipment") {
-                    ForEach(equipment, id: \.self) { item in
+                        
                         HStack {
-                            Text(item)
-                            Spacer()
-                            Button(action: {
-                                equipment.removeAll { $0 == item }
-                            }) {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundColor(.red)
+                            TextField("Add equipment...", text: $newEquipment)
+                            Button("Add") {
+                                if !newEquipment.isEmpty {
+                                    equipment.append(newEquipment)
+                                    newEquipment = ""
+                                }
                             }
+                            .disabled(newEquipment.isEmpty)
                         }
                     }
                     
-                    HStack {
-                        TextField("Add equipment...", text: $newEquipment)
-                        Button("Add") {
-                            if !newEquipment.isEmpty {
-                                equipment.append(newEquipment)
-                                newEquipment = ""
+                    Section("Instructions") {
+                        ForEach(Array(instructions.enumerated()), id: \.offset) { index, instruction in
+                            HStack {
+                                Text("\(index + 1).")
+                                    .fontWeight(.medium)
+                                    .frame(width: 25, alignment: .leading)
+                                Text(instruction)
+                                Spacer()
+                                Button(action: {
+                                    instructions.remove(at: index)
+                                }) {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(.red)
+                                }
                             }
                         }
-                        .disabled(newEquipment.isEmpty)
-                    }
-                }
-                
-                Section("Instructions") {
-                    ForEach(Array(instructions.enumerated()), id: \.offset) { index, instruction in
+                        
                         HStack {
-                            Text("\(index + 1).")
-                                .fontWeight(.medium)
-                                .frame(width: 25, alignment: .leading)
-                            Text(instruction)
-                            Spacer()
-                            Button(action: {
-                                instructions.remove(at: index)
-                            }) {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundColor(.red)
+                            TextField("Add instruction step...", text: $newInstruction)
+                            Button("Add") {
+                                if !newInstruction.isEmpty {
+                                    instructions.append(newInstruction)
+                                    newInstruction = ""
+                                }
                             }
+                            .disabled(newInstruction.isEmpty)
+                        }
+                    }
+                }
+                .navigationTitle("Create Custom Drill")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button("Cancel") {
+                            presentationMode.wrappedValue.dismiss()
                         }
                     }
                     
-                    HStack {
-                        TextField("Add instruction step...", text: $newInstruction)
-                        Button("Add") {
-                            if !newInstruction.isEmpty {
-                                instructions.append(newInstruction)
-                                newInstruction = ""
-                            }
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("Save") {
+                            saveDrill()
                         }
-                        .disabled(newInstruction.isEmpty)
+                        .disabled(name.isEmpty || description.isEmpty)
                     }
-                }
-            }
-            .navigationTitle("Create Custom Drill")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") {
-                        presentationMode.wrappedValue.dismiss()
-                    }
-                }
-                
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Save") {
-                        saveDrill()
-                    }
-                    .disabled(name.isEmpty || description.isEmpty)
                 }
             }
         }
-    }
-    
-    private func saveDrill() {
-        let drill = Drill(
-            name: name,
-            description: description,
-            duration: duration,
-            category: category,
-            difficulty: difficulty,
-            equipment: equipment,
-            playerCount: nil,
-            objectives: [],
-            instructions: instructions,
-            variations: [],
-            videoURL: nil
-        )
         
-        onSave(drill)
-        presentationMode.wrappedValue.dismiss()
+        private func saveDrill() {
+            let drill = Drill(
+                name: name,
+                description: description,
+                duration: duration,
+                category: category,
+                difficulty: difficulty,
+                equipment: equipment,
+                playerCount: nil,
+                objectives: [],
+                instructions: instructions,
+                variations: [],
+                videoURL: nil
+            )
+            
+            onSave(drill)
+            presentationMode.wrappedValue.dismiss()
+        }
     }
-}

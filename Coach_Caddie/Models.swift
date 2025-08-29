@@ -251,7 +251,6 @@ enum SubscriptionLevel: String, Codable, Equatable {
         }
     }
 }
-// MARK: - Enhanced User Model
 struct User: Identifiable, Codable, Equatable {
     var id: UUID
     var firebaseUID: String
@@ -263,6 +262,12 @@ struct User: Identifiable, Codable, Equatable {
     var subscriptionEndDate: Date?
     var cancellationDate: Date?
     var dataRetentionEndDate: Date?
+    var hasUsedTrial: Bool = false  // NEW: Track if user has ever used trial
+    
+    // Add computed property to check trial eligibility
+    var isTrialEligible: Bool {
+        return !hasUsedTrial
+    }
     
     // EXISTING: Computed property for backward compatibility
     var effectiveMembershipType: MembershipType {
@@ -322,10 +327,10 @@ struct User: Identifiable, Codable, Equatable {
         return subscriptionLevel.maxViewerInvitesPerTeam
     }
     
-    // MARK: - Custom Decoding for Backward Compatibility
     enum CodingKeys: String, CodingKey {
         case id, firebaseUID, email, membershipType, dateJoined, subscriptionLevel
         case trialStartDate, subscriptionEndDate, cancellationDate, dataRetentionEndDate
+        case hasUsedTrial  // NEW
     }
     
     init(from decoder: Decoder) throws {
@@ -343,6 +348,7 @@ struct User: Identifiable, Codable, Equatable {
         subscriptionEndDate = try container.decodeIfPresent(Date.self, forKey: .subscriptionEndDate)
         cancellationDate = try container.decodeIfPresent(Date.self, forKey: .cancellationDate)
         dataRetentionEndDate = try container.decodeIfPresent(Date.self, forKey: .dataRetentionEndDate)
+        hasUsedTrial = try container.decodeIfPresent(Bool.self, forKey: .hasUsedTrial) ?? false
     }
     
     func encode(to encoder: Encoder) throws {
@@ -358,6 +364,7 @@ struct User: Identifiable, Codable, Equatable {
         try container.encodeIfPresent(subscriptionEndDate, forKey: .subscriptionEndDate)
         try container.encodeIfPresent(cancellationDate, forKey: .cancellationDate)
         try container.encodeIfPresent(dataRetentionEndDate, forKey: .dataRetentionEndDate)
+        try container.encode(hasUsedTrial, forKey: .hasUsedTrial)  // ADD THIS LINE
     }
     
     // MARK: - Standard initializer
@@ -370,7 +377,8 @@ struct User: Identifiable, Codable, Equatable {
          trialStartDate: Date = Date(),
          subscriptionEndDate: Date? = nil,
          cancellationDate: Date? = nil,
-         dataRetentionEndDate: Date? = nil) {
+         dataRetentionEndDate: Date? = nil,
+         hasUsedTrial: Bool = false) {  // ADD THIS PARAMETER
         self.id = id
         self.firebaseUID = firebaseUID
         self.email = email
@@ -381,10 +389,10 @@ struct User: Identifiable, Codable, Equatable {
         self.subscriptionEndDate = subscriptionEndDate
         self.cancellationDate = cancellationDate
         self.dataRetentionEndDate = dataRetentionEndDate
+        self.hasUsedTrial = hasUsedTrial  // ADD THIS LINE
     }
 }
 
-// MARK: - Planned Substitution
 struct PlannedSubstitution: Identifiable, Codable, Equatable {
     let id = UUID()
     var playerOut: UUID
@@ -393,6 +401,11 @@ struct PlannedSubstitution: Identifiable, Codable, Equatable {
     var reason: SubstitutionReason
     var isExecuted: Bool = false
     var actualMinute: Int?
+    var subGroupIndex: Int? = nil
+    var groupDisplayName: String {
+        guard let groupIndex = subGroupIndex else { return "Individual" }
+        return "Sub \(groupIndex)"
+    }
 }
 
 // MARK: - Lineup Phase
