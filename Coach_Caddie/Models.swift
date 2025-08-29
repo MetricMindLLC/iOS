@@ -1752,6 +1752,9 @@ class GameStateManager: ObservableObject {
     
     static let shared = GameStateManager()
     
+    private var lastPersistTime: Date?
+    private let persistInterval: TimeInterval = 30.0
+    private let criticalPersistEvents: Set<GameAuditEventType> = [.goal, .substitution, .gameEnd, .halfTime]
     private init() {}
     
     func startGameSession(game: Game, team: Team, formation: Formation, lineupPositions: [LineupPosition], halfLength: Int = 45) {
@@ -1902,6 +1905,12 @@ class GameStateManager: ObservableObject {
         
         state.auditLog.append(entry)
         activeGameState = state
+        
+        // Force persist for critical events
+        let criticalEvents: Set<GameAuditEventType> = [.goal, .substitution, .gameEnd, .halfTime]
+        if criticalEvents.contains(eventType) {
+            forcePersistActiveGameState()
+        }
     }
     
     // NEW: Edit audit entry
@@ -1995,6 +2004,12 @@ class GameStateManager: ObservableObject {
     }
     
     func persistActiveGameState() {
+        // Check if enough time has passed since last persist
+        if let lastTime = lastPersistTime,
+           Date().timeIntervalSince(lastTime) < persistInterval {
+            // Skip this persistence unless it's been 30+ seconds
+            return
+        }
         guard let activeState = activeGameState else {
             // Remove persisted state if no active game
             UserDefaults.standard.removeObject(forKey: "ActiveGameState")
@@ -2005,9 +2020,25 @@ class GameStateManager: ObservableObject {
         
         if let encoded = try? JSONEncoder().encode(persistedState) {
             UserDefaults.standard.set(encoded, forKey: "ActiveGameState")
+            lastPersistTime = Date()
             print("💾 Persisted active game state")
         }
     }
+    
+    func forcePersistActiveGameState() {
+          guard let activeState = activeGameState else {
+              UserDefaults.standard.removeObject(forKey: "ActiveGameState")
+              return
+          }
+          
+          let persistedState = PersistedActiveGameState(from: activeState)
+          
+          if let encoded = try? JSONEncoder().encode(persistedState) {
+              UserDefaults.standard.set(encoded, forKey: "ActiveGameState")
+              lastPersistTime = Date()
+              print("💾 Force persisted active game state (critical event)")
+          }
+      }
 
     func restoreActiveGameState(from persistedState: PersistedActiveGameState) {
         // Create a new ActiveGameState from the persisted data

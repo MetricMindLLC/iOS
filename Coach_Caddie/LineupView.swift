@@ -932,29 +932,30 @@ struct LineupView: View {
         
         gameTimer?.invalidate()
         
-        // CONTINUOUS TIMER: Keep 1-second interval for smooth display
         gameTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
             DispatchQueue.main.async {
                 if gameStateManager.activeGameState?.isRunning == true {
                     editedMinute = gameStateManager.calculatedMinute
                     editedSecond = gameStateManager.calculatedSecond
-                    timerTick.toggle() // Keeps continuous timer display
+                    timerTick.toggle()
                     
-                    // CONTINUOUS GameStateManager persistence (UserDefaults only - fast)
-                    // This ensures game state is never lost and updates smoothly
-                    if gameStateManager.calculatedSecond % 30 == 0 { // Every 30 seconds
-                        gameStateManager.persistActiveGameState()
+                    // Only persist every 30 seconds instead of every second
+                    if gameStateManager.calculatedSecond == 0 && gameStateManager.calculatedMinute % 1 == 0 {
+                        // Check substitutions every minute
+                        checkAndExecutePlannedSubstitutions()
+                        
+                        // Only persist every 30 seconds
+                        if gameStateManager.calculatedMinute % 30 == 0 ||
+                           (gameStateManager.calculatedMinute == 0 && gameStateManager.calculatedSecond == 0) {
+                            gameStateManager.persistActiveGameState()
+                        }
                     }
-                    
-                    // Check for automatic substitutions
-                    checkAndExecutePlannedSubstitutions()
                 }
             }
         }
         
         RunLoop.current.add(gameTimer!, forMode: .common)
     }
-    
     private func stopGameTimer() {
         gameTimer?.invalidate()
         gameTimer = nil
@@ -5674,13 +5675,31 @@ struct GameDetailView: View {
     }
     
     private func deleteGame() {
-        if let teamIndex = teamManager.teams.firstIndex(where: { $0.id == team.id }) {
-            if let gameIndex = teamManager.teams[teamIndex].games.firstIndex(where: { $0.id == game.id }) {
-                teamManager.teams[teamIndex].games.remove(at: gameIndex)
-                teamManager.updateTeam(teamManager.teams[teamIndex])
+        Task {
+            if let teamIndex = teamManager.teams.firstIndex(where: { $0.id == team.id }) {
+                if let gameIndex = teamManager.teams[teamIndex].games.firstIndex(where: { $0.id == game.id }) {
+                    // Remove from local array
+                    teamManager.teams[teamIndex].games.remove(at: gameIndex)
+                    
+                    // Delete from Firebase if using subcollections
+                    if team.useSubcollections {
+                        do {
+                            try await teamManager.firebaseManager.deleteGame(game, from: team)
+                        } catch {
+                            print("Failed to delete game from Firebase: \(error)")
+                        }
+                    } else {
+                        // For non-subcollection teams, just update normally
+                        teamManager.updateTeam(teamManager.teams[teamIndex])
+                    }
+                    
+                    // Move dismiss INSIDE the Task block
+                    await MainActor.run {
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                }
             }
         }
-        presentationMode.wrappedValue.dismiss()
     }
     
     private func shareCurrentTab() {

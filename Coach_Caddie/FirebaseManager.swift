@@ -25,6 +25,11 @@ class FirebaseManager: NSObject, ObservableObject {
     private var chatListeners: [String: ListenerRegistration] = [:]
     private let monitor = NWPathMonitor()
     private let queue = DispatchQueue(label: "NetworkMonitor")
+    private var activeOperations: Set<String> = []
+    private let operationQueue = DispatchQueue(label: "com.app.firebase.operations", attributes: .concurrent)
+    private var subcollectionCache: [String: (data: Any, timestamp: Date)] = [:]
+    private let cacheExpiration: TimeInterval = 60
+    private var activeLoadOperations: Set<String> = []
     
     override init() {
         super.init()
@@ -35,6 +40,7 @@ class FirebaseManager: NSObject, ObservableObject {
     deinit {
         monitor.cancel()
     }
+    
     
     // MARK: - Network Monitoring
     private func setupNetworkMonitoring() {
@@ -83,7 +89,6 @@ class FirebaseManager: NSObject, ObservableObject {
         guard let user = Auth.auth().currentUser else {
             throw FirebaseError.notAuthenticated
         }
-        
         print("🔥 saveTeam called for team: \(team.name)")
         print("🔥 Team ID: \(team.id.uuidString)")
         print("🔥 useSubcollections: \(team.useSubcollections)")
@@ -421,7 +426,27 @@ class FirebaseManager: NSObject, ObservableObject {
             throw FirebaseError.notAuthenticated
         }
         
-        // Remove game from team
+        if team.useSubcollections {
+            // Delete the game document and its subcollections
+            let gameRef = db.collection("teams")
+                .document(team.id.uuidString)
+                .collection("games")
+                .document(game.id.uuidString)
+            
+            // Delete subcollections first
+            let collections = ["auditLog", "playerStats", "currentLineup"]
+            for collection in collections {
+                let docs = try await gameRef.collection(collection).getDocuments()
+                for doc in docs.documents {
+                    try await doc.reference.delete()
+                }
+            }
+            
+            // Delete the game document itself
+            try await gameRef.delete()
+        }
+        
+        // Update the team to remove the game from its array
         var updatedTeam = team
         updatedTeam.games.removeAll { $0.id == game.id }
         try await saveTeam(updatedTeam)
@@ -429,7 +454,7 @@ class FirebaseManager: NSObject, ObservableObject {
     
     private func saveGameWithSubcollections(_ game: Game, in team: Team) async throws {
         guard team.useSubcollections else { return }
-        
+
         let gameRef = db.collection("teams").document(team.id.uuidString)
             .collection("games").document(game.id.uuidString)
         
@@ -500,13 +525,45 @@ class FirebaseManager: NSObject, ObservableObject {
             }
         }
     }
-    
-    func deletePractice(_ practice: Practice, from team: Team) async throws {
-        guard let user = Auth.auth().currentUser else {
-            throw FirebaseError.notAuthenticated
+    func savePractice(_ practice: Practice, to team: Team) async throws {
+        guard team.useSubcollections else {
+            // For non-subcollection teams, just save the whole team
+            var updatedTeam = team
+            if !updatedTeam.practices.contains(where: { $0.id == practice.id }) {
+                updatedTeam.practices.append(practice)
+            }
+            try await saveTeam(updatedTeam)
+            return
         }
         
-        // Remove practice from team
+        // For subcollection teams, save practice as separate document
+        let practiceRef = db.collection("teams")
+            .document(team.id.uuidString)
+            .collection("practices")
+            .document(practice.id.uuidString)
+        
+        let practiceData = try Firestore.Encoder().encode(practice)
+        try await practiceRef.setData(practiceData)
+    }
+    
+    func deletePractice(_ practice: Practice, from team: Team) async throws {
+        guard team.useSubcollections else {
+            // For non-subcollection teams, just update the team
+            var updatedTeam = team
+            updatedTeam.practices.removeAll { $0.id == practice.id }
+            try await saveTeam(updatedTeam)
+            return
+        }
+        
+        // For subcollection teams, delete the practice document
+        let practiceRef = db.collection("teams")
+            .document(team.id.uuidString)
+            .collection("practices")
+            .document(practice.id.uuidString)
+        
+        try await practiceRef.delete()
+        
+        // Also update the team to remove from local array
         var updatedTeam = team
         updatedTeam.practices.removeAll { $0.id == practice.id }
         try await saveTeam(updatedTeam)
@@ -586,7 +643,26 @@ class FirebaseManager: NSObject, ObservableObject {
     }
     
     func loadGamesWithSubcollections(for team: Team) async throws -> [Game] {
+        let operationId = "load-games-\(team.id.uuidString)"
+        
+        // Prevent duplicate loads
+        if activeLoadOperations.contains(operationId) {
+            print("⚠️ Skipping duplicate load for team: \(team.name)")
+            return team.games
+        }
+        
+        activeLoadOperations.insert(operationId)
+        defer { activeLoadOperations.remove(operationId) }
         guard team.useSubcollections else { return team.games }
+        
+        // Check cache first
+        let cacheKey = "games-\(team.id.uuidString)"
+        if let cached = subcollectionCache[cacheKey],
+           Date().timeIntervalSince(cached.timestamp) < cacheExpiration,
+           let cachedGames = cached.data as? [Game] {
+            print("📦 Using cached games for team: \(team.name)")
+            return cachedGames
+        }
         
         let gamesRef = db.collection("teams").document(team.id.uuidString).collection("games")
         let snapshot = try await gamesRef.getDocuments()
@@ -664,8 +740,23 @@ class FirebaseManager: NSObject, ObservableObject {
             games.append(game)
         }
         
+        // Cache the loaded games
+        subcollectionCache[cacheKey] = (games, Date())
+        
         print("🎯 Successfully loaded \(games.count) games with full subcollection data")
         return games
+    }
+
+    // Add this method to clear cache when data changes
+    func clearSubcollectionCache(for teamId: UUID) {
+        let keysToRemove = ["games-\(teamId.uuidString)",
+                            "players-\(teamId.uuidString)",
+                            "practices-\(teamId.uuidString)"]
+        
+        for key in keysToRemove {
+            subcollectionCache.removeValue(forKey: key)
+        }
+        print("🗑️ Cleared subcollection cache for team: \(teamId)")
     }
     
     func recalculateSeasonStatsFromGames(for team: Team) -> Team {

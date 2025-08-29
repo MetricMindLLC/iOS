@@ -1092,7 +1092,7 @@ struct GameDetailsSection: View {
     }
 }
 
-// MARK: - Practice Details Section (Enhanced)
+// MARK: - Practice Details Section (Updated to match Game UI)
 struct PracticeDetailsSection: View {
     let practice: Practice
     let team: Team
@@ -1101,7 +1101,7 @@ struct PracticeDetailsSection: View {
         VStack(alignment: .leading, spacing: 20) {
             // Practice Information
             VStack(alignment: .leading, spacing: 12) {
-                Text("Practice Overview")
+                Text("Practice Details")
                     .font(.headline)
                     .padding(.horizontal)
                 
@@ -1109,12 +1109,14 @@ struct PracticeDetailsSection: View {
                     DetailRow(icon: "clock", title: "Duration", value: "\(practice.duration) minutes")
                     
                     if let location = practice.location {
-                        DetailRow(icon: "location", title: "Location", value: location)
+                        DetailRow(icon: "map", title: "Venue", value: location)
                     }
                     
                     if let weather = practice.weather {
                         DetailRow(icon: weatherIcon(for: weather), title: "Weather", value: weather)
                     }
+                    
+                    DetailRow(icon: "figure.run.circle", title: "Status", value: practice.date > Date() ? "Upcoming" : "Completed")
                     
                     DetailRow(icon: "list.bullet", title: "Total Drills", value: "\(practice.drills.count)")
                 }
@@ -1124,31 +1126,88 @@ struct PracticeDetailsSection: View {
                 .padding(.horizontal)
             }
             
-            // Practice Drills
+            // Practice Plan
             if !practice.drills.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Text("Practice Plan")
-                            .font(.headline)
-                        Spacer()
-                        Text("\(totalDrillDuration(practice.drills)) min total")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(.horizontal)
+                    Text("Practice Plan")
+                        .font(.headline)
+                        .padding(.horizontal)
                     
                     VStack(spacing: 12) {
                         ForEach(Array(practice.drills.enumerated()), id: \.element.id) { index, drill in
-                            EventDrillRow(drill: drill, index: index + 1)
+                            HStack {
+                                Text("\(index + 1)")
+                                    .font(.caption)
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.white)
+                                    .frame(width: 24, height: 24)
+                                    .background(Circle().fill(Color.blue))
+                                
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(drill.name)
+                                        .font(.subheadline)
+                                        .fontWeight(.medium)
+                                    
+                                    HStack {
+                                        Text("\(drill.duration) min")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                        Text("•")
+                                            .foregroundColor(.secondary)
+                                        Text(drill.category)
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+                                
+                                Spacer()
+                            }
                         }
                     }
+                    .padding()
+                    .background(Color(.systemGray6))
+                    .cornerRadius(12)
                     .padding(.horizontal)
                 }
             }
             
-            // Practice Notes
+            // Practice Focus Areas (similar to Key Players for games)
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Focus Areas")
+                    .font(.headline)
+                    .padding(.horizontal)
+                
+                VStack(spacing: 8) {
+                    if let topCategories = getTopDrillCategories(from: practice.drills) {
+                        ForEach(topCategories, id: \.self) { category in
+                            HStack {
+                                Image(systemName: categoryIcon(for: category))
+                                    .foregroundColor(.blue)
+                                    .frame(width: 30)
+                                
+                                VStack(alignment: .leading) {
+                                    Text(category)
+                                        .font(.subheadline)
+                                        .fontWeight(.medium)
+                                    Text("\(drillsInCategory(category, drills: practice.drills)) drills")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                                
+                                Spacer()
+                            }
+                        }
+                    }
+                }
+                .padding()
+                .background(Color(.systemGray6))
+                .cornerRadius(12)
+                .padding(.horizontal)
+            }
+            
+            // Notes Section
             if let notes = practice.notes, !notes.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 12) {
                     Text("Coach Notes")
                         .font(.headline)
                         .padding(.horizontal)
@@ -1160,32 +1219,6 @@ struct PracticeDetailsSection: View {
                         .background(Color(.systemGray6))
                         .cornerRadius(12)
                         .padding(.horizontal)
-                }
-            }
-            
-            // Equipment Needed
-            let equipment = getUniqueEquipment(from: practice.drills)
-            if !equipment.isEmpty {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Equipment Needed")
-                        .font(.headline)
-                        .padding(.horizontal)
-                    
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(equipment, id: \.self) { item in
-                            HStack {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundColor(.green)
-                                    .font(.caption)
-                                Text(item)
-                                    .font(.subheadline)
-                            }
-                        }
-                    }
-                    .padding()
-                    .background(Color(.systemGray6))
-                    .cornerRadius(12)
-                    .padding(.horizontal)
                 }
             }
         }
@@ -1204,18 +1237,37 @@ struct PracticeDetailsSection: View {
         }
     }
     
-    private func totalDrillDuration(_ drills: [Drill]) -> Int {
-        drills.reduce(0) { $0 + $1.duration }
+    private func getTopDrillCategories(from drills: [Drill]) -> [String]? {
+        guard !drills.isEmpty else { return nil }
+        
+        var categoryCount: [String: Int] = [:]
+        for drill in drills {
+            categoryCount[drill.category, default: 0] += 1
+        }
+        
+        return Array(categoryCount.keys.sorted {
+            categoryCount[$0]! > categoryCount[$1]!
+        }.prefix(3))
     }
     
-    private func getUniqueEquipment(from drills: [Drill]) -> [String] {
-        var equipmentSet = Set<String>()
-        for drill in drills {
-            for item in drill.equipment {
-                equipmentSet.insert(item)
-            }
+    private func drillsInCategory(_ category: String, drills: [Drill]) -> Int {
+        drills.filter { $0.category == category }.count
+    }
+    
+    private func categoryIcon(for category: String) -> String {
+        switch category.lowercased() {
+        case "warm-up": return "figure.walk"
+        case "technical", "dribbling": return "sportscourt"
+        case "passing": return "arrow.left.and.right"
+        case "shooting": return "target"
+        case "defending": return "shield"
+        case "fitness": return "figure.run"
+        case "tactical": return "brain"
+        case "informational": return "info.circle"
+        case "game": return "gamecontroller"
+        case "relay": return "arrow.triangle.2.circlepath"
+        default: return "star"
         }
-        return Array(equipmentSet).sorted()
     }
 }
 

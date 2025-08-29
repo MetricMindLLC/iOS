@@ -47,7 +47,12 @@ class TeamManager: ObservableObject {
     private var firebaseUpdateWorkItems: [UUID: DispatchWorkItem] = [:]
     private let firebaseUpdateDebounceTime: TimeInterval = 1.5 // Shorter debounce for semi-live updates
     private var gameStateUpdateWorkItems: [UUID: DispatchWorkItem] = [:]
+    private var lastSaveTime: [UUID: Date] = [:]
+    private let minimumSaveInterval: TimeInterval = 2.0
     private let gameStateUpdateDebounceTime: TimeInterval = 10.0 // Game state updates every 10 seconds
+    private var pendingUpdates: [UUID: Team] = [:]
+    private var batchUpdateTimer: Timer?
+    private var activeListeners: Set<UUID> = []
     init() {
         // IMPORTANT: Don't load local data immediately - wait for auth state
         loadAppSettings()
@@ -91,6 +96,35 @@ class TeamManager: ObservableObject {
         } catch {
             await MainActor.run {
                 self.setError("Network reconnection failed: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    func batchUpdateTeams() {
+        // Cancel any existing batch timer
+        batchUpdateTimer?.invalidate()
+        
+        // Schedule batch update
+        batchUpdateTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { _ in
+            Task {
+                await self.processBatchUpdates()
+            }
+        }
+    }
+
+    private func processBatchUpdates() async {
+        let teamsToUpdate = pendingUpdates.values
+        pendingUpdates.removeAll()
+        
+        guard !teamsToUpdate.isEmpty else { return }
+        
+        print("📦 Processing batch update for \(teamsToUpdate.count) teams")
+        
+        for team in teamsToUpdate {
+            do {
+                try await firebaseManager.saveTeam(team)
+            } catch {
+                print("❌ Failed to save team in batch: \(error)")
             }
         }
     }
@@ -152,35 +186,40 @@ class TeamManager: ObservableObject {
     
     func updateTeam(_ team: Team) {
         print("🔥 updateTeam called for team: \(team.name)")
-        print("🔥 Team ID: \(team.id)")
-        print("🔥 Current user UID: \(currentUserUID ?? "nil")")
-        print("🔥 Team coachUID: \(team.coachUID ?? "nil")")
-        print("🔥 isOnline: \(isOnline)")
+        print("🔥 Team ID: \(team.id.uuidString)")
         
-        // 1. Update local state immediately (no change here)
+        guard let currentUserUID = currentUserUID else {
+            print("⚠️ No current user")
+            return
+        }
+        
+        print("🔥 Current user UID: \(currentUserUID)")
+        print("🔥 Team coachUID: \(team.coachUID ?? "nil")")
+        print("🔥 isOnline: \(firebaseManager.isOnline)")
+        
+        // Update local array first
         if let index = teams.firstIndex(where: { $0.id == team.id }) {
             teams[index] = team
-            debouncedSave() // Local save still immediate
-            
-            if isOnline {
-                // 2. Check if this is a game in progress (needs faster sync for live view)
-                let isActiveGame = GameStateManager.shared.activeGameState?.teamId == team.id
-                
-                if isActiveGame {
-                    // LIVE GAME: Use shorter debounce for semi-live updates
-                    updateTeamForLiveGame(team)
-                } else {
-                    // NON-GAME: Use normal debounce
-                    updateTeamWithDebounce(team, debounceTime: firebaseUpdateDebounceTime)
-                }
-            } else {
-                print("🔥 Adding to pending changes (offline)")
-                addToPendingChanges("team_\(team.id.uuidString)", action: "update", teamId: team.id.uuidString)
-            }
+            debouncedSave() // This is your existing local save method
+        }
+        
+        // Check if we're in a live game by looking at the team's games
+        let isLiveGame = team.games.contains { game in
+            !game.isCompleted && game.playerStats.count > 0
+        }
+        
+        // Cancel any existing work item
+        firebaseUpdateWorkItems[team.id]?.cancel()
+        
+        if isLiveGame {
+            print("🔥 Scheduled LIVE game Firebase save in \(firebaseUpdateDebounceTime) seconds")
+            updateTeamForLiveGame(team)
         } else {
-            print("❌ Team not found in teams array!")
+            print("🔥 Scheduled regular Firebase save in 1.5 seconds")
+            updateTeamWithDebounce(team, debounceTime: 1.5)
         }
     }
+
     
     private var teamListeners: [UUID: ListenerRegistration] = [:]
 
@@ -202,12 +241,10 @@ class TeamManager: ObservableObject {
         }
     }
 
-    // MARK: - Live Game Updates (for parent/viewer real-time experience)
     private func updateTeamForLiveGame(_ team: Team) {
         // Cancel any pending regular update
         firebaseUpdateWorkItems[team.id]?.cancel()
-        
-        // Use shorter debounce for live games (1.5 seconds instead of 2+)
+
         let workItem = DispatchWorkItem { [weak self] in
             Task { [weak self] in
                 await self?.saveTeamToFirebaseLive(team)
@@ -216,11 +253,8 @@ class TeamManager: ObservableObject {
         
         firebaseUpdateWorkItems[team.id] = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + firebaseUpdateDebounceTime, execute: workItem)
-        
-        print("🔥 Scheduled LIVE game Firebase save in \(firebaseUpdateDebounceTime) seconds")
     }
 
-    // MARK: - Regular Team Updates (for non-game changes)
     private func updateTeamWithDebounce(_ team: Team, debounceTime: TimeInterval) {
         // Cancel any pending update for this team
         firebaseUpdateWorkItems[team.id]?.cancel()
@@ -233,8 +267,6 @@ class TeamManager: ObservableObject {
         
         firebaseUpdateWorkItems[team.id] = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + debounceTime, execute: workItem)
-        
-        print("🔥 Scheduled regular Firebase save in \(debounceTime) seconds")
     }
 
     // MARK: - Live Game Firebase Save (maintains real-time listeners)
@@ -1814,6 +1846,12 @@ class TeamManager: ObservableObject {
     
     // MARK: - Real-time Listeners
     private func setupRealTimeListener(for team: Team) {
+        guard !activeListeners.contains(team.id) else {
+            print("⚠️ Listener already active for team: \(team.name)")
+            return
+        }
+        
+        activeListeners.insert(team.id)
         // Placeholder - implement setupRealTimeListener in FirebaseManager
         print("Real-time listener setup for team: \(team.name)")
     }

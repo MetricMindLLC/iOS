@@ -963,6 +963,121 @@ class DrillLibrary: ObservableObject {
                     "Gradually reduce pace",
                     "End with team huddle"
                 ]
+            ),
+            // INFORMATIONAL DRILLS
+            Drill(
+                name: "Team Formation Review",
+                description: "Walkthrough of team formations and positioning",
+                duration: 15,
+                category: "Informational",
+                difficulty: "Easy",
+                equipment: ["Whiteboard or cones", "Bibs"],
+                instructions: [
+                    "Gather team in classroom or on field",
+                    "Review chosen formation (4-4-2, 4-3-3, etc.)",
+                    "Walk through each position's responsibilities",
+                    "Discuss defensive shape and compactness",
+                    "Cover attacking patterns and movement",
+                    "Q&A session for player questions"
+                ]
+            ),
+            Drill(
+                name: "Match Video Analysis",
+                description: "Review game footage to identify areas for improvement",
+                duration: 20,
+                category: "Informational",
+                difficulty: "Easy",
+                equipment: ["Video equipment", "Whiteboard"],
+                instructions: [
+                    "Show highlights from recent match",
+                    "Pause to discuss key moments",
+                    "Identify what went well",
+                    "Point out areas for improvement",
+                    "Individual player feedback",
+                    "Set goals for next match"
+                ]
+            ),
+            Drill(
+                name: "Rules and Offside Training",
+                description: "Educational session on soccer rules and offside law",
+                duration: 15,
+                category: "Informational",
+                difficulty: "Easy",
+                equipment: ["Cones", "Whiteboard"],
+                instructions: [
+                    "Explain offside rule with diagrams",
+                    "Walk through common scenarios",
+                    "Practice offside trap as defenders",
+                    "Discuss when to play offside line",
+                    "Review other important rules",
+                    "Practice scenarios on field"
+                ]
+            ),
+
+            // GAME DRILLS
+            Drill(
+                name: "World Cup",
+                description: "Tournament-style small sided games",
+                duration: 30,
+                category: "Game",
+                difficulty: "Medium",
+                equipment: ["Soccer balls", "Cones", "Bibs"],
+                instructions: [
+                    "Create 4 teams representing countries",
+                    "Set up two small fields",
+                    "5-minute games",
+                    "Winners play for championship",
+                    "Losers play for 3rd place",
+                    "Track goals and celebrate winners"
+                ]
+            ),
+            Drill(
+                name: "King of the Hill",
+                description: "Winner stays on possession game",
+                duration: 20,
+                category: "Game",
+                difficulty: "Medium",
+                equipment: ["Soccer balls", "Cones", "Bibs"],
+                instructions: [
+                    "3 teams of 4-5 players",
+                    "Two teams play 4v4 in grid",
+                    "First to 3 goals wins and stays",
+                    "Losing team replaced by waiting team",
+                    "Quick transitions between games",
+                    "Crown the 'king' team at end"
+                ]
+            ),
+            Drill(
+                name: "Soccer Tennis",
+                description: "Volleyball-style game with soccer ball",
+                duration: 15,
+                category: "Game",
+                difficulty: "Hard",
+                equipment: ["Soccer balls", "Cones or net"],
+                instructions: [
+                    "Set up court with center 'net' (cones)",
+                    "Teams of 2-3 players",
+                    "Ball can bounce once per side",
+                    "Maximum 3 touches per side",
+                    "Must volley over net height",
+                    "Play to 11 points, win by 2"
+                ]
+            ),
+            Drill(
+                name: "Capture the Flag",
+                description: "Team game combining soccer skills with strategy",
+                duration: 25,
+                category: "Game",
+                difficulty: "Medium",
+                equipment: ["Soccer balls", "Cones", "Bibs", "Flags or pinnies"],
+                instructions: [
+                    "Each team protects a 'flag' in their zone",
+                    "Players must dribble soccer ball at all times",
+                    "Try to steal opponent's flag and return to base",
+                    "Tagged players frozen until teammate unfreezes",
+                    "Can only be tagged in opponent's half",
+                    "First team to capture flag 3 times wins"
+                ]
             )
         ]
     }
