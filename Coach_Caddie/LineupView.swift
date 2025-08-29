@@ -978,30 +978,22 @@ struct LineupView: View {
         let currentMinute = gameStateManager.calculatedMinute
         
         guard game.useAutoSubstitutions else {
-            print("Auto-substitutions disabled for this game")
+            // Remove or comment out this print - it's spamming the logs
+            // print("Auto-substitutions disabled for this game")
             return
         }
-        
-        print("Checking for planned substitutions at minute \(currentMinute)")
-        
+
         let dueSubstitutions = game.plannedSubstitutions.filter {
             !$0.isExecuted && $0.plannedMinute <= currentMinute
         }
         
-        for plannedSub in dueSubstitutions {
-            print("Executing planned substitution: \(getPlayerName(plannedSub.playerOut)) -> \(getPlayerName(plannedSub.playerIn)) at \(currentMinute)'")
-            executeAutomaticSubstitution(plannedSub)
-        }
-        
-        let currentPhase = game.lineupPhases.first {
-            $0.startMinute <= currentMinute &&
-            ($0.endMinute == nil || currentMinute < $0.endMinute!) &&
-            !$0.isExecuted
-        }
-        
-        if let phase = currentPhase {
-            print("Executing lineup phase: \(phase.name) at \(currentMinute)'")
-            executeLineupPhaseChange(phase)
+        // Only log when there are actual substitutions to execute
+        if !dueSubstitutions.isEmpty {
+            print("Checking for planned substitutions at minute \(currentMinute)")
+            for plannedSub in dueSubstitutions {
+                print("Executing planned substitution: \(getPlayerName(plannedSub.playerOut)) -> \(getPlayerName(plannedSub.playerIn)) at \(currentMinute)'")
+                executeAutomaticSubstitution(plannedSub)
+            }
         }
     }
 

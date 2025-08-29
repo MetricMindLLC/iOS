@@ -365,7 +365,8 @@ class TeamManager: ObservableObject {
         return Auth.auth().currentUser?.uid
     }
     
-    /// Get user role for team (synchronous, uses cache with better new user handling)
+    private var loggedCoachStatus: Set<String> = []
+    
     func getCurrentUserRole(for team: Team) -> AccessLevel {
         guard let currentUserUID = currentUserUID else {
             print("⚠️ No current user UID available")
@@ -374,7 +375,12 @@ class TeamManager: ObservableObject {
         
         // Check if user is the team coach first (this is always reliable)
         if team.coachUID == currentUserUID {
-            print("✅ User is team coach for \(team.name)")
+            // Only log once per team per session
+            let logKey = "\(team.id)-\(currentUserUID)"
+            if !loggedCoachStatus.contains(logKey) {
+                print("✅ User is team coach for \(team.name)")
+                loggedCoachStatus.insert(logKey)
+            }
             
             // FIXED: Only update cache if it's not already cached correctly
             if let cache = permissionCache,
@@ -391,7 +397,7 @@ class TeamManager: ObservableObject {
             
             return .coach
         }
-        
+
         // Return cached role if available
         if let cache = permissionCache,
            !cache.isExpired,
