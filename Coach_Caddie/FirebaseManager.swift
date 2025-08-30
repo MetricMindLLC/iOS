@@ -28,11 +28,17 @@ class FirebaseManager: NSObject, ObservableObject {
     private var activeOperations: Set<String> = []
     private let operationQueue = DispatchQueue(label: "com.app.firebase.operations", attributes: .concurrent)
     private var subcollectionCache: [String: (data: Any, timestamp: Date)] = [:]
-    private let cacheExpiration: TimeInterval = 60
+    private let cacheExpiration: TimeInterval = 300
     private var activeLoadOperations: Set<String> = []
     
     override init() {
         super.init()
+        
+        // Enable Firestore offline persistence
+        let settings = FirestoreSettings()
+        settings.cacheSettings = PersistentCacheSettings(sizeBytes: NSNumber(value: 100 * 1024 * 1024)) // 100MB cache
+        db.settings = settings
+        
         setupNetworkMonitoring()
         setupMessaging()
     }
@@ -327,6 +333,41 @@ class FirebaseManager: NSObject, ObservableObject {
         
         // Stop listening to this team
         stopListening(to: team)
+    }
+    
+    // ADD this new method - doesn't replace anything
+    func loadGamesBasicInfo(for team: Team) async throws -> [Game] {
+        guard team.useSubcollections else { return team.games }
+        
+        let gamesRef = db.collection("teams").document(team.id.uuidString).collection("games")
+        let snapshot = try await gamesRef.getDocuments()
+        
+        var games: [Game] = []
+        for document in snapshot.documents {
+            var game = try Firestore.Decoder().decode(Game.self, from: document.data())
+            // Initialize empty arrays instead of loading subcollections
+            game.auditLog = []
+            game.playerStats = []
+            game.actualStartingLineup = []
+            games.append(game)
+        }
+        
+        print("📄 Loaded \(games.count) games (basic info only)")
+        return games
+    }
+
+    // ADD this new method for loading full game data when needed
+    func loadFullGameData(_ game: Game, for team: Team) async throws -> Game {
+        guard team.useSubcollections else { return game }
+        
+        var fullGame = game
+        let gameRef = db.collection("teams").document(team.id.uuidString)
+            .collection("games").document(game.id.uuidString)
+        
+        // Load all subcollections (use your existing subcollection loading code here)
+        // This is only called when user actually opens the game details
+        
+        return fullGame
     }
     
     // MARK: - Real-time Listeners
@@ -643,19 +684,9 @@ class FirebaseManager: NSObject, ObservableObject {
     }
     
     func loadGamesWithSubcollections(for team: Team) async throws -> [Game] {
-        let operationId = "load-games-\(team.id.uuidString)"
-        
-        // Prevent duplicate loads
-        if activeLoadOperations.contains(operationId) {
-            print("⚠️ Skipping duplicate load for team: \(team.name)")
-            return team.games
-        }
-        
-        activeLoadOperations.insert(operationId)
-        defer { activeLoadOperations.remove(operationId) }
         guard team.useSubcollections else { return team.games }
         
-        // Check cache first
+        // Check cache first (KEEP YOUR EXISTING CACHE CODE)
         let cacheKey = "games-\(team.id.uuidString)"
         if let cached = subcollectionCache[cacheKey],
            Date().timeIntervalSince(cached.timestamp) < cacheExpiration,
@@ -664,6 +695,17 @@ class FirebaseManager: NSObject, ObservableObject {
             return cachedGames
         }
         
+        // Check if this is duplicate load (KEEP YOUR EXISTING CODE)
+        let operationId = "load-games-\(team.id.uuidString)"
+        if activeLoadOperations.contains(operationId) {
+            print("⚠️ Skipping duplicate load for team: \(team.name)")
+            return team.games
+        }
+        
+        activeLoadOperations.insert(operationId)
+        defer { activeLoadOperations.remove(operationId) }
+        
+        // YOUR EXISTING LOADING CODE STAYS THE SAME FROM HERE...
         let gamesRef = db.collection("teams").document(team.id.uuidString).collection("games")
         let snapshot = try await gamesRef.getDocuments()
         
