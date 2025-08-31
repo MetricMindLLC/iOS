@@ -82,9 +82,63 @@ class TeamManager: ObservableObject {
         }
     }
     
+    var teamsICreated: [Team] {
+        guard let currentUser = Auth.auth().currentUser else { return [] }
+        let created = teams.filter { $0.coachUID == currentUser.uid }
+        print("🔍 Teams I created: \(created.count) out of \(teams.count) total teams")
+        for team in teams {
+            print("  Team: \(team.name), coachUID: \(team.coachUID ?? "nil"), mine: \(team.coachUID == currentUser.uid)")
+        }
+        return created
+    }
+
+    var teamsIWasInvitedTo: [Team] {
+        guard let currentUser = Auth.auth().currentUser else { return [] }
+        // Teams where the coachUID is NOT the current user (they didn't create it)
+        return teams.filter { $0.coachUID != currentUser.uid }
+    }
+    func canCreateMoreTeams() -> Bool {
+        guard let user = authManager?.currentUser else { return false }
+        
+        // Shared access users can't create teams at all
+        if user.subscriptionLevel == .sharedAccess {
+            return false
+        }
+        
+        // Only count teams the user CREATED (where they are the original coachUID)
+        let createdTeamsCount = teamsICreated.count
+        let maxAllowed = user.maxTeamsAllowed
+        
+        print("🔍 canCreateMoreTeams check: created=\(createdTeamsCount), max=\(maxAllowed), subscription=\(user.subscriptionLevel.rawValue)")
+        
+        return createdTeamsCount < maxAllowed
+    }
+    
     // ADDED: Method to set auth manager reference
     func setAuthManager(_ authManager: FirebaseAuthManager) {
         self.authManager = authManager
+    }
+    
+    // Add this method to your TeamManager class
+    func deletePractice(from team: Team, practiceId: UUID) {
+        print("🗑️ TeamManager.deletePractice called for practice ID: \(practiceId)")
+        
+        guard let teamIndex = teams.firstIndex(where: { $0.id == team.id }) else {
+            print("🗑️ ERROR: Team not found in teams array")
+            return
+        }
+        
+        guard let practiceIndex = teams[teamIndex].practices.firstIndex(where: { $0.id == practiceId }) else {
+            print("🗑️ ERROR: Practice not found in team.practices array")
+            return
+        }
+        
+        // Remove the practice
+        teams[teamIndex].practices.remove(at: practiceIndex)
+        print("🗑️ Practice removed, remaining practices: \(teams[teamIndex].practices.count)")
+        
+        // Update the team using the same method as your game deletion
+        updateTeam(teams[teamIndex])
     }
     
     private func handleNetworkReconnection() async {
@@ -881,9 +935,7 @@ class TeamManager: ObservableObject {
         // Don't call updateTeam here to avoid unnecessary saves during startup
     }
     
-    // UPDATED: Check authentication before loading local data
     private func loadLocalData() {
-        // CRITICAL: Only load local data if user is authenticated
         guard let currentUser = Auth.auth().currentUser, !currentUser.isAnonymous else {
             print("🔒 No authenticated user - clearing local data")
             teams = []
@@ -904,10 +956,8 @@ class TeamManager: ObservableObject {
             decoder.dateDecodingStrategy = .iso8601
             let loadedTeams = try decoder.decode([Team].self, from: data)
             
-            // ADDED: Filter teams to only include those belonging to current user
-            teams = loadedTeams.filter { team in
-                team.coachUID == currentUser.uid
-            }
+            // DON'T FILTER - Load ALL teams (both created and invited)
+            teams = loadedTeams
             
             // Set selected team to first team if not set
             if selectedTeam == nil && !teams.isEmpty {
@@ -920,7 +970,6 @@ class TeamManager: ObservableObject {
             teams = []
         }
     }
-    
     func addTeam(_ team: Team, isDemo: Bool = false) {
         // Enhanced team limits checking with better error messaging
         if let authManager = authManager,
@@ -941,7 +990,7 @@ class TeamManager: ObservableObject {
             
             // Check team count limits (only for non-demo teams)
             if !isDemo {
-                let currentTeams = teams.count
+                let currentTeams = teamsICreated.count
                 let maxTeams = currentUser.maxTeamsAllowed
                 
                 if currentTeams >= maxTeams {
@@ -1005,13 +1054,6 @@ class TeamManager: ObservableObject {
         }
     }
     
-    func canCreateMoreTeams() -> Bool {
-        guard let authManager = authManager,
-              let currentUser = authManager.currentUser else { return false }
-        
-        return currentUser.subscriptionLevel.canCreateTeams && teams.count < currentUser.maxTeamsAllowed
-    }
-
     func getTeamCreationStatusMessage() -> String? {
         guard let authManager = authManager,
               let currentUser = authManager.currentUser else { return "Please sign in to create teams." }
@@ -1027,10 +1069,10 @@ class TeamManager: ObservableObject {
             }
         }
         
-        let currentTeams = teams.count
+        let currentTeams = teamsICreated.count
         let maxTeams = currentUser.maxTeamsAllowed
         
-        if currentTeams >= maxTeams {
+        if currentTeams == maxTeams - 1 {
             if maxTeams == 1 {
                 return "You've reached your team limit."
             } else {
@@ -1053,7 +1095,7 @@ class TeamManager: ObservableObject {
         }
         
         return (
-            current: teams.count,
+            current: teamsICreated.count,
             max: currentUser.maxTeamsAllowed,
             canCreate: canCreateMoreTeams()
         )
@@ -1124,28 +1166,6 @@ class TeamManager: ObservableObject {
             
             updateTeam(teams[teamIndex])
         }
-    }
-    
-    // Add this method to your TeamManager class
-    func deletePractice(from team: Team, practiceId: UUID) {
-        print("🗑️ TeamManager.deletePractice called for practice ID: \(practiceId)")
-        
-        guard let teamIndex = teams.firstIndex(where: { $0.id == team.id }) else {
-            print("🗑️ ERROR: Team not found in teams array")
-            return
-        }
-        
-        guard let practiceIndex = teams[teamIndex].practices.firstIndex(where: { $0.id == practiceId }) else {
-            print("🗑️ ERROR: Practice not found in team.practices array")
-            return
-        }
-        
-        // Remove the practice
-        teams[teamIndex].practices.remove(at: practiceIndex)
-        print("🗑️ Practice removed, remaining practices: \(teams[teamIndex].practices.count)")
-        
-        // Update the team using the same method as your game deletion
-        updateTeam(teams[teamIndex])
     }
     
     func forceRecalculateAllStats() {
@@ -2058,9 +2078,5 @@ extension User {
         case .sharedAccess: return 0  // Can't create teams, only join
         case .cancelled, .expired: return 0
         }
-    }
-    
-    func canCreateMoreTeams(currentTeamCount: Int) -> Bool {
-        return currentTeamCount < maxTeamsAllowed
     }
 }

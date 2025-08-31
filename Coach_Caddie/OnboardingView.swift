@@ -250,12 +250,12 @@ struct InviteCodeFlowView: View {
     @State private var validatedInvite: TeamInvite?
     @State private var isValidating = false
     @State private var validationError: String?
+    @State private var isLoadingGoogle = false
     
     enum InviteFlowStep {
         case enterCode
         case chooseAuth
         case createAccount
-        case signIn
         case joiningTeam
     }
     
@@ -269,8 +269,6 @@ struct InviteCodeFlowView: View {
                     chooseAuthView
                 case .createAccount:
                     createAccountView
-                case .signIn:
-                    signInView
                 case .joiningTeam:
                     joiningTeamView
                 }
@@ -374,7 +372,7 @@ struct InviteCodeFlowView: View {
         }
     }
     
-    // MARK: - Step 2: Choose Authentication
+    // MARK: - Step 2: Choose Authentication (UPDATED - removed "Sign in with Email")
     private var chooseAuthView: some View {
         VStack(spacing: 24) {
             if let invite = validatedInvite {
@@ -395,13 +393,13 @@ struct InviteCodeFlowView: View {
             }
             
             VStack(spacing: 16) {
-                Text("Choose how to continue:")
+                Text("Create your account to continue:")
                     .font(.headline)
                 
                 Button(action: { currentStep = .createAccount }) {
                     HStack {
                         Image(systemName: "person.badge.plus")
-                        Text("Create New Account")
+                        Text("Create Account with Email")
                             .fontWeight(.semibold)
                     }
                     .foregroundColor(.white)
@@ -411,14 +409,20 @@ struct InviteCodeFlowView: View {
                     .cornerRadius(12)
                 }
                 
-                Button(action: signInWithGoogle) {
+                Button(action: signInWithGoogleForInvite) {
                     HStack(spacing: 12) {
-                        Image("google-logo")
-                            .resizable()
-                            .frame(width: 20, height: 20)
-                        
-                        Text("Sign in with Google")
-                            .fontWeight(.medium)
+                        if isLoadingGoogle {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .gray))
+                                .scaleEffect(0.8)
+                        } else {
+                            Image("google-logo")
+                                .resizable()
+                                .frame(width: 20, height: 20)
+                            
+                            Text("Create Account with Google")
+                                .fontWeight(.medium)
+                        }
                     }
                     .foregroundColor(.black.opacity(0.87))
                     .frame(maxWidth: .infinity)
@@ -430,27 +434,14 @@ struct InviteCodeFlowView: View {
                     )
                     .cornerRadius(12)
                 }
-                
-                Button(action: { currentStep = .signIn }) {
-                    HStack {
-                        Image(systemName: "envelope.fill")
-                        Text("Sign in with Email")
-                            .fontWeight(.semibold)
-                    }
-                    .foregroundColor(Color(red: 0.13, green: 0.47, blue: 0.25))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color(red: 0.13, green: 0.47, blue: 0.25), lineWidth: 2)
-                    )
-                }
+                .disabled(isLoadingGoogle)
             }
             .padding(.horizontal)
             
             Spacer()
         }
     }
+    
     // MARK: - Step 3: Create Account
     private var createAccountView: some View {
         InviteCreateAccountView(
@@ -464,18 +455,7 @@ struct InviteCodeFlowView: View {
         .environmentObject(authManager)
     }
     
-    // MARK: - Step 4: Sign In
-    private var signInView: some View {
-        InviteSignInView(
-            onSuccess: {
-                currentStep = .joiningTeam
-                joinTeamAfterAuth()
-            }
-        )
-        .environmentObject(authManager)
-    }
-    
-    // MARK: - Step 5: Joining Team
+    // MARK: - Step 4: Joining Team
     private var joiningTeamView: some View {
         VStack(spacing: 24) {
             ProgressView()
@@ -543,7 +523,12 @@ struct InviteCodeFlowView: View {
         return invite
     }
     
-    private func signInWithGoogle() {
+    // MARK: - NEW: Special Google Sign-In for Invite Flow
+    private func signInWithGoogleForInvite() {
+        guard let invite = validatedInvite else { return }
+        
+        isLoadingGoogle = true
+        
         Task {
             do {
                 guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
@@ -556,14 +541,32 @@ struct InviteCodeFlowView: View {
                     presentingViewController = presented
                 }
                 
+                // Sign in with Google
                 try await authManager.signInWithGoogle(presenting: presentingViewController)
                 
+                // IMPORTANT: After Google sign-in, immediately set up the user for invite-based access
+                // This prevents the membership selection screen from appearing
+                
+                // Determine membership type based on invite access level
+                let membershipType: MembershipType = invite.accessLevel == .coach ? .coach : .teamInvite
+                
+                // Update the user's membership type WITHOUT changing subscription
+                // They should get sharedAccess subscription as they're joining via invite
+                try await authManager.updateMembershipTypeAndSubscription(
+                    membershipType: membershipType,
+                    subscriptionLevel: .sharedAccess
+                )
+                
                 await MainActor.run {
+                    isLoadingGoogle = false
                     currentStep = .joiningTeam
                     joinTeamAfterAuth()
                 }
             } catch {
-                print("Google Sign-In Error: \(error)")
+                await MainActor.run {
+                    isLoadingGoogle = false
+                    print("Google Sign-In Error for invite: \(error)")
+                }
             }
         }
     }
@@ -738,105 +741,8 @@ struct InviteCreateAccountView: View {
     }
 }
 
-// MARK: - Sign In for Invite
-struct InviteSignInView: View {
-    let onSuccess: () -> Void
-    
-    @EnvironmentObject var authManager: FirebaseAuthManager
-    @State private var email = ""
-    @State private var password = ""
-    @State private var isLoading = false
-    @State private var errorMessage: String?
-    @State private var showError = false
-    
-    var body: some View {
-        VStack(spacing: 24) {
-            VStack(spacing: 12) {
-                Text("Sign In")
-                    .font(.largeTitle)
-                    .fontWeight(.bold)
-                
-                Text("Sign in to join the team")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-            }
-            .padding(.top, 40)
-            
-            VStack(spacing: 16) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Email")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    
-                    TextField("your@email.com", text: $email)
-                        .keyboardType(.emailAddress)
-                        .autocapitalization(.none)
-                        .padding()
-                        .background(Color(.systemGray6))
-                        .cornerRadius(10)
-                }
-                
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Password")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    
-                    SecureField("Password", text: $password)
-                        .padding()
-                        .background(Color(.systemGray6))
-                        .cornerRadius(10)
-                }
-            }
-            
-            Button(action: signIn) {
-                HStack {
-                    if isLoading {
-                        ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                            .scaleEffect(0.8)
-                    } else {
-                        Text("Sign In")
-                            .fontWeight(.semibold)
-                    }
-                }
-                .foregroundColor(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 16)
-                .background(email.isEmpty || password.isEmpty ? Color.gray : Color(red: 0.13, green: 0.47, blue: 0.25))
-                .cornerRadius(12)
-            }
-            .disabled(email.isEmpty || password.isEmpty || isLoading)
-            
-            Spacer()
-        }
-        .padding(.horizontal)
-        .alert("Error", isPresented: $showError) {
-            Button("OK") { }
-        } message: {
-            Text(errorMessage ?? "An unknown error occurred")
-        }
-    }
-    
-    private func signIn() {
-        isLoading = true
-        
-        Task {
-            do {
-                try await authManager.signIn(email: email, password: password)
-                await MainActor.run {
-                    isLoading = false
-                    onSuccess()
-                }
-            } catch {
-                await MainActor.run {
-                    isLoading = false
-                    errorMessage = error.localizedDescription
-                    showError = true
-                }
-            }
-        }
-    }
-}
+// Rest of the file remains the same (SignUpView, SignInView, ForgotPasswordView)...
+// [INCLUDING ALL THE REST OF THE ORIGINAL CODE FROM SignUpView onwards, unchanged]
 
 struct SignUpView: View {
     @EnvironmentObject var authManager: FirebaseAuthManager
@@ -1279,6 +1185,7 @@ struct SignUpView: View {
         }
     }
 }
+
 struct SignInView: View {
     @EnvironmentObject var authManager: FirebaseAuthManager
     @EnvironmentObject var teamManager: TeamManager
@@ -1523,6 +1430,7 @@ struct SignInView: View {
         }
     }
 }
+
 struct ForgotPasswordView: View {
     @Environment(\.presentationMode) var presentationMode
     @State private var email = ""

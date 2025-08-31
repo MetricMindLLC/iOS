@@ -16,6 +16,10 @@ class StoreKitManager: ObservableObject {
     private var processedTransactionsForCurrentUser: Set<UInt64> = []
     private var currentUserUID: String?
     
+    // NEW: Track if we're in initial load to avoid auto-processing existing transactions
+    private var isInitialLoad = true
+    private var hasCompletedInitialLoad = false
+    
     // Updated with Club subscription product IDs
     private let productIDs = [
         "com.coachcaddie.pro.monthly",
@@ -30,10 +34,19 @@ class StoreKitManager: ObservableObject {
     
     init(authManager: FirebaseAuthManager? = nil) {
         self.authManager = authManager
+        
+        // Start listening for transactions
         updateListenerTask = listenForTransactions()
+        
         Task {
             await loadProducts()
             await updatePurchasedProducts()
+            
+            // Mark initial load as complete after we've loaded existing purchases
+            await MainActor.run {
+                self.hasCompletedInitialLoad = true
+                self.isInitialLoad = false
+            }
         }
     }
     
@@ -41,17 +54,28 @@ class StoreKitManager: ObservableObject {
         updateListenerTask?.cancel()
     }
     
-    // MARK: - Public Methods
-    
     func setAuthManager(_ authManager: FirebaseAuthManager) {
         self.authManager = authManager
         
-        // CRITICAL FIX: Reset processed transactions when user changes
         let newUserUID = authManager.currentUser?.firebaseUID
         if newUserUID != currentUserUID {
             print("🔄 User changed from \(currentUserUID ?? "none") to \(newUserUID ?? "none") - clearing processed transactions")
             processedTransactionsForCurrentUser.removeAll()
             currentUserUID = newUserUID
+            isInitialLoad = true
+            
+            Task {
+                await updatePurchasedProducts()
+                await MainActor.run {
+                    self.hasCompletedInitialLoad = true
+                    self.isInitialLoad = false
+                }
+            }
+        } else {
+            // Always update after setting auth manager to ensure fresh data
+            Task {
+                await updatePurchasedProducts()
+            }
         }
     }
     
@@ -154,7 +178,14 @@ class StoreKitManager: ObservableObject {
         do {
             try await AppStore.sync()
             await updatePurchasedProducts()
-            await syncSubscriptionStatus()
+            
+            // Only sync subscription status if user is a paying customer
+            if let user = authManager?.currentUser {
+                // Don't auto-upgrade shared access users during restore
+                if user.subscriptionLevel != .sharedAccess {
+                    await syncSubscriptionStatus()
+                }
+            }
             
             print("✅ Purchases restored successfully")
             
@@ -177,11 +208,31 @@ class StoreKitManager: ObservableObject {
                     let transaction = try self.checkVerified(result)
                     print("📬 Received transaction update: \(transaction.productID) (ID: \(transaction.id))")
                     
-                    // FIXED: Only process if not already processed for CURRENT USER
+                    // CRITICAL: Don't process transactions during initial load UNLESS it's a new purchase
+                    if self.isInitialLoad && !self.purchaseInProgress {
+                        print("⏸️ Skipping transaction during initial load (not a new purchase)")
+                        await transaction.finish()
+                        continue
+                    }
+     
+                    if let user = self.authManager?.currentUser,
+                       user.subscriptionLevel == .sharedAccess,
+                       !self.purchaseInProgress {
+                        print("⏸️ Skipping auto-processing for shared access user")
+                        await transaction.finish()
+                        continue
+                    }
+                    
+                    // Only process if not already processed for CURRENT USER
                     if !self.processedTransactionsForCurrentUser.contains(transaction.id) {
-                        print("🔄 Processing new transaction for current user: \(transaction.id)")
-                        await self.handleSuccessfulPurchase(transaction)
-                        self.processedTransactionsForCurrentUser.insert(transaction.id)
+                        // Only handle if it's a new purchase or user explicitly restored
+                        if self.purchaseInProgress || !self.hasCompletedInitialLoad {
+                            print("🔄 Processing new transaction for current user: \(transaction.id)")
+                            await self.handleSuccessfulPurchase(transaction)
+                            self.processedTransactionsForCurrentUser.insert(transaction.id)
+                        } else {
+                            print("⏸️ Skipping background transaction (not actively purchasing)")
+                        }
                         await transaction.finish()
                     } else {
                         print("⚠️ Transaction \(transaction.id) already processed for current user, skipping")
@@ -210,11 +261,24 @@ class StoreKitManager: ObservableObject {
         
         print("🔍 Checking current entitlements...")
         
+        // Don't check entitlements if we're actively purchasing
+        if purchaseInProgress {
+            print("⏸️ Purchase in progress, skipping entitlement check")
+            return
+        }
+        
+        // Don't auto-process for shared access users who aren't actively upgrading
+        if let user = authManager?.currentUser,
+           user.subscriptionLevel == .sharedAccess {
+            print("⏸️ Shared access user, skipping automatic entitlement check")
+            self.purchasedProductIDs = []
+            return
+        }
+        
         for await result in StoreKit.Transaction.currentEntitlements {
             do {
                 let transaction = try checkVerified(result)
                 
-                // Only include non-revoked transactions
                 if transaction.revocationDate == nil {
                     purchasedIDs.insert(transaction.productID)
                     seenTransactionIDs.insert(transaction.id)
@@ -225,7 +289,6 @@ class StoreKitManager: ObservableObject {
             }
         }
         
-        // FIXED: Only update processed transactions for current user
         if !seenTransactionIDs.isEmpty {
             processedTransactionsForCurrentUser.formUnion(seenTransactionIDs)
         }
@@ -235,7 +298,6 @@ class StoreKitManager: ObservableObject {
         print("📝 Tracking \(processedTransactionsForCurrentUser.count) processed transactions for current user")
     }
     
-    // FIXED: New method that uses the correct product ID instead of transaction's product ID
     private func handleSuccessfulPurchaseWithCorrectProduct(_ transaction: StoreKit.Transaction, intendedProductID: String) async {
         print("🎯 Processing purchase: intended=\(intendedProductID), transaction=\(transaction.productID) (ID: \(transaction.id))")
         
@@ -246,21 +308,44 @@ class StoreKitManager: ObservableObject {
         }
         
         do {
-            // CRITICAL FIX: Use the intended product ID, not the transaction's product ID
             guard let subscriptionLevel = getSubscriptionLevel(for: intendedProductID) else {
                 print("❌ Unknown intended product ID: \(intendedProductID)")
                 return
             }
             
             print("⬆️ Setting subscription to \(subscriptionLevel.rawValue) based on intended purchase: \(intendedProductID)")
+            
+            // Update subscription in Firebase
             try await authManager.updateSubscriptionLevel(subscriptionLevel, transactionId: String(transaction.id))
-            await updatePurchasedProducts()
+            
+            // Force refresh the user from Firebase
+            await authManager.refreshCurrentUser()
+            
+            // CRITICAL: Wait a moment for the refresh to propagate
+            try await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+            
+            // Now force a complete re-initialization
+            self.currentUserUID = nil
+            self.setAuthManager(authManager)
+            
             print("✅ Successfully updated subscription to \(subscriptionLevel.rawValue) in Firebase")
             
         } catch {
             print("❌ Failed to update subscription in Firebase: \(error)")
             errorMessage = "Purchase successful but failed to update account. Please contact support."
         }
+    }
+    
+    func clearAllSandboxTransactions() async {
+        print("🧹 Clearing all sandbox transactions...")
+        for await result in StoreKit.Transaction.currentEntitlements {
+            if let transaction = try? checkVerified(result) {
+                print("Finishing transaction: \(transaction.id)")
+                await transaction.finish()
+            }
+        }
+        processedTransactionsForCurrentUser.removeAll()
+        purchasedProductIDs.removeAll()
     }
     
     // Keep the original method for background transaction updates
@@ -270,6 +355,12 @@ class StoreKitManager: ObservableObject {
         guard let authManager = self.authManager else {
             print("❌ No auth manager available - cannot update subscription")
             errorMessage = "Unable to update subscription. Please restart the app and restore purchases."
+            return
+        }
+        
+        // Don't auto-process for shared access users
+        if authManager.currentUser?.subscriptionLevel == .sharedAccess {
+            print("⏸️ Not auto-processing transaction for shared access user")
             return
         }
         
@@ -290,11 +381,25 @@ class StoreKitManager: ObservableObject {
         }
     }
     
+    func clearSandboxTransactions() async {
+        for await result in StoreKit.Transaction.currentEntitlements {
+            if let transaction = try? checkVerified(result) {
+                await transaction.finish()
+            }
+        }
+    }
+    
     private func syncSubscriptionStatus() async {
         print("🔄 Syncing subscription status with Firebase...")
         
         guard let authManager = self.authManager else {
             print("❌ No auth manager available for sync")
+            return
+        }
+        
+        // Don't sync for shared access users
+        if authManager.currentUser?.subscriptionLevel == .sharedAccess {
+            print("⏸️ Not syncing subscription for shared access user")
             return
         }
         

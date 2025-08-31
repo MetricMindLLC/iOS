@@ -11,6 +11,7 @@ struct SubscriptionView: View {
     @State private var showingConfirmation = false
     @State private var selectedProduct: Product?
     @State private var isDowngrade = false
+    @State private var showingSharedAccessInfo = false
     
     // Initialize with auth manager reference
     init() {
@@ -19,6 +20,10 @@ struct SubscriptionView: View {
     
     var currentSubscriptionLevel: SubscriptionLevel {
         authManager.currentUser?.subscriptionLevel ?? .trial
+    }
+    
+    var isSharedAccessUser: Bool {
+        currentSubscriptionLevel == .sharedAccess
     }
     
     var body: some View {
@@ -32,7 +37,12 @@ struct SubscriptionView: View {
                     } else if storeKit.products.isEmpty {
                         emptyStateSection
                     } else {
-                        currentPlanSection
+                        // Show different sections based on user type
+                        if isSharedAccessUser {
+                            sharedAccessInfoSection
+                        } else {
+                            currentPlanSection
+                        }
                         availablePlansSection
                     }
                     
@@ -41,7 +51,9 @@ struct SubscriptionView: View {
                     }
                     
                     if !storeKit.products.isEmpty {
-                        manageSubscriptionSection
+                        if !isSharedAccessUser {
+                            manageSubscriptionSection
+                        }
                         restoreSection
                     }
                 }
@@ -88,26 +100,114 @@ struct SubscriptionView: View {
             if let product = selectedProduct {
                 if isDowngrade {
                     Text("Are you sure you want to downgrade to \(getSubscriptionName(for: product))? This change will take effect at the end of your current billing period.")
+                } else if isSharedAccessUser {
+                    Text("Upgrade to \(getSubscriptionName(for: product)) for \(product.displayPrice)? This will allow you to create and manage your own teams.")
                 } else {
                     Text("Upgrade to \(getSubscriptionName(for: product)) for \(product.displayPrice)?")
                 }
             }
         }
+        .alert("About Shared Access", isPresented: $showingSharedAccessInfo) {
+            Button("Got it") { }
+        } message: {
+            Text("You currently have free access to teams you've been invited to. Upgrade to create and manage your own teams!")
+        }
     }
     
     private var headerSection: some View {
         VStack(spacing: 16) {
-            Image(systemName: "star.circle.fill")
+            Image(systemName: isSharedAccessUser ? "person.2.circle.fill" : "star.circle.fill")
                 .font(.system(size: 60))
-                .foregroundColor(.yellow)
+                .foregroundColor(isSharedAccessUser ? .blue : .yellow)
             
-            Text("Manage Subscription")
+            Text(isSharedAccessUser ? "Upgrade Your Account" : "Manage Subscription")
                 .font(.title)
                 .fontWeight(.bold)
             
             if let user = authManager.currentUser {
-                subscriptionStatusView(for: user)
+                if isSharedAccessUser {
+                    Text("Start creating your own teams")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                } else {
+                    subscriptionStatusView(for: user)
+                }
             }
+        }
+    }
+    
+    // NEW: Section for shared access users
+    private var sharedAccessInfoSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Current Access")
+                .font(.headline)
+            
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Shared Access")
+                            .font(.title2)
+                            .fontWeight(.bold)
+                        
+                        Text("Free")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    Spacer()
+                    
+                    Button(action: { showingSharedAccessInfo = true }) {
+                        Image(systemName: "info.circle")
+                            .font(.title2)
+                            .foregroundColor(.blue)
+                    }
+                }
+                
+                // Current access features
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                            .font(.caption)
+                        Text("Access to teams you've been invited to")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    HStack {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                            .font(.caption)
+                        Text("View and interact with shared teams")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    HStack {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(.red)
+                            .font(.caption)
+                        Text("Cannot create your own teams")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                
+                // Upgrade prompt
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Want to create your own teams?")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    
+                    Text("Upgrade to a paid plan to become a head coach and manage your own teams.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .padding()
+                .background(Color.blue.opacity(0.1))
+                .cornerRadius(8)
+            }
+            .padding()
+            .background(Color.gray.opacity(0.1))
+            .cornerRadius(12)
         }
     }
     
@@ -177,12 +277,23 @@ struct SubscriptionView: View {
     
     private var availablePlansSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Available Plans")
+            Text(isSharedAccessUser ? "Choose Your Plan" : "Available Plans")
                 .font(.headline)
             
-            // Filter products to exclude trial if user is not eligible
+            if isSharedAccessUser {
+                Text("Select a plan to start creating and managing your own teams")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+            }
+            
+            // Filter products to exclude trial if user is not eligible or is shared access
             let filteredProducts = storeKit.products.filter { product in
                 let subscriptionLevel = getSubscriptionLevel(for: product)
+                
+                // Shared access users shouldn't see trial
+                if isSharedAccessUser {
+                    return subscriptionLevel != .trial
+                }
                 
                 // If it's a trial product, only show if user is eligible
                 if subscriptionLevel == .trial {
@@ -200,6 +311,7 @@ struct SubscriptionView: View {
                     isCurrentPlan: isCurrentPlan(product),
                     isPurchased: storeKit.isProductPurchased(product.id),
                     isLoading: storeKit.purchaseInProgress,
+                    isSharedAccessUser: isSharedAccessUser,
                     onSelect: {
                         handlePlanSelection(product)
                     }
@@ -207,7 +319,7 @@ struct SubscriptionView: View {
             }
             
             // Show message if trial is not available
-            if authManager.currentUser?.isTrialEligible == false {
+            if authManager.currentUser?.isTrialEligible == false && !isSharedAccessUser {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
                         Image(systemName: "info.circle")
@@ -424,13 +536,23 @@ struct SubscriptionView: View {
     private func handlePlanSelection(_ product: Product) {
         guard !isCurrentPlan(product) else { return }
         
+        if storeKit.isProductPurchased(product.id) {
+            storeKit.errorMessage = "You already have an active subscription to this plan."
+            return
+        }
+        
         selectedProduct = product
         
-        // Determine if this is a downgrade
-        if let productLevel = getSubscriptionLevel(for: product) {
-            isDowngrade = productLevel.sortOrder < currentSubscriptionLevel.sortOrder
-        } else {
+        // For shared access users, it's always an upgrade
+        if isSharedAccessUser {
             isDowngrade = false
+        } else {
+            // Determine if this is a downgrade for regular users
+            if let productLevel = getSubscriptionLevel(for: product) {
+                isDowngrade = productLevel.sortOrder < currentSubscriptionLevel.sortOrder
+            } else {
+                isDowngrade = false
+            }
         }
         
         showingConfirmation = true
@@ -441,12 +563,25 @@ struct SubscriptionView: View {
         
         // Check if purchase was successful
         if storeKit.errorMessage == nil {
-            await MainActor.run {
+            // For shared access users upgrading, we need to ONLY update subscription, NOT membership type
+            if isSharedAccessUser {
+                if let level = getSubscriptionLevel(for: product) {
+                    // FIXED: Only update subscription level, preserve existing membership type
+                    try? await authManager.updateSubscriptionLevel(level, transactionId: nil)
+                    
+                    successMessage = "Successfully upgraded to \(level.displayName)! You can now create your own teams while keeping access to teams you were invited to."
+                } else {
+                    successMessage = "Subscription updated successfully!"
+                }
+            } else {
                 if let level = getSubscriptionLevel(for: product) {
                     successMessage = isDowngrade ?
                         "Your plan will change to \(level.displayName) at the end of your current billing period." :
                         "Successfully upgraded to \(level.displayName)!"
                 }
+            }
+            
+            await MainActor.run {
                 showingSuccessAlert = true
             }
         }
@@ -459,13 +594,14 @@ struct SubscriptionView: View {
     }
 }
 
-// MARK: - Subscription Plan Card
+// MARK: - Subscription Plan Card (UPDATED)
 struct SubscriptionPlanCard: View {
     let product: Product
     let currentLevel: SubscriptionLevel
     let isCurrentPlan: Bool
     let isPurchased: Bool
     let isLoading: Bool
+    let isSharedAccessUser: Bool
     let onSelect: () -> Void
     
     private var subscriptionLevel: SubscriptionLevel {
@@ -481,16 +617,26 @@ struct SubscriptionPlanCard: View {
     }
     
     private var isUpgrade: Bool {
-        subscriptionLevel.sortOrder > currentLevel.sortOrder
+        // For shared access users, everything is an upgrade
+        if isSharedAccessUser {
+            return true
+        }
+        return subscriptionLevel.sortOrder > currentLevel.sortOrder
     }
     
     private var isDowngrade: Bool {
-        subscriptionLevel.sortOrder < currentLevel.sortOrder
+        // Shared access users can't downgrade
+        if isSharedAccessUser {
+            return false
+        }
+        return subscriptionLevel.sortOrder < currentLevel.sortOrder
     }
     
     private var buttonText: String {
         if isCurrentPlan {
             return "Current Plan"
+        } else if isSharedAccessUser {
+            return "Start Creating Teams"
         } else if isUpgrade {
             return "Upgrade"
         } else if isDowngrade {
@@ -503,6 +649,8 @@ struct SubscriptionPlanCard: View {
     private var buttonColor: Color {
         if isCurrentPlan {
             return .gray
+        } else if isSharedAccessUser {
+            return .blue
         } else if isUpgrade {
             return .green
         } else if isDowngrade {
@@ -527,6 +675,18 @@ struct SubscriptionPlanCard: View {
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 2)
                                 .background(Color.green)
+                                .foregroundColor(.white)
+                                .cornerRadius(4)
+                        }
+                        
+                        // Show "RECOMMENDED" for Pro plan for shared access users
+                        if isSharedAccessUser && subscriptionLevel == .pro {
+                            Text("RECOMMENDED")
+                                .font(.caption)
+                                .fontWeight(.bold)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 2)
+                                .background(Color.orange)
                                 .foregroundColor(.white)
                                 .cornerRadius(4)
                         }
@@ -581,7 +741,20 @@ struct SubscriptionPlanCard: View {
             
             // Features for this level
             VStack(alignment: .leading, spacing: 4) {
-                ForEach(Array(subscriptionLevel.features.prefix(3).enumerated()), id: \.offset) { _, feature in
+                // For shared access users, emphasize team creation features
+                if isSharedAccessUser {
+                    HStack {
+                        Image(systemName: "star.fill")
+                            .foregroundColor(.yellow)
+                            .font(.caption)
+                        Text("Create up to \(subscriptionLevel == .pro ? "3" : subscriptionLevel == .premium ? "10" : "unlimited") teams")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundColor(.primary)
+                    }
+                }
+                
+                ForEach(Array(subscriptionLevel.features.prefix(isSharedAccessUser ? 2 : 3).enumerated()), id: \.offset) { _, feature in
                     HStack {
                         Image(systemName: "checkmark")
                             .foregroundColor(isCurrentPlan ? .green : .secondary)

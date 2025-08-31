@@ -338,7 +338,10 @@ class FirebaseAuthManager: ObservableObject {
         
         do {
             print("🔍 FirebaseAuthManager: Fetching user document from Firestore")
-            let doc = try await db.collection("users").document(firebaseUser.uid).getDocument()
+            // FORCE FRESH READ FROM SERVER, NOT CACHE
+            let doc = try await db.collection("users")
+                .document(firebaseUser.uid)
+                .getDocument(source: .server)
             
             if doc.exists {
                 print("🔍 FirebaseAuthManager: User document exists, decoding")
@@ -619,6 +622,7 @@ class FirebaseAuthManager: ObservableObject {
         
         // Post notification for other parts of the app
         await MainActor.run {
+            self.currentUser = updatedUser
             NotificationCenter.default.post(
                 name: Notification.Name("SubscriptionUpdated"),
                 object: nil,

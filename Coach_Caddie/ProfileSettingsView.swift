@@ -1519,7 +1519,7 @@ struct ProfileSettingsView: View {
                     }
                     Spacer()
                     Button("Upgrade") {
-                        // Handle upgrade navigation
+                        showingSubscription = true  // FIXED: Now opens the subscription view
                     }
                     .font(.caption)
                     .foregroundColor(.orange)
@@ -1540,17 +1540,19 @@ struct ProfileSettingsView: View {
             }
         } footer: {
             if let currentUser = authManager.currentUser {
-                let planName = currentUser.subscriptionLevel.displayName
-                let maxTeams = currentUser.maxTeamsAllowed
-                
-                if maxTeams < 999 {
-                    if teamManager.teams.count >= maxTeams {
-                        Text("You've reached your team limit for the \(planName) plan. Upgrade to create more teams.")
-                    } else {
-                        Text("Your \(planName) plan allows up to \(maxTeams) team\(maxTeams == 1 ? "" : "s").")
-                    }
-                } else {
-                    Text("Unlimited teams on your \(planName) plan.")
+                        let planName = currentUser.subscriptionLevel.displayName
+                        let maxTeams = currentUser.maxTeamsAllowed
+                        let createdCount = teamManager.teamsICreated.count
+                        let invitedCount = teamManager.teamsIWasInvitedTo.count
+                        
+                        if maxTeams < 999 {
+                            if createdCount >= maxTeams {
+                                Text("You've reached your team creation limit for the \(planName) plan." + (invitedCount > 0 ? " You're also a member of \(invitedCount) team\(invitedCount == 1 ? "" : "s") through invites (these don't count toward your limit)." : ""))
+                            } else {
+                                Text("Your \(planName) plan allows you to create up to \(maxTeams) team\(maxTeams == 1 ? "" : "s"). You've created \(createdCount)." + (invitedCount > 0 ? " You're also a member of \(invitedCount) team\(invitedCount == 1 ? "" : "s") through invites (these don't count toward your limit)." : ""))
+                            }
+                        } else {
+                            Text("Unlimited team creation on your \(planName) plan." + (invitedCount > 0 ? " You're also a member of \(invitedCount) team\(invitedCount == 1 ? "" : "s") through invites (these don't count toward your limit)." : ""))
                 }
             }
         }

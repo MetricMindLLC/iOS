@@ -15,7 +15,8 @@ struct NewTeamView: View {
     @State private var hasAcknowledgedResponsibility = false
     @State private var showingResponsibilityDisclaimer = false
     @State private var showingParentNoticeGenerator = false
-
+    @State private var showingSubscription = false
+    
     var body: some View {
         NavigationView {
             Form {
@@ -43,16 +44,14 @@ struct NewTeamView: View {
                                 .foregroundColor(.blue)
                             Text("Teams")
                             Spacer()
-                            Text("\(teamManager.teams.count)/\(currentUser.maxTeamsAllowed)")
-                                .foregroundColor(teamManager.teams.count >= currentUser.maxTeamsAllowed ? .red : .secondary)
-                                .fontWeight(teamManager.teams.count >= currentUser.maxTeamsAllowed ? .semibold : .regular)
+                            Text("\(teamManager.teamsICreated.count)/\(currentUser.maxTeamsAllowed)")
+                                .foregroundColor(teamManager.teamsICreated.count >= currentUser.maxTeamsAllowed ? .red : .secondary)
+                                .fontWeight(teamManager.teamsICreated.count >= currentUser.maxTeamsAllowed ? .semibold : .regular)
                         }
                         
-                        if teamManager.teams.count >= currentUser.maxTeamsAllowed {
+                        if teamManager.teamsICreated.count >= currentUser.maxTeamsAllowed {
                             Button("Upgrade Plan") {
-                                // Handle upgrade navigation
-                                // presentationMode.wrappedValue.dismiss()
-                                // showingUpgradeView = true
+                                showingSubscription = true
                             }
                             .foregroundColor(.orange)
                         }
@@ -274,6 +273,10 @@ struct NewTeamView: View {
                     )
                 )
             }
+            .sheet(isPresented: $showingSubscription) {
+                SubscriptionView()
+                    .environmentObject(teamManager.authManager ?? FirebaseAuthManager())
+            }
             .onChange(of: format) { _ in
                 // Update default formation when format changes
                 defaultFormation = format.defaultFormation
@@ -281,43 +284,35 @@ struct NewTeamView: View {
         }
     }
     
-    // MARK: - Computed Properties
     
     private var canCreateTeam: Bool {
         guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         guard hasAcknowledgedResponsibility else { return false }
         
-        // Check team limits
-        if let authManager = teamManager.authManager,
-           let currentUser = authManager.currentUser {
-            return teamManager.teams.count < currentUser.maxTeamsAllowed
-        }
-        
-        return true
+        // Use the TeamManager's method that correctly counts created teams only
+        return teamManager.canCreateMoreTeams()
     }
     
     private var teamLimitWarning: String? {
         guard let authManager = teamManager.authManager,
               let currentUser = authManager.currentUser else { return nil }
         
-        let currentTeams = teamManager.teams.count
+        let createdTeamsCount = teamManager.teamsICreated.count  // Use created teams only
         let maxTeams = currentUser.maxTeamsAllowed
         let planName = currentUser.subscriptionLevel.displayName
         
-        if currentTeams >= maxTeams {
+        if createdTeamsCount >= maxTeams {
             if maxTeams == 1 {
                 return "You've reached your team limit for the \(planName) plan. Upgrade to create more teams."
             } else {
                 return "You've reached your maximum of \(maxTeams) teams for the \(planName) plan. Upgrade to create more teams."
             }
-        } else if currentTeams == maxTeams - 1 {
+        } else if createdTeamsCount == maxTeams - 1 {
             return "This will be your last team on the \(planName) plan. Consider upgrading for more teams."
         }
         
         return nil
     }
-    
-    // MARK: - Methods
     
     private func createTeam() {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -335,20 +330,8 @@ struct NewTeamView: View {
         // Enhanced team limit checking
         if let authManager = teamManager.authManager,
            let currentUser = authManager.currentUser {
-            let currentTeams = teamManager.teams.count
-            let maxTeams = currentUser.maxTeamsAllowed
             
-            if currentTeams >= maxTeams {
-                let planName = currentUser.subscriptionLevel.displayName
-                if maxTeams == 1 {
-                    errorMessage = "You've reached your team limit for the \(planName) plan. Please upgrade to create more teams."
-                } else {
-                    errorMessage = "You've reached your maximum of \(maxTeams) teams for the \(planName) plan. Please upgrade to create more teams."
-                }
-                return
-            }
-            
-            // Fixed: Use subscriptionLevel.canCreateTeams instead of currentUser.canCreateTeams
+            // First check if they can create teams at all
             if !currentUser.subscriptionLevel.canCreateTeams {
                 switch currentUser.subscriptionLevel {
                 case .sharedAccess:
@@ -360,6 +343,20 @@ struct NewTeamView: View {
                 }
                 return
             }
+            
+            // Now check team count limits using the correct method
+            if !teamManager.canCreateMoreTeams() {
+                let createdCount = teamManager.teamsICreated.count
+                let maxTeams = currentUser.maxTeamsAllowed
+                let planName = currentUser.subscriptionLevel.displayName
+                
+                if maxTeams == 1 {
+                    errorMessage = "You've reached your team limit for the \(planName) plan. Please upgrade to create more teams."
+                } else {
+                    errorMessage = "You've reached your maximum of \(maxTeams) teams for the \(planName) plan. You've created \(createdCount) team\(createdCount == 1 ? "" : "s"). Please upgrade to create more teams."
+                }
+                return
+            }
         }
         
         // Check for duplicate team names
@@ -367,7 +364,7 @@ struct NewTeamView: View {
             errorMessage = "A team with this name already exists"
             return
         }
-
+        
         let newTeam = Team(
             name: trimmedName,
             format: format,
@@ -376,64 +373,65 @@ struct NewTeamView: View {
             ageGroup: ageGroup.isEmpty ? nil : ageGroup,
             season: season.isEmpty ? nil : season
         )
-
+        
         teamManager.addTeam(newTeam)
         presentationMode.wrappedValue.dismiss()
     }
 }
-
-// MARK: - Team Format Extensions
-extension TeamFormat {
-    var displayName: String {
-        switch self {
-        case .fiveVFive: return "5v5 (Youth)"
-        case .sevenVSeven: return "7v7 (Youth)"
-        case .nineVNine: return "9v9 (Youth)"
-        case .elevenVEleven: return "11v11 (Full Field)"
+    
+    // MARK: - Team Format Extensions
+    extension TeamFormat {
+        var displayName: String {
+            switch self {
+            case .fiveVFive: return "5v5 (Youth)"
+            case .sevenVSeven: return "7v7 (Youth)"
+            case .nineVNine: return "9v9 (Youth)"
+            case .elevenVEleven: return "11v11 (Full Field)"
+            }
         }
     }
-}
-
-// MARK: - Formation Extensions
-extension Formation {
-    var displayName: String {
-        switch self {
-        // 5v5 formations - UPDATED TO MATCH CURRENT FORMATIONS
-        case .formation5v5_1211: return "1-2-1-1 (Diamond)"
-        case .formation5v5_2111: return "2-1-1-1 (Defensive)"
-        case .formation5v5_131: return "1-3-1 (Midfield Heavy)"
-        case .formation5v5_221: return "2-2-1 (Balanced)"
-        case .formation5v5_23: return "2-3 (Attacking)"
-        case .formation5v5_32: return "3-2 (Defensive)"
-            
-        // 7v7 formations - UPDATED TO MATCH CURRENT FORMATIONS
-        case .formation7v7_312: return "3-1-2 (Balanced)"
-        case .formation7v7_213: return "2-1-3 (Attacking)"
-        case .formation7v7_321: return "3-2-1 (Defensive)"
-        case .formation7v7_222: return "2-2-2 (Box)"
-            
-        // 9v9 formations - UPDATED TO MATCH CURRENT FORMATIONS
-        case .formation9v9_3212: return "3-2-1-2 (Balanced)"
-        case .formation9v9_3131: return "3-1-3-1 (Diamond)"
-        case .formation9v9_4121: return "4-1-2-1 (Defensive)"
-        case .formation9v9_413: return "4-1-3 (Attacking)"
-        case .formation9v9_323: return "3-2-3 (Attack)"
-        case .formation9v9_332: return "3-3-2 (Midfield)"
-        case .formation9v9_233: return "2-3-3 (Ultra Attack)"
-            
-        // 11v11 formations - UPDATED TO INCLUDE NEW FORMATION
-        case .formation442: return "4-4-2 (Classic)"
-        case .formation433: return "4-3-3 (Attacking)"
-        case .formation352: return "3-5-2 (Midfield)"
-        case .formation451: return "4-5-1 (Defensive)"
-        case .formation343: return "3-4-3 (Wide)"
-        case .formation4231: return "4-2-3-1 (Modern)"
-        case .formation532: return "5-3-2 (Defensive)"
-        case .formation541: return "5-4-1 (Ultra Defensive)"
-        case .formation41212: return "4-1-2-1-2 (Diamond)"
-            
-        // Default case for any other formations
-        default: return self.rawValue
+    
+    // MARK: - Formation Extensions
+    extension Formation {
+        var displayName: String {
+            switch self {
+                // 5v5 formations - UPDATED TO MATCH CURRENT FORMATIONS
+            case .formation5v5_1211: return "1-2-1-1 (Diamond)"
+            case .formation5v5_2111: return "2-1-1-1 (Defensive)"
+            case .formation5v5_131: return "1-3-1 (Midfield Heavy)"
+            case .formation5v5_221: return "2-2-1 (Balanced)"
+            case .formation5v5_23: return "2-3 (Attacking)"
+            case .formation5v5_32: return "3-2 (Defensive)"
+                
+                // 7v7 formations - UPDATED TO MATCH CURRENT FORMATIONS
+            case .formation7v7_312: return "3-1-2 (Balanced)"
+            case .formation7v7_213: return "2-1-3 (Attacking)"
+            case .formation7v7_321: return "3-2-1 (Defensive)"
+            case .formation7v7_222: return "2-2-2 (Box)"
+                
+                // 9v9 formations - UPDATED TO MATCH CURRENT FORMATIONS
+            case .formation9v9_3212: return "3-2-1-2 (Balanced)"
+            case .formation9v9_3131: return "3-1-3-1 (Diamond)"
+            case .formation9v9_4121: return "4-1-2-1 (Defensive)"
+            case .formation9v9_413: return "4-1-3 (Attacking)"
+            case .formation9v9_323: return "3-2-3 (Attack)"
+            case .formation9v9_332: return "3-3-2 (Midfield)"
+            case .formation9v9_233: return "2-3-3 (Ultra Attack)"
+                
+                // 11v11 formations - UPDATED TO INCLUDE NEW FORMATION
+            case .formation442: return "4-4-2 (Classic)"
+            case .formation433: return "4-3-3 (Attacking)"
+            case .formation352: return "3-5-2 (Midfield)"
+            case .formation451: return "4-5-1 (Defensive)"
+            case .formation343: return "3-4-3 (Wide)"
+            case .formation4231: return "4-2-3-1 (Modern)"
+            case .formation532: return "5-3-2 (Defensive)"
+            case .formation541: return "5-4-1 (Ultra Defensive)"
+            case .formation41212: return "4-1-2-1-2 (Diamond)"
+                
+                // Default case for any other formations
+            default: return self.rawValue
+            }
         }
     }
-}
+
