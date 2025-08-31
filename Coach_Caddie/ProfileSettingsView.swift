@@ -1464,11 +1464,11 @@ struct ProfileSettingsView: View {
                 HStack {
                     Image(systemName: "number.circle.fill")
                         .foregroundColor(.blue)
-                    Text("Teams")
+                    Text("Teams Created")  // CHANGED: More specific label
                     Spacer()
-                    Text("\(teamManager.teams.count)/\(currentUser.maxTeamsAllowed)")
-                        .foregroundColor(teamManager.teams.count >= currentUser.maxTeamsAllowed ? .red : .secondary)
-                        .fontWeight(teamManager.teams.count >= currentUser.maxTeamsAllowed ? .semibold : .regular)
+                    Text("\(teamManager.teamsICreated.count)/\(currentUser.maxTeamsAllowed)")  // CHANGED: Use teamsICreated
+                        .foregroundColor(teamManager.teamsICreated.count >= currentUser.maxTeamsAllowed ? .red : .secondary)
+                        .fontWeight(teamManager.teamsICreated.count >= currentUser.maxTeamsAllowed ? .semibold : .regular)
                 }
                 .padding(.vertical, 2)
             }
@@ -1503,7 +1503,7 @@ struct ProfileSettingsView: View {
             
             // Show upgrade suggestion if at limit
             if let currentUser = authManager.currentUser,
-               teamManager.teams.count >= currentUser.maxTeamsAllowed,
+               teamManager.teamsICreated.count >= currentUser.maxTeamsAllowed,  // CHANGED: Use teamsICreated
                currentUser.maxTeamsAllowed < 999 {
                 HStack {
                     Image(systemName: "arrow.up.circle.fill")
@@ -1519,7 +1519,7 @@ struct ProfileSettingsView: View {
                     }
                     Spacer()
                     Button("Upgrade") {
-                        showingSubscription = true  // FIXED: Now opens the subscription view
+                        showingSubscription = true
                     }
                     .font(.caption)
                     .foregroundColor(.orange)
@@ -1533,26 +1533,26 @@ struct ProfileSettingsView: View {
                 if let currentUser = authManager.currentUser,
                    currentUser.maxTeamsAllowed < 999 {
                     Spacer()
-                    Text("\(teamManager.teams.count)/\(currentUser.maxTeamsAllowed)")
+                    Text("\(teamManager.teamsICreated.count)/\(currentUser.maxTeamsAllowed)")  // CHANGED: Use teamsICreated
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
             }
         } footer: {
             if let currentUser = authManager.currentUser {
-                        let planName = currentUser.subscriptionLevel.displayName
-                        let maxTeams = currentUser.maxTeamsAllowed
-                        let createdCount = teamManager.teamsICreated.count
-                        let invitedCount = teamManager.teamsIWasInvitedTo.count
-                        
-                        if maxTeams < 999 {
-                            if createdCount >= maxTeams {
-                                Text("You've reached your team creation limit for the \(planName) plan." + (invitedCount > 0 ? " You're also a member of \(invitedCount) team\(invitedCount == 1 ? "" : "s") through invites (these don't count toward your limit)." : ""))
-                            } else {
-                                Text("Your \(planName) plan allows you to create up to \(maxTeams) team\(maxTeams == 1 ? "" : "s"). You've created \(createdCount)." + (invitedCount > 0 ? " You're also a member of \(invitedCount) team\(invitedCount == 1 ? "" : "s") through invites (these don't count toward your limit)." : ""))
-                            }
-                        } else {
-                            Text("Unlimited team creation on your \(planName) plan." + (invitedCount > 0 ? " You're also a member of \(invitedCount) team\(invitedCount == 1 ? "" : "s") through invites (these don't count toward your limit)." : ""))
+                let planName = currentUser.subscriptionLevel.displayName
+                let maxTeams = currentUser.maxTeamsAllowed
+                let createdCount = teamManager.teamsICreated.count
+                let invitedCount = teamManager.teamsIWasInvitedTo.count
+                
+                if maxTeams < 999 {
+                    if createdCount >= maxTeams {
+                        Text("You've reached your team creation limit for the \(planName) plan." + (invitedCount > 0 ? " You're also a member of \(invitedCount) team\(invitedCount == 1 ? "" : "s") through invites (these don't count toward your limit)." : ""))
+                    } else {
+                        Text("Your \(planName) plan allows you to create up to \(maxTeams) team\(maxTeams == 1 ? "" : "s"). You've created \(createdCount)." + (invitedCount > 0 ? " You're also a member of \(invitedCount) team\(invitedCount == 1 ? "" : "s") through invites (these don't count toward your limit)." : ""))
+                    }
+                } else {
+                    Text("Unlimited team creation on your \(planName) plan." + (invitedCount > 0 ? " You're also a member of \(invitedCount) team\(invitedCount == 1 ? "" : "s") through invites." : ""))
                 }
             }
         }
