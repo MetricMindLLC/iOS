@@ -90,14 +90,14 @@ class FirebaseManager: NSObject, ObservableObject {
         }
     }
     
-    // MARK: - Team Management
-    func saveTeam(_ team: Team) async throws {
+    func saveTeam(_ team: Team, onlyNewGames: Bool = false) async throws {
         guard let user = Auth.auth().currentUser else {
             throw FirebaseError.notAuthenticated
         }
         print("🔥 saveTeam called for team: \(team.name)")
         print("🔥 Team ID: \(team.id.uuidString)")
         print("🔥 useSubcollections: \(team.useSubcollections)")
+        print("🔥 onlyNewGames: \(onlyNewGames)")
         
         let teamRef = db.collection("teams").document(team.id.uuidString)
         
@@ -119,9 +119,21 @@ class FirebaseManager: NSObject, ObservableObject {
                 try await playersRef.document(player.id.uuidString).setData(playerData)
             }
             
-            // Save games to subcollection with their nested subcollections
+            // Save games to subcollection with optimization for new games only
             let gamesRef = teamRef.collection("games")
-            for game in team.games {
+            
+            let gamesToSave: [Game]
+            if onlyNewGames {
+                // Get existing game IDs to avoid unnecessary writes
+                let existingGameIds = try await getExistingGameIds(for: team.id.uuidString)
+                gamesToSave = team.games.filter { !existingGameIds.contains($0.id.uuidString) }
+                print("🎯 Saving only \(gamesToSave.count) NEW games instead of all \(team.games.count)")
+            } else {
+                gamesToSave = team.games
+                print("📦 Saving all \(team.games.count) games")
+            }
+            
+            for game in gamesToSave {
                 let gameRef = gamesRef.document(game.id.uuidString)
                 
                 // IMPORTANT: Save the nested subcollections FIRST before modifying the game
@@ -209,6 +221,13 @@ class FirebaseManager: NSObject, ObservableObject {
         
         lastSyncDate = Date()
     }
+
+    // Add this helper method to get existing game IDs
+    private func getExistingGameIds(for teamId: String) async throws -> Set<String> {
+        let gamesRef = db.collection("teams").document(teamId).collection("games")
+        let snapshot = try await gamesRef.getDocuments()
+        return Set(snapshot.documents.map { $0.documentID })
+    }
     
     func loadTeam(teamId: String) async throws -> Team? {
         let teamDoc = try await db.collection("teams").document(teamId).getDocument()
@@ -225,6 +244,114 @@ class FirebaseManager: NSObject, ObservableObject {
         }
         
         return team
+    }
+
+    /// Saves only the specified game's data to Firebase subcollections - used during live games
+    func saveActiveGameData(_ game: Game, in team: Team) async throws {
+        guard team.useSubcollections else {
+            // Fallback to full team save for non-subcollection teams
+            try await saveTeam(team)
+            return
+        }
+        
+        guard let user = Auth.auth().currentUser else {
+            throw FirebaseError.notAuthenticated
+        }
+        
+        print("🎯 Saving ONLY active game data for: \(game.opponent) (ID: \(game.id))")
+        
+        let gameRef = db.collection("teams").document(team.id.uuidString)
+            .collection("games").document(game.id.uuidString)
+        
+        // Save nested subcollections FIRST
+        
+        // Save audit log entries
+        if let auditLog = game.auditLog, !auditLog.isEmpty {
+            let auditLogRef = gameRef.collection("auditLog")
+            let existingAuditDocs = try await auditLogRef.getDocuments()
+            for doc in existingAuditDocs.documents {
+                try await doc.reference.delete()
+            }
+            for (index, auditEntry) in auditLog.enumerated() {
+                let auditData = try Firestore.Encoder().encode(auditEntry)
+                try await auditLogRef.document(String(index)).setData(auditData)
+            }
+            print("📝 Saved \(auditLog.count) audit log entries for ACTIVE game vs \(game.opponent)")
+        }
+        
+        // Save player stats
+        if !game.playerStats.isEmpty {
+            let playerStatsRef = gameRef.collection("playerStats")
+            let existingStatsDocs = try await playerStatsRef.getDocuments()
+            for doc in existingStatsDocs.documents {
+                try await doc.reference.delete()
+            }
+            for stats in game.playerStats {
+                let statsData = try Firestore.Encoder().encode(stats)
+                try await playerStatsRef.document(stats.playerId.uuidString).setData(statsData)
+            }
+            print("📊 Saved \(game.playerStats.count) player stats for ACTIVE game vs \(game.opponent)")
+        }
+        
+        // Save current lineup
+        if let actualStartingLineup = game.actualStartingLineup, !actualStartingLineup.isEmpty {
+            let currentLineupRef = gameRef.collection("currentLineup")
+            let existingLineupDocs = try await currentLineupRef.getDocuments()
+            for doc in existingLineupDocs.documents {
+                try await doc.reference.delete()
+            }
+            for (index, position) in actualStartingLineup.enumerated() {
+                let positionData = try Firestore.Encoder().encode(position)
+                try await currentLineupRef.document(String(index)).setData(positionData)
+            }
+            print("📋 Saved \(actualStartingLineup.count) lineup positions for ACTIVE game vs \(game.opponent)")
+        }
+        
+        // NOW save the main game document WITHOUT nested arrays
+        var gameDataForFirebase = game
+        gameDataForFirebase.auditLog = []  // Clear the array, not nil
+        gameDataForFirebase.playerStats = []
+        gameDataForFirebase.actualStartingLineup = []  // Clear the array, not nil
+        
+        let gameData = try Firestore.Encoder().encode(gameDataForFirebase)
+        try await gameRef.setData(gameData)
+        
+        print("✅ ACTIVE game saved successfully: \(game.opponent)")
+    }
+
+    /// Updates only the main team document without touching subcollections - used for team-level changes during games
+    func saveTeamMainDocumentOnly(_ team: Team) async throws {
+        guard let user = Auth.auth().currentUser else {
+            throw FirebaseError.notAuthenticated
+        }
+        
+        print("📄 Saving ONLY main team document for: \(team.name)")
+        
+        let teamRef = db.collection("teams").document(team.id.uuidString)
+        
+        if team.useSubcollections {
+            // Create team data without nested collections
+            var teamDataForFirebase = team
+            teamDataForFirebase.players = []  // Will be in subcollections
+            teamDataForFirebase.games = []    // Will be in subcollections
+            teamDataForFirebase.practices = [] // Will be in subcollections
+            
+            let teamData = try Firestore.Encoder().encode(teamDataForFirebase)
+            try await teamRef.setData(teamData)
+            print("✅ Main team document updated (subcollections unchanged)")
+        } else {
+            // Save everything as embedded arrays in the main document
+            let teamData = try Firestore.Encoder().encode(team)
+            try await teamRef.setData(teamData)
+            print("✅ Team saved with embedded data")
+        }
+        
+        // Save team reference under user's document
+        let userRef = db.collection("users").document(user.uid)
+        try await userRef.setData([
+            "teams": FieldValue.arrayUnion([team.id.uuidString]),
+            "lastUpdated": FieldValue.serverTimestamp()
+        ], merge: true)
     }
     
     func loadTeams(for userId: String) async throws -> [Team] {

@@ -238,18 +238,13 @@ class TeamManager: ObservableObject {
             .store(in: &cancellables)
     }
     
-    func updateTeam(_ team: Team) {
+    func updateTeam(_ team: Team, activeGameId: UUID? = nil) {
         print("🔥 updateTeam called for team: \(team.name)")
-        print("🔥 Team ID: \(team.id.uuidString)")
-        
-        guard let currentUserUID = currentUserUID else {
-            print("⚠️ No current user")
-            return
-        }
-        
-        print("🔥 Current user UID: \(currentUserUID)")
+        print("🔥 Team ID: \(team.id)")
+        print("🔥 Current user UID: \(Auth.auth().currentUser?.uid ?? "nil")")
         print("🔥 Team coachUID: \(team.coachUID ?? "nil")")
         print("🔥 isOnline: \(firebaseManager.isOnline)")
+        print("🔥 Active Game ID: \(activeGameId?.uuidString ?? "none")")
         
         // Update local array first
         if let index = teams.firstIndex(where: { $0.id == team.id }) {
@@ -257,23 +252,19 @@ class TeamManager: ObservableObject {
             debouncedSave() // This is your existing local save method
         }
         
-        // Check if we're in a live game by looking at the team's games
-        let isLiveGame = team.games.contains { game in
-            !game.isCompleted && game.playerStats.count > 0
-        }
-        
-        // Cancel any existing work item
+        // Cancel any existing work item for this team
         firebaseUpdateWorkItems[team.id]?.cancel()
         
-        if isLiveGame {
-            print("🔥 Scheduled LIVE game Firebase save in \(firebaseUpdateDebounceTime) seconds")
-            updateTeamForLiveGame(team)
+        // Route to appropriate save method based on whether we have an active game
+        if let activeGameId = activeGameId,
+           let activeGame = team.games.first(where: { $0.id == activeGameId }) {
+            print("🔥 Routing to ACTIVE GAME specific save for game: \(activeGame.opponent)")
+            updateActiveGameWithDebounce(team, activeGame: activeGame)
         } else {
-            print("🔥 Scheduled regular Firebase save in 1.5 seconds")
+            print("🔥 Routing to FULL TEAM save (will process all games)")
             updateTeamWithDebounce(team, debounceTime: 1.5)
         }
     }
-
     
     private var teamListeners: [UUID: ListenerRegistration] = [:]
 
@@ -347,6 +338,76 @@ class TeamManager: ObservableObject {
                 self.addToPendingChanges("team_\(team.id.uuidString)", action: "update", teamId: team.id.uuidString)
                 self.firebaseUpdateWorkItems.removeValue(forKey: team.id)
             }
+        }
+    }
+    
+    private func updateActiveGameWithDebounce(_ team: Team, activeGame: Game) {
+        // Cancel any pending update for this team
+        firebaseUpdateWorkItems[team.id]?.cancel()
+        
+        let workItem = DispatchWorkItem { [weak self] in
+            Task { [weak self] in
+                await self?.saveActiveGameToFirebaseLive(team, activeGame: activeGame)
+            }
+        }
+        
+        firebaseUpdateWorkItems[team.id] = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + firebaseUpdateDebounceTime, execute: workItem)
+    }
+
+
+    private func saveActiveGameToFirebaseLive(_ team: Team, activeGame: Game) async {
+        print("🎯 LIVE saveActiveGameToFirebase called for game: \(activeGame.opponent)")
+        
+        guard await ensureAuthentication() else {
+            print("❌ ensureAuthentication failed")
+            return
+        }
+        
+        do {
+            // Use the specific active game save method instead of full team save
+            try await firebaseManager.saveActiveGameData(activeGame, in: team)
+            print("✅ LIVE Active Game save completed - parents/viewers will see updates")
+            
+            await MainActor.run {
+                self.removePendingChange("team_\(team.id.uuidString)")
+                self.firebaseUpdateWorkItems.removeValue(forKey: team.id)
+            }
+        } catch {
+            print("❌ LIVE Active Game save failed: \(error)")
+            await MainActor.run {
+                self.setError("Failed to save active game: \(error.localizedDescription)")
+                self.addToPendingChanges("team_\(team.id.uuidString)", action: "update", teamId: team.id.uuidString)
+                self.firebaseUpdateWorkItems.removeValue(forKey: team.id)
+            }
+        }
+    }
+    
+    func updateTeamImmediatelyForActiveGame(_ team: Team, activeGameId: UUID) async {
+        print("🚨 CRITICAL EVENT - immediate sync for live view")
+        
+        // Cancel any pending debounced updates
+        firebaseUpdateWorkItems[team.id]?.cancel()
+        firebaseUpdateWorkItems.removeValue(forKey: team.id)
+        
+        // Update local state
+        if let index = teams.firstIndex(where: { $0.id == team.id }) {
+            teams[index] = team
+            debouncedSave()
+        }
+        
+        // Get the active game
+        guard let activeGame = team.games.first(where: { $0.id == activeGameId }) else {
+            print("❌ Active game not found, falling back to full team save")
+            await updateTeamImmediately(team)
+            return
+        }
+        
+        // Save only the active game data immediately
+        if isOnline {
+            await saveActiveGameToFirebaseLive(team, activeGame: activeGame)
+        } else {
+            addToPendingChanges("team_\(team.id.uuidString)", action: "update", teamId: team.id.uuidString)
         }
     }
 
@@ -1144,7 +1205,21 @@ class TeamManager: ObservableObject {
     func addGame(to team: Team, game: Game) {
         if let teamIndex = teams.firstIndex(where: { $0.id == team.id }) {
             teams[teamIndex].games.append(game)
-            updateTeam(teams[teamIndex])
+            
+            // Use optimized save for subcollection teams
+            if teams[teamIndex].useSubcollections && isOnline {
+                Task {
+                    do {
+                        try await firebaseManager.saveTeam(teams[teamIndex], onlyNewGames: true)
+                    } catch {
+                        await MainActor.run {
+                            self.setError("Failed to save new game: \(error.localizedDescription)")
+                        }
+                    }
+                }
+            } else {
+                updateTeam(teams[teamIndex])
+            }
         }
     }
     

@@ -314,7 +314,7 @@ struct TeamOverviewTab: View {
                     Text(team.name)
                         .font(.largeTitle)
                         .bold()
-                    Text("\(team.format.rawValue) â€¢ \(team.defaultFormation.rawValue)")
+                    Text("\(team.format.rawValue) • \(team.defaultFormation.rawValue)")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }

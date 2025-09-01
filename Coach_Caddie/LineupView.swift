@@ -424,7 +424,8 @@ struct LineupView: View {
         
         selectedGame = game
         
-        teamManager.updateTeam(team)
+        // Use active game context for initial save
+        teamManager.updateTeam(team, activeGameId: game.id)
         
         // Start game session
         showingGameMode = true
@@ -455,11 +456,13 @@ struct LineupView: View {
     
     private func handleLineupPositionChange() {
         if showingGameMode && selectedGame != nil {
-            // During game mode: Update with subcollections support
+            // During game mode: Update with subcollections support and active game context
             saveCurrentLineupToGame()
             saveLineupToUserDefaults()
             gameStateManager.activeGameState?.lineupPositions = lineupPositions
-            teamManager.updateTeam(team)
+            
+            // FIXED: Use active game-specific save with game ID context
+            teamManager.updateTeam(team, activeGameId: selectedGame?.id)
             
             print("Game mode lineup change - fast sync for live view")
         } else {
@@ -683,7 +686,9 @@ struct LineupView: View {
         
         // 15. Force immediate save with listener protection
         print("💾 About to force immediate save with listener protection")
-        teamManager.updateTeamImmediatelySync(updatedTeam)
+        Task {
+            await teamManager.updateTeamImmediatelyForActiveGame(updatedTeam, activeGameId: updatedGame.id)
+        }
         print("💾 Immediate save completed")
         
         // 16. Wait a moment then allow normal operations to resume
@@ -759,7 +764,8 @@ struct LineupView: View {
         // Update the game in the team
         if let gameIndex = team.games.firstIndex(where: { $0.id == updatedGame.id }) {
             team.games[gameIndex] = updatedGame
-            teamManager.updateTeam(team)
+            // FIXED: Use active game context since we're clearing the active game
+            teamManager.updateTeam(team, activeGameId: updatedGame.id)
             selectedGame = team.games[gameIndex]
         }
         
@@ -781,7 +787,7 @@ struct LineupView: View {
         let impactFeedback = UIImpactFeedbackGenerator(style: .heavy)
         impactFeedback.impactOccurred()
         
-        print("Cleared all game data including time tracking")
+        print("🧹 Cleared all game data including time tracking")
     }
     
     private func updateGameInTeam(_ game: Game) {
@@ -844,27 +850,31 @@ struct LineupView: View {
     private func initializeStartingLineupTime() {
         guard var game = selectedGame else { return }
         
-        // Clear any existing stats to prevent duplicates
-        game.playerStats = []
+        print("⏱️ Initializing starting lineup time tracking...")
         
-        // Initialize stats for all players in the starting lineup
+        // Clear any existing time entries to prevent duplicates
+        game.playerStats.removeAll()
+        
+        // Initialize time tracking for starting lineup players
         for position in lineupPositions {
             if let playerId = position.playerId {
-                var stats = PlayerGameStats(playerId: playerId)
-                // Add the initial time entry after creating the stats
-                stats.timeEntries = [TimeEntry(enteredAt: 0, exitedAt: nil)]
-                game.playerStats.append(stats)
+                var playerStats = PlayerGameStats(playerId: playerId)
+                // Add initial time entry starting at minute 0
+                playerStats.timeEntries.append(TimeEntry(enteredAt: 0, exitedAt: nil))
+                game.playerStats.append(playerStats)
+                
+                print("✅ Initialized time tracking for starting player \(getPlayerName(playerId)) from minute 0")
             }
         }
         
-        // Update the game in the team
+        selectedGame = game
         if let gameIndex = team.games.firstIndex(where: { $0.id == game.id }) {
             team.games[gameIndex] = game
-            selectedGame = game
         }
         
-        teamManager.updateTeam(team)
-        print("⏰ Initialized time tracking for \(game.playerStats.count) starting players")
+        // FIXED: Use active game context for time initialization
+        teamManager.updateTeam(team, activeGameId: game.id)
+        print("🎯 Completed starting lineup time initialization for \(game.playerStats.count) players")
     }
     
     private func clearLineup() {
@@ -1001,54 +1011,59 @@ struct LineupView: View {
     private func executeAutomaticSubstitution(_ plannedSub: PlannedSubstitution) {
         guard var game = selectedGame else { return }
         
-        print("Executing substitution: \(getPlayerName(plannedSub.playerOut)) -> \(getPlayerName(plannedSub.playerIn))")
+        let currentMinute = gameStateManager.calculatedMinute
         
+        // Find the position being substituted
         if let positionIndex = lineupPositions.firstIndex(where: { $0.playerId == plannedSub.playerOut }) {
+            // Track player exit
+            trackPlayerExit(playerId: plannedSub.playerOut, minute: currentMinute)
+            
+            // Update lineup position
             lineupPositions[positionIndex].playerId = plannedSub.playerIn
-            print("Updated lineup position: \(getPlayerName(plannedSub.playerIn)) now in position")
+            
+            // Track player entry
+            trackPlayerEntry(playerId: plannedSub.playerIn, minute: currentMinute)
+            
+            // Add substitution to game record
+            let substitution = Substitution(
+                playerIn: plannedSub.playerIn,
+                playerOut: plannedSub.playerOut,
+                minute: currentMinute,
+                reason: plannedSub.reason
+            )
+            game.substitutions.append(substitution)
+            
+            // Add audit entry
+            gameStateManager.addAuditEntry(
+                eventType: .substitution,
+                gameTime: gameStateManager.auditLogTime,
+                details: "AUTO: \(getPlayerName(plannedSub.playerOut)) ↔ \(getPlayerName(plannedSub.playerIn)) (\(plannedSub.reason.rawValue))"
+            )
+            
+            // Mark as executed
+            if let subIndex = game.plannedSubstitutions.firstIndex(where: { $0.id == plannedSub.id }) {
+                game.plannedSubstitutions[subIndex].isExecuted = true
+                game.plannedSubstitutions[subIndex].actualMinute = currentMinute
+            }
+            
+            // Update game state manager
+            gameStateManager.activeGameState?.lineupPositions = lineupPositions
+            
+            // Update game and team
+            selectedGame = game
+            if let gameIndex = team.games.firstIndex(where: { $0.id == game.id }) {
+                team.games[gameIndex] = game
+            }
+            
+            // FIXED: Use active game context for substitutions
+            teamManager.updateTeam(team, activeGameId: game.id)
+            
+            let impactFeedback = UIImpactFeedbackGenerator(style: .heavy)
+            impactFeedback.impactOccurred()
+            
+            print("🔄 AUTO SUB: \(getPlayerName(plannedSub.playerOut)) ↔ \(getPlayerName(plannedSub.playerIn)) at \(currentMinute)'")
         }
-        
-        trackPlayingTime(playerOut: plannedSub.playerOut, playerIn: plannedSub.playerIn, minute: gameStateManager.calculatedMinute)
-        
-        let substitution = Substitution(
-            playerIn: plannedSub.playerIn,
-            playerOut: plannedSub.playerOut,
-            minute: gameStateManager.calculatedMinute,
-            reason: plannedSub.reason
-        )
-        
-        game.substitutions.append(substitution)
-        print("Added substitution to game log")
-        
-        gameStateManager.addAuditEntry(
-            eventType: .substitution,
-            gameTime: gameStateManager.auditLogTime,
-            playerName: getPlayerName(plannedSub.playerOut),
-            playerId: plannedSub.playerOut,
-            details: "AUTO: \(getPlayerName(plannedSub.playerOut)) -> \(getPlayerName(plannedSub.playerIn)) (\(plannedSub.reason.rawValue))"
-        )
-        print("Added to audit log")
-        
-        if let subIndex = game.plannedSubstitutions.firstIndex(where: { $0.id == plannedSub.id }) {
-            game.plannedSubstitutions[subIndex].isExecuted = true
-            game.plannedSubstitutions[subIndex].actualMinute = gameStateManager.calculatedMinute
-        }
-        
-        selectedGame = game
-        if let gameIndex = team.games.firstIndex(where: { $0.id == game.id }) {
-            team.games[gameIndex] = game
-        }
-        
-        gameStateManager.activeGameState?.lineupPositions = lineupPositions
-        
-        teamManager.updateTeam(team)
-        
-        let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
-        impactFeedback.impactOccurred()
-        
-        print("Substitution complete!")
     }
-
     private func executeLineupPhaseChange(_ phase: LineupPhase) {
         guard var game = selectedGame else { return }
         
@@ -1085,7 +1100,9 @@ struct LineupView: View {
         if let gameIndex = team.games.firstIndex(where: { $0.id == game.id }) {
             team.games[gameIndex] = game
         }
-        teamManager.updateTeam(team)
+        
+        // FIXED: Use active game context for lineup phase changes
+        teamManager.updateTeam(team, activeGameId: game.id)
         
         print("Full rotation complete!")
     }
@@ -4215,22 +4232,22 @@ struct ModernGameModeView: View {
             teamManager.teams[teamIndex] = team
         }
         
-        // 5. OPTIMIZED: Prioritize critical events for immediate sync
+        // 5. UPDATED: Pass active game ID context to prevent saving all games
         Task {
             switch event {
             case .goal, .redCard:
-                // Critical events - save immediately for live view
-                await teamManager.updateTeamImmediately(team)
+                // Critical events - save immediately for live view with active game context
+                await teamManager.updateTeamImmediatelyForActiveGame(team, activeGameId: game.id)
                 print("🚨 Critical event - immediate sync for live view")
                 
             case .yellowCard, .save, .assist:
-                // Important events - use live game debounce (1.5 seconds)
-                teamManager.updateTeam(team)
+                // Important events - use live game debounce (1.5 seconds) with active game context
+                teamManager.updateTeam(team, activeGameId: game.id)
                 print("⚡ Important event - fast sync for live view")
                 
             default:
-                // Other events - normal debounced sync
-                teamManager.updateTeam(team)
+                // Other events - normal debounced sync with active game context
+                teamManager.updateTeam(team, activeGameId: game.id)
             }
         }
         
@@ -4306,7 +4323,7 @@ struct ModernGameModeView: View {
         
         // OPTIMIZED: Use immediate save for stat recalculations (important for live view)
         Task {
-            await teamManager.updateTeamImmediately(team)
+            await teamManager.updateTeamImmediatelyForActiveGame(team, activeGameId: game.id)
         }
     }
     // MARK: - Modern Game Header (UPDATED with Reduced Spacing)
@@ -7016,4 +7033,3 @@ struct FullCaptureGameLineupTab: View {
             .frame(minWidth: 50)
         }
     }
-
