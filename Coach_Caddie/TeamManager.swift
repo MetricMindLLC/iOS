@@ -171,7 +171,6 @@ class TeamManager: ObservableObject {
         print("🔍 Team ownership cache manually refreshed")
     }
     
-    // Add this method to your TeamManager class
     func deletePractice(from team: Team, practiceId: UUID) {
         print("🗑️ TeamManager.deletePractice called for practice ID: \(practiceId)")
         
@@ -185,12 +184,38 @@ class TeamManager: ObservableObject {
             return
         }
         
-        // Remove the practice
-        teams[teamIndex].practices.remove(at: practiceIndex)
-        print("🗑️ Practice removed, remaining practices: \(teams[teamIndex].practices.count)")
+        // Get the practice object before removing it
+        let practiceToDelete = teams[teamIndex].practices[practiceIndex]
         
-        // Update the team using the same method as your game deletion
-        updateTeam(teams[teamIndex])
+        // Remove from local array first
+        teams[teamIndex].practices.remove(at: practiceIndex)
+        print("🗑️ Practice removed from local array, remaining practices: \(teams[teamIndex].practices.count)")
+        
+        // Save locally immediately (don't call updateTeam!)
+        debouncedSave()
+        
+        // Handle Firebase deletion - DON'T call updateTeam()
+        if isOnline {
+            Task {
+                do {
+                    // Ensure authentication before Firebase operation
+                    guard await self.ensureAuthentication() else { return }
+                    
+                    // Use the specific deletePractice method from FirebaseManager
+                    try await firebaseManager.deletePractice(practiceToDelete, from: team)
+                    print("✅ Practice deleted from Firebase successfully")
+                } catch {
+                    await MainActor.run {
+                        self.setError("Failed to delete practice from cloud: \(error.localizedDescription)")
+                        // Add to pending changes as fallback
+                        self.addToPendingChanges("delete_practice_\(practiceId.uuidString)", action: "delete_practice", teamId: team.id.uuidString)
+                    }
+                }
+            }
+        } else {
+            // Add to pending changes for offline deletion
+            addToPendingChanges("delete_practice_\(practiceId.uuidString)", action: "delete_practice", teamId: team.id.uuidString)
+        }
     }
     
     private func handleNetworkReconnection() async {
@@ -1413,7 +1438,7 @@ class TeamManager: ObservableObject {
             updateTeam(teams[teamIndex])
         }
     }
-    
+
     // MARK: - Demo Data
     func createDemoTeam() {
         // Create a basic demo team - you'll need to implement Team.createDemoTeam() or create manually

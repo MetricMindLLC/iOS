@@ -691,48 +691,61 @@ class FirebaseManager: NSObject, ObservableObject {
             print("⚠️ updatePractice: Non-subcollection team - TeamManager should handle save")
         }
     }
+    // Replace your existing savePractice method with this:
     func savePractice(_ practice: Practice, to team: Team) async throws {
-        guard team.useSubcollections else {
-            // For non-subcollection teams, just save the whole team
+        if team.useSubcollections {
+            // For subcollection teams, save practice as separate document
+            let practiceRef = db.collection("teams")
+                .document(team.id.uuidString)
+                .collection("practices")
+                .document(practice.id.uuidString)
+            
+            let practiceData = try Firestore.Encoder().encode(practice)
+            try await practiceRef.setData(practiceData)
+            print("✅ Saved practice to subcollection")
+        } else {
+            // For non-subcollection teams, update the entire team document
             var updatedTeam = team
-            if !updatedTeam.practices.contains(where: { $0.id == practice.id }) {
+            if let existingIndex = updatedTeam.practices.firstIndex(where: { $0.id == practice.id }) {
+                updatedTeam.practices[existingIndex] = practice
+            } else {
                 updatedTeam.practices.append(practice)
             }
-            try await saveTeam(updatedTeam)
-            return
+            
+            let teamData = try Firestore.Encoder().encode(updatedTeam)
+            try await db.collection("teams").document(team.id.uuidString).setData(teamData)
+            print("✅ Updated team document with practice")
         }
-        
-        // For subcollection teams, save practice as separate document
-        let practiceRef = db.collection("teams")
-            .document(team.id.uuidString)
-            .collection("practices")
-            .document(practice.id.uuidString)
-        
-        let practiceData = try Firestore.Encoder().encode(practice)
-        try await practiceRef.setData(practiceData)
     }
     
     func deletePractice(_ practice: Practice, from team: Team) async throws {
-        guard team.useSubcollections else {
-            // For non-subcollection teams, just update the team
-            var updatedTeam = team
-            updatedTeam.practices.removeAll { $0.id == practice.id }
-            try await saveTeam(updatedTeam)
-            return
+        guard let user = Auth.auth().currentUser else {
+            throw FirebaseError.notAuthenticated
         }
         
-        // For subcollection teams, delete the practice document
-        let practiceRef = db.collection("teams")
-            .document(team.id.uuidString)
-            .collection("practices")
-            .document(practice.id.uuidString)
-        
-        try await practiceRef.delete()
-        
-        // Also update the team to remove from local array
-        var updatedTeam = team
-        updatedTeam.practices.removeAll { $0.id == practice.id }
-        try await saveTeam(updatedTeam)
+        if team.useSubcollections {
+            // Delete the practice document from subcollection
+            let practiceRef = db.collection("teams")
+                .document(team.id.uuidString)
+                .collection("practices")
+                .document(practice.id.uuidString)
+            
+            // Delete the practice document
+            try await practiceRef.delete()
+            print("✅ Deleted practice from Firebase subcollection")
+            
+            // Clear the cache for this team (like deleteGame does)
+            clearSubcollectionCache(for: team.id)
+        } else {
+            // For non-subcollection teams, update the full team document
+            var updatedTeam = team
+            updatedTeam.practices.removeAll { $0.id == practice.id }
+            
+            // Save only the main team document (like deleteGame does)
+            let teamData = try Firestore.Encoder().encode(updatedTeam)
+            try await db.collection("teams").document(team.id.uuidString).setData(teamData)
+            print("✅ Updated team document after practice deletion")
+        }
     }
     
     func updateGameRSVP(gameId: UUID, playerId: UUID, status: RSVPStatus, in team: Team) async throws {

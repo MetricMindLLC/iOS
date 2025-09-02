@@ -427,22 +427,17 @@ struct ImprovedNewPracticeView: View {
             weather: weather
         )
         
-        // Add to team's practices array
         if let teamIndex = teamManager.teams.firstIndex(where: { $0.id == team.id }) {
             teamManager.teams[teamIndex].practices.append(practice)
             
-            // Save to Firebase with proper subcollection handling
+            // Save to Firebase directly - no updateTeam call
             Task {
-                if team.useSubcollections {
-                    do {
-                        try await teamManager.firebaseManager.savePractice(practice, to: team)
-                        print("✅ Practice saved to subcollection")
-                    } catch {
-                        print("Failed to save practice to Firebase: \(error)")
-                    }
+                do {
+                    try await teamManager.firebaseManager.savePractice(practice, to: team)
+                    print("✅ Practice saved efficiently")
+                } catch {
+                    print("Failed to save practice to Firebase: \(error)")
                 }
-                // Always update the team to trigger sync
-                teamManager.updateTeam(teamManager.teams[teamIndex])
             }
         }
         
