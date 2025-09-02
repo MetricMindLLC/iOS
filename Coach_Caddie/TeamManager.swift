@@ -53,6 +53,9 @@ class TeamManager: ObservableObject {
     private var pendingUpdates: [UUID: Team] = [:]
     private var batchUpdateTimer: Timer?
     private var activeListeners: Set<UUID> = []
+    private var cachedTeamOwnership: [UUID: Bool] = [:]
+    private var teamOwnershipCacheTimestamp: Date?
+    private let teamOwnershipCacheExpiration: TimeInterval = 3600 // 1 hour
     init() {
         // IMPORTANT: Don't load local data immediately - wait for auth state
         loadAppSettings()
@@ -84,19 +87,48 @@ class TeamManager: ObservableObject {
     
     var teamsICreated: [Team] {
         guard let currentUser = Auth.auth().currentUser else { return [] }
-        let created = teams.filter { $0.coachUID == currentUser.uid }
-        print("🔍 Teams I created: \(created.count) out of \(teams.count) total teams")
-        for team in teams {
-            print("  Team: \(team.name), coachUID: \(team.coachUID ?? "nil"), mine: \(team.coachUID == currentUser.uid)")
+        
+        // Check if cache is still valid
+        if let cacheTime = teamOwnershipCacheTimestamp,
+           Date().timeIntervalSince(cacheTime) < teamOwnershipCacheExpiration,
+           !cachedTeamOwnership.isEmpty {
+            // Use cached results
+            let created = teams.filter { cachedTeamOwnership[$0.id] == true }
+            return created
         }
+        
+        // Cache is expired or empty, recalculate and cache
+        cachedTeamOwnership.removeAll()
+        
+        for team in teams {
+            let isOwner = team.coachUID == currentUser.uid
+            cachedTeamOwnership[team.id] = isOwner
+        }
+        
+        teamOwnershipCacheTimestamp = Date()
+        
+        let created = teams.filter { cachedTeamOwnership[$0.id] == true }
+        
+        // Only log once when cache is refreshed
+        print("🔍 Team ownership cache refreshed: \(created.count) out of \(teams.count) total teams")
+        
         return created
     }
 
     var teamsIWasInvitedTo: [Team] {
         guard let currentUser = Auth.auth().currentUser else { return [] }
-        // Teams where the coachUID is NOT the current user (they didn't create it)
+        
+        // Use cached ownership data if available
+        if let cacheTime = teamOwnershipCacheTimestamp,
+           Date().timeIntervalSince(cacheTime) < teamOwnershipCacheExpiration,
+           !cachedTeamOwnership.isEmpty {
+            return teams.filter { cachedTeamOwnership[$0.id] == false }
+        }
+        
+        // Fallback to direct calculation if cache not available
         return teams.filter { $0.coachUID != currentUser.uid }
     }
+    
     func canCreateMoreTeams() -> Bool {
         guard let user = authManager?.currentUser else { return false }
         
@@ -117,6 +149,26 @@ class TeamManager: ObservableObject {
     // ADDED: Method to set auth manager reference
     func setAuthManager(_ authManager: FirebaseAuthManager) {
         self.authManager = authManager
+    }
+    
+    private func clearTeamOwnershipCache() {
+        cachedTeamOwnership.removeAll()
+        teamOwnershipCacheTimestamp = nil
+    }
+
+    // Add method to refresh cache on demand (for app startup)
+    func refreshTeamOwnershipCache() {
+        guard let currentUser = Auth.auth().currentUser else { return }
+        
+        cachedTeamOwnership.removeAll()
+        
+        for team in teams {
+            let isOwner = team.coachUID == currentUser.uid
+            cachedTeamOwnership[team.id] = isOwner
+        }
+        
+        teamOwnershipCacheTimestamp = Date()
+        print("🔍 Team ownership cache manually refreshed")
     }
     
     // Add this method to your TeamManager class
@@ -199,6 +251,7 @@ class TeamManager: ObservableObject {
                     print("🔒 No authenticated user - not loading local data")
                     self?.teams = []
                     self?.clearPermissionCache()
+                    self?.clearTeamOwnershipCache()
                 }
             }
         }
@@ -947,20 +1000,17 @@ class TeamManager: ObservableObject {
         return []
     }
     
-    // MARK: - App Startup Integration (NEW)
-    
-    /// Call this once when app launches or user logs in
     func initializeUserSession() async {
         print("🚀 Initializing user session...")
         
-        // Load team data first
         loadData()
         
-        // Wait a moment for teams to load
         try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
         
-        // Load all permissions in parallel
         await loadUserPermissions()
+        
+        // Refresh team ownership cache after session is initialized
+        refreshTeamOwnershipCache()
         
         print("✅ User session initialized")
     }
@@ -1077,6 +1127,7 @@ class TeamManager: ObservableObject {
         }
         
         teams.append(teamToAdd)
+        clearTeamOwnershipCache()
         debouncedSave()
         
         // For demo teams or when offline, just save locally
@@ -1169,6 +1220,7 @@ class TeamManager: ObservableObject {
             selectedTeam = teams.first
         }
         
+        clearTeamOwnershipCache()
         debouncedSave()
         
         if isOnline {
@@ -1384,6 +1436,7 @@ class TeamManager: ObservableObject {
             await MainActor.run {
                 if !self.teams.contains(where: { $0.id == team.id }) {
                     self.teams.append(team)
+                    self.clearTeamOwnershipCache()
                     self.saveLocalData()
                     self.setupRealTimeListener(for: team)
                 }
@@ -1929,6 +1982,7 @@ class TeamManager: ObservableObject {
                 let localTeams = self.teams
                 let mergedTeams = self.mergeTeams(local: localTeams, remote: fullyLoadedTeams)
                 self.teams = mergedTeams
+                self.clearTeamOwnershipCache()
                 
                 // Set selected team if none is selected
                 if self.selectedTeam == nil && !self.teams.isEmpty {
