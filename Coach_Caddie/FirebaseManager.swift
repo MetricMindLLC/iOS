@@ -544,7 +544,6 @@ class FirebaseManager: NSObject, ObservableObject {
         teamListeners.removeValue(forKey: team.id.uuidString)
     }
     
-    // MARK: - Player Management
     func updatePlayer(_ player: Player, in team: Team) async throws {
         guard team.coachUID == Auth.auth().currentUser?.uid else {
             throw FirebaseError.accessDenied
@@ -553,11 +552,9 @@ class FirebaseManager: NSObject, ObservableObject {
         if team.useSubcollections {
             try await savePlayerToSubcollection(player, in: team)
         } else {
-            var updatedTeam = team
-            if let index = updatedTeam.players.firstIndex(where: { $0.id == player.id }) {
-                updatedTeam.players[index] = player
-                try await saveTeam(updatedTeam)
-            }
+            // CHANGED: Don't call saveTeam directly - let TeamManager handle routing
+            // The calling TeamManager method should handle the save
+            print("⚠️ updatePlayer: Non-subcollection team - TeamManager should handle save")
         }
     }
     
@@ -572,7 +569,6 @@ class FirebaseManager: NSObject, ObservableObject {
         try await saveTeam(updatedTeam)
     }
     
-    // MARK: - Game Management
     func updateGame(_ game: Game, in team: Team) async throws {
         guard let user = Auth.auth().currentUser else {
             throw FirebaseError.notAuthenticated
@@ -581,11 +577,8 @@ class FirebaseManager: NSObject, ObservableObject {
         if team.useSubcollections {
             try await saveGameWithSubcollections(game, in: team)
         } else {
-            var updatedTeam = team
-            if let index = updatedTeam.games.firstIndex(where: { $0.id == game.id }) {
-                updatedTeam.games[index] = game
-                try await saveTeam(updatedTeam)
-            }
+            // CHANGED: Don't call saveTeam directly - let TeamManager handle routing
+            print("⚠️ updateGame: Non-subcollection team - TeamManager should handle save")
         }
     }
     
@@ -612,12 +605,21 @@ class FirebaseManager: NSObject, ObservableObject {
             
             // Delete the game document itself
             try await gameRef.delete()
+            print("✅ Deleted game \(game.opponent) and its subcollections from Firebase")
+            
+            // FIXED: Don't save the entire team - just clear the cache
+            clearSubcollectionCache(for: team.id)
+        } else {
+            // For non-subcollection teams, we need to update the full team document
+            // Create updated team without the deleted game
+            var updatedTeam = team
+            updatedTeam.games.removeAll { $0.id == game.id }
+            
+            // Save only the main team document (without subcollections since it doesn't use them)
+            let teamData = try Firestore.Encoder().encode(updatedTeam)
+            try await db.collection("teams").document(team.id.uuidString).setData(teamData)
+            print("✅ Updated team document after game deletion")
         }
-        
-        // Update the team to remove the game from its array
-        var updatedTeam = team
-        updatedTeam.games.removeAll { $0.id == game.id }
-        try await saveTeam(updatedTeam)
     }
     
     private func saveGameWithSubcollections(_ game: Game, in team: Team) async throws {
@@ -677,7 +679,6 @@ class FirebaseManager: NSObject, ObservableObject {
         try await gameRef.setData(gameData)
     }
     
-    // MARK: - Practice Management
     func updatePractice(_ practice: Practice, in team: Team) async throws {
         guard let user = Auth.auth().currentUser else {
             throw FirebaseError.notAuthenticated
@@ -686,11 +687,8 @@ class FirebaseManager: NSObject, ObservableObject {
         if team.useSubcollections {
             try await savePracticeToSubcollection(practice, in: team)
         } else {
-            var updatedTeam = team
-            if let index = updatedTeam.practices.firstIndex(where: { $0.id == practice.id }) {
-                updatedTeam.practices[index] = practice
-                try await saveTeam(updatedTeam)
-            }
+            // CHANGED: Don't call saveTeam directly - let TeamManager handle routing
+            print("⚠️ updatePractice: Non-subcollection team - TeamManager should handle save")
         }
     }
     func savePractice(_ practice: Practice, to team: Team) async throws {

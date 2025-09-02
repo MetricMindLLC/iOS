@@ -240,6 +240,7 @@ class TeamManager: ObservableObject {
     
     func updateTeam(_ team: Team, activeGameId: UUID? = nil) {
         print("🔥 updateTeam called for team: \(team.name)")
+        print("🔥 Called from: \(Thread.callStackSymbols[1])")
         print("🔥 Team ID: \(team.id)")
         print("🔥 Current user UID: \(Auth.auth().currentUser?.uid ?? "nil")")
         print("🔥 Team coachUID: \(team.coachUID ?? "nil")")
@@ -1233,13 +1234,38 @@ class TeamManager: ObservableObject {
     }
     
     func removeGame(from team: Team, game: Game) {
-        if let teamIndex = teams.firstIndex(where: { $0.id == team.id }) {
-            teams[teamIndex].games.removeAll { $0.id == game.id }
-            
-            // Immediately recalculate stats for this team after game deletion
-            recalculateStatsForTeam(teamIndex: teamIndex)
-            
-            updateTeam(teams[teamIndex])
+        guard let teamIndex = teams.firstIndex(where: { $0.id == team.id }) else {
+            print("❌ Team not found for game deletion")
+            return
+        }
+        
+        // Remove from local array first
+        teams[teamIndex].games.removeAll { $0.id == game.id }
+        
+        // Recalculate stats after removal
+        recalculateStatsForTeam(teamIndex: teamIndex)
+        
+        // Save locally
+        debouncedSave()
+        
+        // Handle Firebase deletion
+        if isOnline {
+            Task {
+                do {
+                    // Use the specific deleteGame method - don't call updateTeam
+                    try await firebaseManager.deleteGame(game, from: team)
+                    print("✅ Game deleted from Firebase successfully")
+                } catch {
+                    await MainActor.run {
+                        self.setError("Failed to delete game from cloud: \(error.localizedDescription)")
+                        // Add to pending changes as fallback
+                        self.addToPendingChanges("delete_game_\(game.id.uuidString)", action: "delete_game", teamId: team.id.uuidString)
+                    }
+                }
+            }
+        } else {
+            // Add to pending changes for offline deletion
+            addToPendingChanges("delete_game_\(game.id.uuidString)", action: "delete_game", teamId: team.id.uuidString)
         }
     }
     

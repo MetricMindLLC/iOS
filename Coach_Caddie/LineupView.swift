@@ -138,7 +138,7 @@ struct LineupView: View {
                             team.games[gameIndex] = updatedGame
                             selectedGame = updatedGame
                         }
-                        teamManager.updateTeam(team)
+                        teamManager.updateTeam(team, activeGameId: updatedGame.id)
                     }
                 )
             }
@@ -461,17 +461,14 @@ struct LineupView: View {
             saveLineupToUserDefaults()
             gameStateManager.activeGameState?.lineupPositions = lineupPositions
             
-            // FIXED: Use active game-specific save with game ID context
+            // Use active game-specific save with game ID context
             teamManager.updateTeam(team, activeGameId: selectedGame?.id)
-            
-            print("Game mode lineup change - fast sync for live view")
+            print("🎯 GAME MODE: Using active game save")
         } else {
-            // Not in game mode: Use normal debounced sync
+            // CHANGED: During lineup planning, only save locally - no Firebase
             saveCurrentLineupToGame()
             saveLineupToUserDefaults()
-            teamManager.updateTeam(team)
-            
-            print("Lineup planning change - normal sync")
+            print("📝 LINEUP PLANNING: Local save only - no Firebase sync")
         }
     }
     
