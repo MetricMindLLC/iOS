@@ -1625,7 +1625,7 @@ struct ProfileSettingsView: View {
             Text("Data Management")
         } footer: {
             if canImportData {
-                Text("Enable subcollections for better performance. Download the template to see the correct format for importing players or teams.")
+                Text("If you're unable to edit certain fields or don't see expected data, try restarting the app. Data synchronization may take a moment to complete.")
             } else {
                 Text("Import functionality is only available to team coaches.")
             }
