@@ -1258,24 +1258,118 @@ class TeamManager: ObservableObject {
     }
     
     func updatePlayer(in team: Team, player: Player) {
-        if let teamIndex = teams.firstIndex(where: { $0.id == team.id }) {
-            if let playerIndex = teams[teamIndex].players.firstIndex(where: { $0.id == player.id }) {
-                teams[teamIndex].players[playerIndex] = player
-                updateTeam(teams[teamIndex])
+        guard let teamIndex = teams.firstIndex(where: { $0.id == team.id }) else {
+            print("⚠️ Team not found for player update")
+            return
+        }
+        
+        guard let playerIndex = teams[teamIndex].players.firstIndex(where: { $0.id == player.id }) else {
+            print("⚠️ Player not found for update")
+            return
+        }
+        
+        // Update local array first
+        teams[teamIndex].players[playerIndex] = player
+        teams[teamIndex].updateActivityTimestamp()
+        
+        print("✅ Updated player \(player.name) locally in team \(team.name)")
+        
+        // Save locally immediately
+        debouncedSave()
+        
+        // Handle Firebase save efficiently based on subcollection support
+        if teams[teamIndex].useSubcollections && isOnline {
+            // For subcollection teams, save only the updated player
+            Task {
+                do {
+                    guard await ensureAuthentication() else { return }
+                    try await firebaseManager.savePlayerToSubcollection(player, in: teams[teamIndex])
+                    print("✅ Updated player in subcollection: \(player.name)")
+                } catch {
+                    await MainActor.run {
+                        self.setError("Failed to update player: \(error.localizedDescription)")
+                        // Add to pending changes as fallback
+                        self.addToPendingChanges("update_player_\(player.id.uuidString)", action: "update_player", teamId: team.id.uuidString)
+                    }
+                }
             }
+        } else {
+            // For non-subcollection teams or offline, use full team update
+            updateTeam(teams[teamIndex])
         }
     }
     
     func addPlayer(to team: Team, player: Player) {
-        if let teamIndex = teams.firstIndex(where: { $0.id == team.id }) {
-            teams[teamIndex].players.append(player)
+        guard let teamIndex = teams.firstIndex(where: { $0.id == team.id }) else {
+            print("⚠️ Team not found for player addition")
+            return
+        }
+        
+        // Add to local array first
+        teams[teamIndex].players.append(player)
+        teams[teamIndex].updateActivityTimestamp()
+        
+        print("✅ Added player \(player.name) locally to team \(team.name)")
+        
+        // Save locally immediately
+        debouncedSave()
+        
+        // Handle Firebase save efficiently based on subcollection support
+        if teams[teamIndex].useSubcollections && isOnline {
+            // For subcollection teams, save only the new player
+            Task {
+                do {
+                    guard await ensureAuthentication() else { return }
+                    try await firebaseManager.savePlayerToSubcollection(player, in: teams[teamIndex])
+                    print("✅ Saved new player to subcollection: \(player.name)")
+                } catch {
+                    await MainActor.run {
+                        self.setError("Failed to save new player: \(error.localizedDescription)")
+                        // Add to pending changes as fallback
+                        self.addToPendingChanges("add_player_\(player.id.uuidString)", action: "add_player", teamId: team.id.uuidString)
+                    }
+                }
+            }
+        } else {
+            // For non-subcollection teams or offline, use full team update
             updateTeam(teams[teamIndex])
         }
     }
     
     func removePlayer(from team: Team, player: Player) {
-        if let teamIndex = teams.firstIndex(where: { $0.id == team.id }) {
-            teams[teamIndex].players.removeAll { $0.id == player.id }
+        guard let teamIndex = teams.firstIndex(where: { $0.id == team.id }) else {
+            print("⚠️ Team not found for player removal")
+            return
+        }
+        
+        // Remove from local array first
+        teams[teamIndex].players.removeAll { $0.id == player.id }
+        teams[teamIndex].updateActivityTimestamp()
+        
+        print("✅ Removed player \(player.name) locally from team \(team.name)")
+        
+        // Save locally immediately
+        debouncedSave()
+        
+        // Handle Firebase deletion efficiently based on subcollection support
+        if teams[teamIndex].useSubcollections && isOnline {
+            // For subcollection teams, delete only this player document
+            Task {
+                do {
+                    guard await ensureAuthentication() else { return }
+                    
+                    try await firebaseManager.deletePlayer(player, from: team)
+                    print("✅ Deleted player from subcollection: \(player.name)")
+                } catch {
+                    await MainActor.run {
+                        self.setError("Failed to delete player: \(error.localizedDescription)")
+                        // Add to pending changes as fallback
+                        self.addToPendingChanges("delete_player_\(player.id.uuidString)", action: "delete_player", teamId: team.id.uuidString)
+                    }
+                }
+            }
+        } else {
+            // For non-subcollection teams or offline, use full team update
             updateTeam(teams[teamIndex])
         }
     }
@@ -1675,6 +1769,10 @@ class TeamManager: ObservableObject {
                 }
             }
         }
+    }
+    
+    internal func saveLocalDataNow() {
+        debouncedSave()
     }
 
     func updatePracticeRSVP(practiceId: UUID, playerId: UUID, status: RSVPStatus) {

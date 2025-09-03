@@ -344,11 +344,9 @@ struct PlayerDetailView: View {
     }
     
     func removePlayer() {
-        if let index = team.players.firstIndex(where: { $0.id == player.id }) {
-            team.players.remove(at: index)
-            teamManager.updateTeam(team)
-            presentationMode.wrappedValue.dismiss()
-        }
+        teamManager.removePlayer(from: team, player: player)
+        presentationMode.wrappedValue.dismiss()
+
     }
 }
 
@@ -877,27 +875,19 @@ struct EditPlayerView: View {
             player.notes = notes.isEmpty ? nil : notes
         }
         
-        // Update in team
-        if let index = team.players.firstIndex(where: { $0.id == player.id }) {
-            team.players[index] = player
-        }
-        
-        // FIXED: Save to Firebase via TeamManager
-        // This was missing - causing the data to only save locally
-        teamManager.updateTeam(team)
-        
+        teamManager.updatePlayer(in: team, player: player)
+
         showingSaveConfirmation = true
     }
 }
 
-// MARK: - Add Player View (UPDATED FOR COPPA COMPLIANCE)
+// MARK: - Add Player View (FIXED FOR PROPER SAVING)
 struct AddPlayerView: View {
     @Binding var team: Team
     @EnvironmentObject var teamManager: TeamManager
     @State private var playerName = ""
     @State private var jerseyNumber = ""
     @State private var selectedPositions: Set<String> = []
-    // REMOVED: @State private var birthDate = Date() - COPPA compliance
     @State private var parentName = ""
     @State private var parentPhone = ""
     @State private var parentEmail = ""
@@ -930,8 +920,6 @@ struct AddPlayerView: View {
                     
                     TextField("Jersey Number", text: $jerseyNumber)
                         .keyboardType(.numberPad)
-                    
-                    // REMOVED: DatePicker for Date of Birth - COPPA compliance
                 }
                 
                 // Positions Section
@@ -1031,7 +1019,7 @@ struct AddPlayerView: View {
         }
     }
     
-    // MARK: - Save Player (UPDATED FOR COPPA COMPLIANCE)
+    // MARK: - Save Player (FIXED TO MATCH SUCCESSFUL PATTERNS)
     private func savePlayer() {
         // Check for duplicate jersey number
         if let jerseyNum = Int(jerseyNumber),
@@ -1042,40 +1030,37 @@ struct AddPlayerView: View {
         
         isSaving = true
         
-        // Create new player WITHOUT dateOfBirth for COPPA compliance
-        var newPlayer = Player(
-            name: playerName,
+        // Create new player - FIXED parameter order
+        let newPlayer = Player(
+            name: playerName.trimmingCharacters(in: .whitespacesAndNewlines),
             jerseyNumber: Int(jerseyNumber) ?? 0,
-            positions: Array(selectedPositions),
+            positions: Array(selectedPositions).sorted(),
             preferredPosition: selectedPositions.first ?? "MID",
+            notes: notes.isEmpty ? nil : notes,
             seasonStats: PlayerStats(),
-            parentInfo: ParentInfo()
+            parentInfo: ParentInfo(
+                parentName: parentName,
+                parentEmail: parentEmail,
+                parentPhone: parentPhone,
+                secondParentName: secondParentName,
+                secondParentEmail: secondParentEmail,
+                secondParentPhone: secondParentPhone
+            ),
+            emergencyContact: emergencyContact.isEmpty ? nil : emergencyContact,
+            emergencyPhone: emergencyPhone.isEmpty ? nil : emergencyPhone,
+            medicalNotes: medicalNotes.isEmpty ? nil : medicalNotes,
         )
         
-        // Set parent info
-        newPlayer.parentInfo.parentName = parentName
-        newPlayer.parentInfo.parentEmail = parentEmail
-        newPlayer.parentInfo.parentPhone = parentPhone
-        newPlayer.parentInfo.secondParentName = secondParentName
-        newPlayer.parentInfo.secondParentEmail = secondParentEmail
-        newPlayer.parentInfo.secondParentPhone = secondParentPhone
+        // FIXED: Follow the efficient pattern like addGame - modify local state directly
+        var updatedTeam = team
+        updatedTeam.players.append(newPlayer)
+        updatedTeam.updateActivityTimestamp()
         
-        // Set optional properties
-        // REMOVED: newPlayer.dateOfBirth = birthDate - COPPA compliance
-        newPlayer.emergencyContact = emergencyContact.isEmpty ? nil : emergencyContact
-        newPlayer.emergencyPhone = emergencyPhone.isEmpty ? nil : emergencyPhone
-        newPlayer.medicalNotes = medicalNotes.isEmpty ? nil : medicalNotes
-        newPlayer.notes = notes.isEmpty ? nil : notes
-        // REMOVED: newPlayer.playerPhoto = playerPhoto?.jpegData(compressionQuality: 0.8)
+        // Update the binding to reflect the changes
+        team = updatedTeam
         
-        // Add to team
-        team.players.append(newPlayer)
-        
-        // Update activity timestamp for data retention
-        team.updateActivityTimestamp()
-        
-        // Save to Firebase via TeamManager
-        teamManager.updateTeam(team)
+        // FIXED: Use TeamManager.addPlayer which handles everything properly
+        teamManager.addPlayer(to: updatedTeam, player: newPlayer)
         
         // Dismiss the view
         presentationMode.wrappedValue.dismiss()

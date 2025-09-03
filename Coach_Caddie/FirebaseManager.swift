@@ -563,10 +563,24 @@ class FirebaseManager: NSObject, ObservableObject {
             throw FirebaseError.notAuthenticated
         }
         
-        // Remove player from team
-        var updatedTeam = team
-        updatedTeam.players.removeAll { $0.id == player.id }
-        try await saveTeam(updatedTeam)
+        if team.useSubcollections {
+            // For subcollection teams, only delete the player document
+            let playerRef = db.collection("teams")
+                .document(team.id.uuidString)
+                .collection("players")
+                .document(player.id.uuidString)
+            
+            try await playerRef.delete()
+            print("✅ Deleted player from subcollection: \(player.name)")
+        } else {
+            // For non-subcollection teams, update the full team document
+            var updatedTeam = team
+            updatedTeam.players.removeAll { $0.id == player.id }
+            
+            let teamData = try Firestore.Encoder().encode(updatedTeam)
+            try await db.collection("teams").document(team.id.uuidString).setData(teamData)
+            print("✅ Updated team document after player deletion")
+        }
     }
     
     func updateGame(_ game: Game, in team: Team) async throws {
