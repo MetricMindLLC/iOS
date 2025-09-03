@@ -17,6 +17,25 @@ struct NewTeamView: View {
     @State private var showingParentNoticeGenerator = false
     @State private var showingSubscription = false
     
+    private let presetColors: [Color] = [
+        Color(red: 0.13, green: 0.47, blue: 0.25), // Forest Green
+        Color.red,
+        Color.blue,
+        Color(red: 0.2, green: 0.2, blue: 0.8), // Royal Blue
+        Color.orange,
+        Color.purple,
+        Color(red: 0.6, green: 0.0, blue: 0.0), // Maroon
+        Color(red: 0.0, green: 0.4, blue: 0.0), // Dark Green
+        Color(red: 0.8, green: 0.0, blue: 0.8), // Magenta
+        Color(red: 0.9, green: 0.6, blue: 0.0), // Gold
+        Color(red: 0.0, green: 0.6, blue: 0.8), // Cyan
+        Color(red: 0.4, green: 0.0, blue: 0.8), // Indigo
+        Color(red: 0.8, green: 0.2, blue: 0.2), // Crimson
+        Color(red: 0.0, green: 0.3, blue: 0.6), // Navy
+        Color(red: 0.5, green: 0.3, blue: 0.0), // Brown
+        Color.black
+    ]
+    
     var body: some View {
         NavigationView {
             Form {
@@ -241,17 +260,73 @@ struct NewTeamView: View {
             }
             .sheet(isPresented: $showingColorPicker) {
                 NavigationView {
-                    ColorPicker("Choose Team Color", selection: $selectedColor)
-                        .padding()
-                        .navigationTitle("Custom Color")
-                        .navigationBarTitleDisplayMode(.inline)
-                        .toolbar {
-                            ToolbarItem(placement: .navigationBarTrailing) {
-                                Button("Done") {
-                                    showingColorPicker = false
+                    VStack(spacing: 20) {
+                        // Current selected color preview
+                        VStack(spacing: 12) {
+                            Text("Selected Color")
+                                .font(.headline)
+                                .foregroundColor(.secondary)
+                            
+                            Circle()
+                                .fill(selectedColor)
+                                .frame(width: 80, height: 80)
+                                .overlay(
+                                    Circle()
+                                        .stroke(Color.gray.opacity(0.3), lineWidth: 2)
+                                )
+                        }
+                        .padding(.top)
+                        
+                        // Preset colors grid
+                        VStack(alignment: .leading, spacing: 16) {
+                            Text("Preset Colors")
+                                .font(.headline)
+                                .padding(.horizontal)
+                            
+                            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 12) {
+                                ForEach(Array(presetColors.enumerated()), id: \.offset) { index, color in
+                                    Button(action: {
+                                        selectedColor = color
+                                    }) {
+                                        Circle()
+                                            .fill(color)
+                                            .frame(width: 60, height: 60)
+                                            .overlay(
+                                                Circle()
+                                                    .stroke(selectedColor == color ? Color.primary : Color.gray.opacity(0.3),
+                                                           lineWidth: selectedColor == color ? 3 : 1)
+                                            )
+                                            .scaleEffect(selectedColor == color ? 1.1 : 1.0)
+                                            .animation(.easeInOut(duration: 0.2), value: selectedColor)
+                                    }
+                                    .buttonStyle(PlainButtonStyle())
                                 }
                             }
+                            .padding(.horizontal)
                         }
+                        
+                        // Custom color picker
+                        VStack(alignment: .leading, spacing: 16) {
+                            Text("Custom Color")
+                                .font(.headline)
+                                .padding(.horizontal)
+                            
+                            ColorPicker("Choose Custom Color", selection: $selectedColor)
+                                .padding(.horizontal)
+                        }
+                        
+                        Spacer()
+                    }
+                    .navigationTitle("Team Color")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button("Done") {
+                                showingColorPicker = false
+                            }
+                            .fontWeight(.semibold)
+                        }
+                    }
                 }
             }
             .sheet(isPresented: $showingResponsibilityDisclaimer) {

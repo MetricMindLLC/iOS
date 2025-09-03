@@ -1680,7 +1680,10 @@ struct LocationPickerView: View {
             // Use TeamManager method instead of direct binding manipulation
             teamManager.deletePractice(from: team, practiceId: practice.id)
             
-            presentationMode.wrappedValue.dismiss()
+            // Wrap dismiss in async dispatch
+            DispatchQueue.main.async {
+                presentationMode.wrappedValue.dismiss()
+            }
         }
         
         private func weatherIcon(for weather: String) -> String {

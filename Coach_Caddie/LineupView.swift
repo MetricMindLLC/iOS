@@ -396,6 +396,10 @@ struct LineupView: View {
     private func startGameMode() {
         guard var game = selectedGame else { return }
         
+        if game.startingLineup == nil || game.startingLineup?.isEmpty == true {
+            game.startingLineup = lineupPositions  // Save the planned starting lineup
+        }
+        
         // CRITICAL: Initialize game data structure for subcollections
         game.actualStartingLineup = lineupPositions
         game.formation = selectedFormation
@@ -512,15 +516,12 @@ struct LineupView: View {
         
         // 3. Save starting lineup (if not already saved)
         if updatedGame.startingLineup == nil || updatedGame.startingLineup?.isEmpty == true {
-            updatedGame.startingLineup = lineupPositions
-            print("⚽ Saved starting lineup with \(lineupPositions.count) positions")
+            print("⚠️ WARNING: startingLineup missing - should have been set at game start!")
         }
         
         // 4. Save actual starting lineup used during game
-        if updatedGame.actualStartingLineup == nil || updatedGame.actualStartingLineup?.isEmpty == true {
-            updatedGame.actualStartingLineup = lineupPositions
-            print("⚽ Saved actual starting lineup with \(lineupPositions.count) positions")
-        }
+        updatedGame.actualStartingLineup = lineupPositions
+        print("🎯 Updated actual current lineup with \(lineupPositions.count) positions")
         
         // 5. CRITICAL: Mark game as completed
         updatedGame.isCompleted = true
@@ -5689,30 +5690,11 @@ struct GameDetailView: View {
     }
     
     private func deleteGame() {
-        Task {
-            if let teamIndex = teamManager.teams.firstIndex(where: { $0.id == team.id }) {
-                if let gameIndex = teamManager.teams[teamIndex].games.firstIndex(where: { $0.id == game.id }) {
-                    // Remove from local array
-                    teamManager.teams[teamIndex].games.remove(at: gameIndex)
-                    
-                    // Delete from Firebase if using subcollections
-                    if team.useSubcollections {
-                        do {
-                            try await teamManager.firebaseManager.deleteGame(game, from: team)
-                        } catch {
-                            print("Failed to delete game from Firebase: \(error)")
-                        }
-                    } else {
-                        // For non-subcollection teams, just update normally
-                        teamManager.updateTeam(teamManager.teams[teamIndex])
-                    }
-                    
-                    // Move dismiss INSIDE the Task block
-                    await MainActor.run {
-                        presentationMode.wrappedValue.dismiss()
-                    }
-                }
-            }
+        teamManager.removeGame(from: team, game: game)
+        
+        // Dismiss immediately since removeGame handles the deletion efficiently
+        DispatchQueue.main.async {
+            presentationMode.wrappedValue.dismiss()
         }
     }
     
@@ -5953,9 +5935,8 @@ struct FullCaptureGameLineupTab: View {
     let game: Game
     let team: Team
     
-    // FIXED: Use actualStartingLineup if available, fallback to startingLineup
     private var startingLineupPlayers: [(Player, Position)] {
-        let lineup = game.actualStartingLineup ?? game.startingLineup
+        let lineup = game.startingLineup ?? game.actualStartingLineup
         guard let lineup = lineup else { return [] }
         
         return lineup.compactMap { position in
@@ -5965,9 +5946,8 @@ struct FullCaptureGameLineupTab: View {
         }
     }
     
-    // FIXED: Get the lineup for field display
     private var displayLineup: [LineupPosition] {
-        return game.actualStartingLineup ?? game.startingLineup ?? []
+        return game.startingLineup ?? game.actualStartingLineup ?? []
     }
     
     var body: some View {
@@ -6542,9 +6522,9 @@ struct FullCaptureGameLineupTab: View {
         let game: Game
         let team: Team
         
-        // Use actualStartingLineup if available, fallback to startingLineup
         private var startingLineupPlayers: [(Player, Position)] {
-            let lineup = game.actualStartingLineup ?? game.startingLineup
+            // Use the true starting lineup, not the actual lineup which may have changed
+            let lineup = game.startingLineup ?? game.actualStartingLineup
             guard let lineup = lineup else { return [] }
             
             return lineup.compactMap { position in
