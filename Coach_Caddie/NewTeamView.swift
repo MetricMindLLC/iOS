@@ -7,6 +7,7 @@ struct NewTeamView: View {
     @State private var name = ""
     @State private var format: GameFormat = .elevenVEleven
     @State private var defaultFormation: Formation = .formation442
+    @State private var defaultHalfLength: Int = 45  // NEW: Add half length state
     @State private var selectedColor = Color(red: 0.13, green: 0.47, blue: 0.25)
     @State private var ageGroup = ""
     @State private var season = ""
@@ -93,8 +94,17 @@ struct NewTeamView: View {
                             Text(formation.displayName).tag(formation)
                         }
                     }
+                    
+                    // NEW: Half Length Picker
+                    Picker("Default Half Length", selection: $defaultHalfLength) {
+                        ForEach([15, 20, 25, 30, 35, 40, 45], id: \.self) { minutes in
+                            Text("\(minutes) minutes").tag(minutes)
+                        }
+                    }
                 } header: {
                     Text("Game Settings")
+                } footer: {
+                    Text("Choose your game format, starting formation, and default half length. You can change these later in team settings.")
                 }
                 
                 Section {
@@ -224,6 +234,11 @@ struct NewTeamView: View {
                             .foregroundColor(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                         
+                        Label("Half length can be adjusted per game if needed", systemImage: "clock.fill")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        
                         Label("Parent notification helps ensure COPPA compliance", systemImage: "shield.checkered")
                             .font(.caption)
                             .foregroundColor(.secondary)
@@ -342,6 +357,7 @@ struct NewTeamView: View {
                         name: name.trimmingCharacters(in: .whitespacesAndNewlines),
                         format: format,
                         defaultFormation: defaultFormation,
+                        defaultHalfLength: defaultHalfLength,  // NEW: Include half length
                         primaryColor: selectedColor,
                         ageGroup: ageGroup.isEmpty ? nil : ageGroup,
                         season: season.isEmpty ? nil : season
@@ -355,10 +371,26 @@ struct NewTeamView: View {
             .onChange(of: format) { _ in
                 // Update default formation when format changes
                 defaultFormation = format.defaultFormation
+                
+                // NEW: Update default half length based on format
+                defaultHalfLength = getDefaultHalfLengthForFormat(format)
             }
         }
     }
     
+    // NEW: Helper function to get appropriate half length for different formats
+    private func getDefaultHalfLengthForFormat(_ format: GameFormat) -> Int {
+        switch format {
+        case .fiveVFive:
+            return 20  // Shorter for youth games
+        case .sevenVSeven:
+            return 25  // Medium for youth
+        case .nineVNine:
+            return 35  // Longer for older youth
+        case .elevenVEleven:
+            return 45  // Full length for adult/high school
+        }
+    }
     
     private var canCreateTeam: Bool {
         guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
@@ -444,6 +476,7 @@ struct NewTeamView: View {
             name: trimmedName,
             format: format,
             defaultFormation: defaultFormation,
+            defaultHalfLength: defaultHalfLength,  // NEW: Include the selected half length
             primaryColor: selectedColor,
             ageGroup: ageGroup.isEmpty ? nil : ageGroup,
             season: season.isEmpty ? nil : season
@@ -454,59 +487,58 @@ struct NewTeamView: View {
     }
 }
     
-    // MARK: - Team Format Extensions
-    extension TeamFormat {
-        var displayName: String {
-            switch self {
-            case .fiveVFive: return "5v5 (Youth)"
-            case .sevenVSeven: return "7v7 (Youth)"
-            case .nineVNine: return "9v9 (Youth)"
-            case .elevenVEleven: return "11v11 (Full Field)"
-            }
+// MARK: - Team Format Extensions
+extension TeamFormat {
+    var displayName: String {
+        switch self {
+        case .fiveVFive: return "5v5 (Youth)"
+        case .sevenVSeven: return "7v7 (Youth)"
+        case .nineVNine: return "9v9 (Youth)"
+        case .elevenVEleven: return "11v11 (Full Field)"
         }
     }
-    
-    // MARK: - Formation Extensions
-    extension Formation {
-        var displayName: String {
-            switch self {
-                // 5v5 formations - UPDATED TO MATCH CURRENT FORMATIONS
-            case .formation5v5_1211: return "1-2-1-1 (Diamond)"
-            case .formation5v5_2111: return "2-1-1-1 (Defensive)"
-            case .formation5v5_131: return "1-3-1 (Midfield Heavy)"
-            case .formation5v5_221: return "2-2-1 (Balanced)"
-            case .formation5v5_23: return "2-3 (Attacking)"
-            case .formation5v5_32: return "3-2 (Defensive)"
-                
-                // 7v7 formations - UPDATED TO MATCH CURRENT FORMATIONS
-            case .formation7v7_312: return "3-1-2 (Balanced)"
-            case .formation7v7_213: return "2-1-3 (Attacking)"
-            case .formation7v7_321: return "3-2-1 (Defensive)"
-            case .formation7v7_222: return "2-2-2 (Box)"
-                
-                // 9v9 formations - UPDATED TO MATCH CURRENT FORMATIONS
-            case .formation9v9_3212: return "3-2-1-2 (Balanced)"
-            case .formation9v9_3131: return "3-1-3-1 (Diamond)"
-            case .formation9v9_4121: return "4-1-2-1 (Defensive)"
-            case .formation9v9_413: return "4-1-3 (Attacking)"
-            case .formation9v9_323: return "3-2-3 (Attack)"
-            case .formation9v9_332: return "3-3-2 (Midfield)"
-            case .formation9v9_233: return "2-3-3 (Ultra Attack)"
-                
-                // 11v11 formations - UPDATED TO INCLUDE NEW FORMATION
-            case .formation442: return "4-4-2 (Classic)"
-            case .formation433: return "4-3-3 (Attacking)"
-            case .formation352: return "3-5-2 (Midfield)"
-            case .formation451: return "4-5-1 (Defensive)"
-            case .formation343: return "3-4-3 (Wide)"
-            case .formation4231: return "4-2-3-1 (Modern)"
-            case .formation532: return "5-3-2 (Defensive)"
-            case .formation541: return "5-4-1 (Ultra Defensive)"
-            case .formation41212: return "4-1-2-1-2 (Diamond)"
-                
-                // Default case for any other formations
-            default: return self.rawValue
-            }
-        }
-    }
+}
 
+// MARK: - Formation Extensions
+extension Formation {
+    var displayName: String {
+        switch self {
+            // 5v5 formations - UPDATED TO MATCH CURRENT FORMATIONS
+        case .formation5v5_1211: return "1-2-1-1 (Diamond)"
+        case .formation5v5_2111: return "2-1-1-1 (Defensive)"
+        case .formation5v5_131: return "1-3-1 (Midfield Heavy)"
+        case .formation5v5_221: return "2-2-1 (Balanced)"
+        case .formation5v5_23: return "2-3 (Attacking)"
+        case .formation5v5_32: return "3-2 (Defensive)"
+            
+            // 7v7 formations - UPDATED TO MATCH CURRENT FORMATIONS
+        case .formation7v7_312: return "3-1-2 (Balanced)"
+        case .formation7v7_213: return "2-1-3 (Attacking)"
+        case .formation7v7_321: return "3-2-1 (Defensive)"
+        case .formation7v7_222: return "2-2-2 (Box)"
+            
+            // 9v9 formations - UPDATED TO MATCH CURRENT FORMATIONS
+        case .formation9v9_3212: return "3-2-1-2 (Balanced)"
+        case .formation9v9_3131: return "3-1-3-1 (Diamond)"
+        case .formation9v9_4121: return "4-1-2-1 (Defensive)"
+        case .formation9v9_413: return "4-1-3 (Attacking)"
+        case .formation9v9_323: return "3-2-3 (Attack)"
+        case .formation9v9_332: return "3-3-2 (Midfield)"
+        case .formation9v9_233: return "2-3-3 (Ultra Attack)"
+            
+            // 11v11 formations - UPDATED TO INCLUDE NEW FORMATION
+        case .formation442: return "4-4-2 (Classic)"
+        case .formation433: return "4-3-3 (Attacking)"
+        case .formation352: return "3-5-2 (Midfield)"
+        case .formation451: return "4-5-1 (Defensive)"
+        case .formation343: return "3-4-3 (Wide)"
+        case .formation4231: return "4-2-3-1 (Modern)"
+        case .formation532: return "5-3-2 (Defensive)"
+        case .formation541: return "5-4-1 (Ultra Defensive)"
+        case .formation41212: return "4-1-2-1-2 (Diamond)"
+            
+            // Default case for any other formations
+        default: return self.rawValue
+        }
+    }
+}

@@ -1607,34 +1607,48 @@ struct MonthlyStats {
     }
 }
 
-// MARK: - Stats Visibility Models (Add these to Models.swift or separate file)
+// MARK: - Stats Visibility Settings (ADD THIS TO Models.swift)
 struct StatsVisibilitySettings: Codable, Equatable {
-    // Player Stats Visibility
     var showGoals: Bool = true
     var showAssists: Bool = true
-    var showShots: Bool = false          // Hidden by default
+    var showShots: Bool = true
     var showSaves: Bool = true
-    var showGoalsConceded: Bool = false  // Hidden by default (sensitive for goalkeepers)
-    var showYellowCards: Bool = false    // Hidden by default (disciplinary)
-    var showRedCards: Bool = false       // Hidden by default (disciplinary)
+    var showGoalsConceded: Bool = false
+    var showYellowCards: Bool = false
+    var showRedCards: Bool = false
     var showGamesPlayed: Bool = true
     var showTotalPlayingTime: Bool = true
-    var showRelativePlayingTime: Bool = true
-    
-    // Team Stats Visibility
+    var showRelativePlayingTime: Bool = false
     var showTeamRecord: Bool = true
     var showGoalDifference: Bool = true
     var showWinPercentage: Bool = true
     var showTopPerformers: Bool = true
-    var showTeamComparison: Bool = true
-    var showMonthlyTrends: Bool = false  // Hidden by default (detailed analytics)
-    
-    // Overview Stats Visibility
+    var showTeamComparison: Bool = false
+    var showMonthlyTrends: Bool = false
     var showOverallStats: Bool = true
     var showGoalsChart: Bool = true
     
     // Preset configurations
-    static let coachDefault = StatsVisibilitySettings() // All enabled by default based on struct defaults
+    static let coachDefault = StatsVisibilitySettings(
+        showGoals: true,
+        showAssists: true,
+        showShots: true,
+        showSaves: true,
+        showGoalsConceded: true,
+        showYellowCards: true,
+        showRedCards: true,
+        showGamesPlayed: true,
+        showTotalPlayingTime: true,
+        showRelativePlayingTime: true,
+        showTeamRecord: true,
+        showGoalDifference: true,
+        showWinPercentage: true,
+        showTopPerformers: true,
+        showTeamComparison: true,
+        showMonthlyTrends: true,
+        showOverallStats: true,
+        showGoalsChart: true
+    )
     
     static let parentFriendly = StatsVisibilitySettings(
         showGoals: true,
@@ -1646,11 +1660,11 @@ struct StatsVisibilitySettings: Codable, Equatable {
         showRedCards: false,
         showGamesPlayed: true,
         showTotalPlayingTime: true,
-        showRelativePlayingTime: true,
+        showRelativePlayingTime: false,
         showTeamRecord: true,
         showGoalDifference: false,
-        showWinPercentage: true,
-        showTopPerformers: true,
+        showWinPercentage: false,
+        showTopPerformers: false,
         showTeamComparison: false,
         showMonthlyTrends: false,
         showOverallStats: true,
@@ -1661,7 +1675,7 @@ struct StatsVisibilitySettings: Codable, Equatable {
         showGoals: true,
         showAssists: true,
         showShots: false,
-        showSaves: true,
+        showSaves: false,
         showGoalsConceded: false,
         showYellowCards: false,
         showRedCards: false,
@@ -1677,6 +1691,42 @@ struct StatsVisibilitySettings: Codable, Equatable {
         showOverallStats: true,
         showGoalsChart: false
     )
+}
+
+// MARK: - Team Extensions for Stats Visibility (ADD THIS TO Models.swift)
+extension Team {
+    // Stats visibility settings for different access levels
+    var statsVisibilityForParents: StatsVisibilitySettings {
+        get {
+            // Try to decode from UserDefaults or Firebase
+            if let data = UserDefaults.standard.data(forKey: "statsVisibility_parents_\(id.uuidString)"),
+               let settings = try? JSONDecoder().decode(StatsVisibilitySettings.self, from: data) {
+                return settings
+            }
+            return StatsVisibilitySettings.parentFriendly
+        }
+        set {
+            // Save to UserDefaults (in production, save to Firebase)
+            if let data = try? JSONEncoder().encode(newValue) {
+                UserDefaults.standard.set(data, forKey: "statsVisibility_parents_\(id.uuidString)")
+            }
+        }
+    }
+    
+    var statsVisibilityForViewers: StatsVisibilitySettings {
+        get {
+            if let data = UserDefaults.standard.data(forKey: "statsVisibility_viewers_\(id.uuidString)"),
+               let settings = try? JSONDecoder().decode(StatsVisibilitySettings.self, from: data) {
+                return settings
+            }
+            return StatsVisibilitySettings.basic
+        }
+        set {
+            if let data = try? JSONEncoder().encode(newValue) {
+                UserDefaults.standard.set(data, forKey: "statsVisibility_viewers_\(id.uuidString)")
+            }
+        }
+    }
 }
 
 // Type alias for compatibility

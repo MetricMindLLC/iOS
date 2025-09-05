@@ -1625,7 +1625,7 @@ struct ProfileSettingsView: View {
             Text("Data Management")
         } footer: {
             if canImportData {
-                Text("If you're unable to edit certain fields or don't see expected data, try restarting the app. Data synchronization may take a moment to complete.")
+                Text("If you're unable to edit certain fields or don't see expected data, try restarting the app.  Data sync may take a moment to complete")
             } else {
                 Text("Import functionality is only available to team coaches.")
             }

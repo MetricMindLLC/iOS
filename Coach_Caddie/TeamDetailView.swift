@@ -1213,36 +1213,56 @@ struct EmptyPracticesView: View {
     }
 }
 
-// MARK: - Team Settings View (UPDATED with team-specific settings)
+// MARK: - Team Settings View (FIXED - Half Length Picker Issue)
 struct TeamSettingsView: View {
     @Binding var team: Team
     @ObservedObject var teamManager: TeamManager
     @Binding var showingDeleteAlert: Bool
     @Environment(\.presentationMode) var presentationMode
     
+    // Add local state to track changes
+    @State private var localTeamName: String = ""
+    @State private var localFormat: GameFormat = .elevenVEleven
+    @State private var localDefaultFormation: Formation = .formation442
+    @State private var localDefaultHalfLength: Int = 45
+    @State private var hasUnsavedChanges = false
+    
     var body: some View {
         NavigationView {
             Form {
                 Section("Team Information") {
-                    TextField("Team Name", text: $team.name)
+                    TextField("Team Name", text: $localTeamName)
+                        .onChange(of: localTeamName) { _ in hasUnsavedChanges = true }
                     
-                    Picker("Team Format", selection: $team.format) {
+                    Picker("Team Format", selection: $localFormat) {
                         ForEach(GameFormat.allCases, id: \.self) { format in
                             Text(format.rawValue).tag(format)
                         }
                     }
-                    
-                    Picker("Default Formation", selection: $team.defaultFormation) {
-                        ForEach(team.format.availableFormations, id: \.self) { formation in
-                            Text(formation.rawValue).tag(formation)
+                    .onChange(of: localFormat) { newFormat in
+                        hasUnsavedChanges = true
+                        // Update formation if the current one isn't available for the new format
+                        if !newFormat.availableFormations.contains(localDefaultFormation) {
+                            localDefaultFormation = newFormat.defaultFormation
                         }
                     }
                     
-                    // NEW: Team-specific half length setting
-                    Picker("Default Half Length", selection: $team.defaultHalfLength) {
+                    Picker("Default Formation", selection: $localDefaultFormation) {
+                        ForEach(localFormat.availableFormations, id: \.self) { formation in
+                            Text(formation.rawValue).tag(formation)
+                        }
+                    }
+                    .onChange(of: localDefaultFormation) { _ in hasUnsavedChanges = true }
+                    
+                    // FIXED: Half Length Picker with explicit onChange
+                    Picker("Default Half Length", selection: $localDefaultHalfLength) {
                         ForEach([15, 20, 25, 30, 35, 40, 45], id: \.self) { minutes in
                             Text("\(minutes) minutes").tag(minutes)
                         }
+                    }
+                    .onChange(of: localDefaultHalfLength) { newValue in
+                        print("Half length changed to: \(newValue)")
+                        hasUnsavedChanges = true
                     }
                 }
                 
@@ -1271,10 +1291,10 @@ struct TeamSettingsView: View {
                 
                 Section {
                     Button("Save Changes") {
-                        teamManager.updateTeam(team)
-                        presentationMode.wrappedValue.dismiss()
+                        saveChanges()
                     }
-                    .foregroundColor(.blue)
+                    .foregroundColor(hasUnsavedChanges ? .blue : .gray)
+                    .disabled(!hasUnsavedChanges)
                 }
                 
                 Section {
@@ -1292,44 +1312,54 @@ struct TeamSettingsView: View {
                         presentationMode.wrappedValue.dismiss()
                     }
                 }
+                
+                // Optional: Add a Save button in the toolbar too
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Save") {
+                        saveChanges()
+                    }
+                    .fontWeight(.semibold)
+                    .disabled(!hasUnsavedChanges)
+                }
             }
         }
-    }
-}
-
-// Add this extension to your Team model (in Models.swift)
-extension Team {
-    // Stats visibility settings for different access levels
-    var statsVisibilityForParents: StatsVisibilitySettings {
-        get {
-            // Try to decode from UserDefaults or Firebase
-            if let data = UserDefaults.standard.data(forKey: "statsVisibility_parents_\(id.uuidString)"),
-               let settings = try? JSONDecoder().decode(StatsVisibilitySettings.self, from: data) {
-                return settings
-            }
-            return StatsVisibilitySettings.parentFriendly
+        .onAppear {
+            // Initialize local state with current team values
+            localTeamName = team.name
+            localFormat = team.format
+            localDefaultFormation = team.defaultFormation
+            localDefaultHalfLength = team.defaultHalfLength
+            hasUnsavedChanges = false
+            print("TeamSettingsView appeared - Half length initialized to: \(localDefaultHalfLength)")
         }
-        set {
-            // Save to UserDefaults (in production, save to Firebase)
-            if let data = try? JSONEncoder().encode(newValue) {
-                UserDefaults.standard.set(data, forKey: "statsVisibility_parents_\(id.uuidString)")
+        .onDisappear {
+            // Warn about unsaved changes if needed
+            if hasUnsavedChanges {
+                print("Warning: TeamSettingsView dismissed with unsaved changes")
             }
         }
     }
     
-    var statsVisibilityForViewers: StatsVisibilitySettings {
-        get {
-            if let data = UserDefaults.standard.data(forKey: "statsVisibility_viewers_\(id.uuidString)"),
-               let settings = try? JSONDecoder().decode(StatsVisibilitySettings.self, from: data) {
-                return settings
-            }
-            return StatsVisibilitySettings.basic
-        }
-        set {
-            if let data = try? JSONEncoder().encode(newValue) {
-                UserDefaults.standard.set(data, forKey: "statsVisibility_viewers_\(id.uuidString)")
-            }
-        }
+    private func saveChanges() {
+        print("Saving team changes - Half length: \(localDefaultHalfLength)")
+        
+        // Create updated team with local changes
+        var updatedTeam = team
+        updatedTeam.name = localTeamName
+        updatedTeam.format = localFormat
+        updatedTeam.defaultFormation = localDefaultFormation
+        updatedTeam.defaultHalfLength = localDefaultHalfLength
+        
+        // Update through team manager
+        teamManager.updateTeam(updatedTeam)
+        
+        // Update the binding to reflect changes
+        team = updatedTeam
+        
+        hasUnsavedChanges = false
+        presentationMode.wrappedValue.dismiss()
+        
+        print("Team settings saved successfully - Half length: \(updatedTeam.defaultHalfLength)")
     }
 }
 

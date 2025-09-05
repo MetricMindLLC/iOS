@@ -91,7 +91,7 @@ enum Formation: String, CaseIterable, Codable {
         case .formation532:
             return [
                 .goalkeeper,
-                .centerBack, .centerBack, .centerBack, .centerBack, .centerBack,
+                .leftBack, .centerBack, .centerBack, .centerBack, .rightBack,
                 .leftMidfield, .centerMidfield, .rightMidfield,
                 .striker, .striker
             ]
@@ -99,7 +99,7 @@ enum Formation: String, CaseIterable, Codable {
         case .formation541:
             return [
                 .goalkeeper,
-                .centerBack, .centerBack, .centerBack, .centerBack, .centerBack,
+                .leftBack, .centerBack, .centerBack, .centerBack, .rightBack,
                 .leftMidfield, .centerMidfield, .centerMidfield, .rightMidfield,
                 .striker
             ]
@@ -126,7 +126,7 @@ enum Formation: String, CaseIterable, Codable {
         case .formation7v7_213:
             return [
                 .goalkeeper,
-                .rightBack, .leftBack,
+                .centerBack, .centerBack,
                 .centerMidfield,
                 .leftWing, .striker, .rightWing
             ]
@@ -142,8 +142,8 @@ enum Formation: String, CaseIterable, Codable {
         case .formation7v7_222:
             return [
                 .goalkeeper,
-                .rightBack, .leftBack,
-                .rightCenterMidfield, .leftCenterMidfield,
+                .centerBack, .centerBack,
+                .leftCenterMidfield, .rightCenterMidfield,
                 .striker, .striker
             ]
             
@@ -151,7 +151,7 @@ enum Formation: String, CaseIterable, Codable {
         case .formation7v7_231:
             return [
                 .goalkeeper,
-                .rightBack, .leftBack,
+                .centerBack, .centerBack,
                 .leftMidfield, .centerMidfield, .rightMidfield,
                 .striker
             ]
@@ -195,25 +195,25 @@ enum Formation: String, CaseIterable, Codable {
         case .formation9v9_323:
             return [
                 .goalkeeper,
-                .defender, .defender, .defender,
-                .midfielder, .midfielder,
-                .forward, .forward, .forward
+                .centerBack, .centerBack, .centerBack,
+                .centerMidfield, .centerMidfield,
+                .leftWing, .striker, .rightWing
             ]
             
         case .formation9v9_332:
             return [
                 .goalkeeper,
-                .defender, .defender, .defender,
-                .midfielder, .midfielder, .midfielder,
-                .forward, .forward
+                .centerBack, .centerBack, .centerBack,
+                .leftMidfield, .centerMidfield, .rightMidfield,
+                .striker, .striker,
             ]
             
         case .formation9v9_233:
             return [
                 .goalkeeper,
-                .defender, .defender,
-                .midfielder, .midfielder, .midfielder,
-                .forward, .forward, .forward
+                .centerBack, .centerBack,
+                .leftMidfield, .centerMidfield, .rightMidfield,
+                .leftWing, .striker, .rightWing
             ]
             
         // 5v5 formations (5 field players, NO goalkeeper)
@@ -721,6 +721,22 @@ enum Formation: String, CaseIterable, Codable {
     }
 }
 
+extension Formation {
+    func positionLocation(for position: Position, in size: CGSize) -> CGPoint {
+        // Get all positions for this formation
+        let allPositions = self.fieldPositions(for: size)
+        let formationPositions = self.positions
+        
+        // Find the index of this position type in the formation
+        if let positionIndex = formationPositions.firstIndex(of: position) {
+            return allPositions[positionIndex]
+        }
+        
+        // Fallback to center if position not found
+        return CGPoint(x: size.width/2, y: size.height/2)
+    }
+}
+
 // MARK: - Position Enum with All Positions
 enum Position: String, CaseIterable, Codable {
     case goalkeeper = "Goalkeeper"
@@ -829,3 +845,4 @@ extension Team {
         return format.defaultFormation
     }
 }
+

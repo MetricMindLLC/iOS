@@ -394,17 +394,52 @@ struct User: Identifiable, Codable, Equatable {
 }
 
 struct PlannedSubstitution: Identifiable, Codable, Equatable {
-    let id = UUID()
+    var id: UUID = UUID() // CHANGED: from 'let' to 'var'
     var playerOut: UUID
     var playerIn: UUID
     var plannedMinute: Int
     var reason: SubstitutionReason
+    var targetPosition: Position  // ADD THIS LINE
     var isExecuted: Bool = false
     var actualMinute: Int?
     var subGroupIndex: Int? = nil
     var groupDisplayName: String {
         guard let groupIndex = subGroupIndex else { return "Individual" }
         return "Sub \(groupIndex)"
+    }
+    
+    // ADD CUSTOM DECODER FOR BACKWARD COMPATIBILITY
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        playerOut = try container.decode(UUID.self, forKey: .playerOut)
+        playerIn = try container.decode(UUID.self, forKey: .playerIn)
+        plannedMinute = try container.decode(Int.self, forKey: .plannedMinute)
+        reason = try container.decode(SubstitutionReason.self, forKey: .reason)
+        targetPosition = try container.decodeIfPresent(Position.self, forKey: .targetPosition) ?? .midfielder // Fallback
+        isExecuted = try container.decodeIfPresent(Bool.self, forKey: .isExecuted) ?? false
+        actualMinute = try container.decodeIfPresent(Int.self, forKey: .actualMinute)
+        subGroupIndex = try container.decodeIfPresent(Int.self, forKey: .subGroupIndex)
+    }
+    
+    // STANDARD INITIALIZER
+    init(playerOut: UUID,
+         playerIn: UUID,
+         plannedMinute: Int,
+         reason: SubstitutionReason,
+         targetPosition: Position) {
+        self.id = UUID()
+        self.playerOut = playerOut
+        self.playerIn = playerIn
+        self.plannedMinute = plannedMinute
+        self.reason = reason
+        self.targetPosition = targetPosition
+    }
+    
+    private enum CodingKeys: String, CodingKey {
+        case id, playerOut, playerIn, plannedMinute, reason, targetPosition
+        case isExecuted, actualMinute, subGroupIndex
     }
 }
 
@@ -1299,7 +1334,8 @@ enum GameAuditEventType: String, Codable, CaseIterable {
     case freeKick = "Free Kick"
     case cornerKick = "Corner Kick"
     case penaltyKick = "Penalty Kick"
-    case goalAgainst = "Goal Against"  // NEW: For when opponent scores
+    case goalAgainst = "Goal Against"
+    case positionChange = "Position Change"  // MOVED: Fixed comment placement
 
     var icon: String {
         switch self {
@@ -1321,7 +1357,8 @@ enum GameAuditEventType: String, Codable, CaseIterable {
         case .freeKick: return "arrow.up.circle"
         case .cornerKick: return "arrow.turn.up.right"
         case .penaltyKick: return "circle.dotted"
-        case .goalAgainst: return "soccerball.inverse"  // NEW
+        case .goalAgainst: return "soccerball.inverse"
+        case .positionChange: return "arrow.triangle.swap"  // ADDED
         }
     }
 
@@ -1331,17 +1368,33 @@ enum GameAuditEventType: String, Codable, CaseIterable {
         case .yellowCard: return .yellow
         case .redCard, .injury: return .red
         case .gameStart, .gameEnd, .halfTime, .secondHalfStart: return .blue
+        case .substitution: return .blue
         case .save: return .purple
         case .shot, .shotOnTarget: return .orange
         case .timerAdjustment: return .blue
         case .freeKick: return .cyan
         case .cornerKick: return .mint
         case .penaltyKick: return .gray
-        case .goalAgainst: return .red  // NEW
-        default: return .gray
+        case .goalAgainst: return .red
+        case .positionChange: return .purple
+        case .timeout, .gamePause, .gameResume: return .gray
+        case .formationChange: return .orange
         }
     }
 }
+
+struct PlannedPositionChange: Identifiable, Codable, Equatable {
+    let id = UUID()
+    var playerId: UUID
+    var fromPosition: Position
+    var toPosition: Position
+    var plannedMinute: Int
+    var isExecuted: Bool = false
+    var actualMinute: Int?
+    var subGroupIndex: Int? = nil
+}
+
+
 
 // MARK: - Game (FIXED for backward compatibility)
 struct Game: Identifiable, Codable, Equatable {
@@ -1364,7 +1417,8 @@ struct Game: Identifiable, Codable, Equatable {
     var lineupPhases: [LineupPhase] = []  // NEW
     var useAutoSubstitutions: Bool = false  // NEW
     var actualStartingLineup: [LineupPosition]? = nil
-    
+    var plannedPositionChanges: [PlannedPositionChange] = []
+    var substitutionNotes: String? = nil 
     // MARK: - Custom Decoding for Backward Compatibility
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
