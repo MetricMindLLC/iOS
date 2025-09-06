@@ -1374,6 +1374,128 @@ class TeamManager: ObservableObject {
         }
     }
     
+    // MARK: - Game Planning Data Management
+    func updateGamePlanningData(_ game: Game, in team: Team) {
+        print("🔄 Updating game planning data for: \(game.opponent)")
+        
+        // Update local team data first
+        guard let teamIndex = teams.firstIndex(where: { $0.id == team.id }) else {
+            print("❌ Team not found for game planning update")
+            return
+        }
+        
+        guard let gameIndex = teams[teamIndex].games.firstIndex(where: { $0.id == game.id }) else {
+            print("❌ Game not found for planning update")
+            return
+        }
+        
+        // Update the game in the local team
+        teams[teamIndex].games[gameIndex] = game
+        teams[teamIndex].updateActivityTimestamp()
+        
+        print("✅ Updated planning data locally for game vs \(game.opponent)")
+        
+        // Save locally immediately for UI responsiveness
+        debouncedSave()
+        
+        // Use the existing updateTeam method for Firebase sync
+        // This ensures proper debouncing and real-time updates for other users
+        updateTeam(teams[teamIndex])
+    }
+    
+    // MARK: - Lineup-Specific Save
+    func updateGameLineupOnly(_ game: Game, in team: Team) {
+        print("🏟️ Updating ONLY lineup data for: \(game.opponent)")
+        
+        // Update local team data first
+        guard let teamIndex = teams.firstIndex(where: { $0.id == team.id }) else {
+            print("❌ Team not found for lineup update")
+            return
+        }
+        
+        guard let gameIndex = teams[teamIndex].games.firstIndex(where: { $0.id == game.id }) else {
+            print("❌ Game not found for lineup update")
+            return
+        }
+        
+        // Update the game in the local team
+        teams[teamIndex].games[gameIndex] = game
+        teams[teamIndex].updateActivityTimestamp()
+        
+        print("✅ Updated lineup data locally for game vs \(game.opponent)")
+        
+        // Save locally immediately for UI responsiveness
+        debouncedSave()
+        
+        // Save only this specific game's data to Firebase
+        if isOnline {
+            Task {
+                guard await ensureAuthentication() else { return }
+                
+                do {
+                    if team.useSubcollections {
+                        // Use the specific game save method for subcollections
+                        try await firebaseManager.saveGameWithSubcollections(game, in: team)
+                        print("✅ Saved lineup to game subcollection only")
+                    } else {
+                        // For non-subcollection teams, we still need full team save
+                        try await firebaseManager.saveTeam(teams[teamIndex])
+                        print("✅ Saved team with lineup data")
+                    }
+                } catch {
+                    await MainActor.run {
+                        self.setError("Failed to save lineup: \(error.localizedDescription)")
+                    }
+                }
+            }
+        }
+    }
+    
+    // MARK: - Game Planning Data Management (Lineup + Substitutions)
+    func updateGamePlanningDataOnly(_ game: Game, in team: Team) {  // Added "Only" to the name
+        print("🔄 Updating game planning data (lineup + subs) for: \(game.opponent)")
+        
+        // Update local team data first
+        guard let teamIndex = teams.firstIndex(where: { $0.id == team.id }) else {
+            print("❌ Team not found for planning update")
+            return
+        }
+        
+        guard let gameIndex = teams[teamIndex].games.firstIndex(where: { $0.id == game.id }) else {
+            print("❌ Game not found for planning update")
+            return
+        }
+        
+        // Update the game in the local team
+        teams[teamIndex].games[gameIndex] = game
+        teams[teamIndex].updateActivityTimestamp()
+        
+        print("✅ Updated planning data locally for game vs \(game.opponent)")
+        
+        // Save locally immediately for UI responsiveness
+        debouncedSave()
+        
+        // Save only planning data to Firebase
+        if isOnline {
+            Task {
+                guard await ensureAuthentication() else { return }
+                
+                do {
+                    if team.useSubcollections {
+                        try await firebaseManager.saveGamePlanningOnly(game, in: team)
+                    } else {
+                        try await firebaseManager.saveTeam(teams[teamIndex])
+                    }
+                    print("✅ Saved planning data to Firebase")
+                } catch {
+                    await MainActor.run {
+                        self.setError("Failed to save planning data: \(error.localizedDescription)")
+                    }
+                }
+            }
+        }
+    }
+    
     func addGame(to team: Team, game: Game) {
         if let teamIndex = teams.firstIndex(where: { $0.id == team.id }) {
             teams[teamIndex].games.append(game)

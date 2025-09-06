@@ -59,6 +59,10 @@ struct LineupView: View {
     @State private var showingSubstitutionPlanner = false
     @State private var hasCheckedPermissions = false
     @State private var currentGameMinute: Int = 0
+    @State private var hasUnsavedLineupChanges = false
+    @State private var isSavingLineup = false
+    @State private var hasUnsavedPlanningChanges = false
+    @State private var isSavingPlanning = false
     
     private var isReadOnlyUser: Bool {
         return userRole == .viewer || userRole == .parent
@@ -83,6 +87,44 @@ struct LineupView: View {
         .overlay {
             readOnlyOverlay
         }
+        .overlay {
+            if hasUnsavedPlanningChanges && selectedGame != nil && !showingGameMode && canEditLineup {
+                VStack {
+                    HStack {
+                        Spacer()
+                            .frame(maxWidth: 125)  // This controls how far left it goes
+                        
+                        Button(action: savePlanningToFirebase) {
+                            HStack(spacing: 6) {
+                                if isSavingPlanning {
+                                    ProgressView()
+                                        .scaleEffect(0.7)
+                                        .tint(.white)
+                                } else {
+                                    Image(systemName: "square.and.arrow.up")
+                                        .font(.system(size: 14, weight: .semibold))
+                                }
+                                Text(isSavingPlanning ? "Saving..." : "Save")
+                                    .font(.system(size: 14, weight: .semibold))
+                            }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.blue)
+                            .cornerRadius(20)
+                            .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
+                        }
+                        .disabled(isSavingPlanning)
+                        
+                        Spacer()
+                    }
+                    .padding(.top, 0)  // Keep this positive to position below the very top
+                    
+                    Spacer()
+                }
+            }
+        }
+        // Continue with your existing modifiers (.onAppear, .onDisappear, etc.)
         .onAppear {
             checkLineupPermissions()
             loadSavedLineupState()
@@ -131,14 +173,13 @@ struct LineupView: View {
             if let game = selectedGame {
                 SubstitutionPlannerView(
                     team: team,
-                    game: game,
+                    game: Binding(
+                        get: { selectedGame ?? game },
+                        set: { selectedGame = $0 }
+                    ),
                     lineupPositions: lineupPositions,
-                    onSave: { updatedGame in
-                        if let gameIndex = team.games.firstIndex(where: { $0.id == game.id }) {
-                            team.games[gameIndex] = updatedGame
-                            selectedGame = updatedGame
-                        }
-                        teamManager.updateTeam(team, activeGameId: updatedGame.id)
+                    onPlanningDataChanged: {
+                        hasUnsavedPlanningChanges = true
                     }
                 )
             }
@@ -320,6 +361,64 @@ struct LineupView: View {
     }
     
     @ViewBuilder
+    private var saveLineupButton: some View {
+        Button(action: saveLineupToFirebase) {
+            HStack {
+                if isSavingLineup {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                        .foregroundColor(.white)
+                    Text("Saving...")
+                        .fontWeight(.semibold)
+                } else {
+                    Image(systemName: "square.and.arrow.up")
+                    Text("Save Lineup")
+                        .fontWeight(.semibold)
+                }
+            }
+            .foregroundColor(.white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(
+                LinearGradient(
+                    gradient: Gradient(colors: [Color.blue, Color.blue.opacity(0.8)]),
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+            .cornerRadius(12)
+        }
+        .disabled(isSavingLineup)
+        .padding(.horizontal)
+    }
+    
+    @ViewBuilder
+    private var savePlanningButton: some View {
+        Button(action: savePlanningToFirebase) {
+            HStack {
+                if isSavingPlanning {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                        .foregroundColor(.white)
+                    Text("Saving...")
+                        .fontWeight(.semibold)
+                } else {
+                    Image(systemName: "square.and.arrow.up")
+                    Text("Save Lineup & Subs")
+                        .fontWeight(.semibold)
+                }
+            }
+            .foregroundColor(.white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(Color.blue)
+            .cornerRadius(12)
+        }
+        .disabled(isSavingPlanning)
+        .padding(.horizontal)
+    }
+    
+    @ViewBuilder
     private func mainContentArea(geometry: GeometryProxy) -> some View {
         if showingGameMode && selectedGame != nil {
             gameModView
@@ -393,6 +492,42 @@ struct LineupView: View {
         )
     }
     
+    private func savePlanningToFirebase() {
+        guard let selectedGame = selectedGame else { return }
+        
+        isSavingPlanning = true
+        
+        // Update the game with current lineup
+        saveCurrentLineupToGame()
+        
+        // Use the renamed method to avoid ambiguity
+        teamManager.updateGamePlanningDataOnly(selectedGame, in: team)
+        
+        // Reset unsaved changes flag after a brief delay
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            self.hasUnsavedPlanningChanges = false
+            self.isSavingPlanning = false
+        }
+    }
+    
+    private func saveLineupToFirebase() {
+        guard let selectedGame = selectedGame else { return }
+        
+        isSavingLineup = true
+        
+        // Update the game with current lineup
+        saveCurrentLineupToGame()
+        
+        // Use the lineup-specific save method
+        teamManager.updateGameLineupOnly(selectedGame, in: team)
+        
+        // Reset unsaved changes flag after a brief delay
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            self.hasUnsavedLineupChanges = false
+            self.isSavingLineup = false
+        }
+    }
+    
     private func startGameMode() {
         guard var game = selectedGame else { return }
         
@@ -461,19 +596,18 @@ struct LineupView: View {
     
     private func handleLineupPositionChange() {
         if showingGameMode && selectedGame != nil {
-            // During game mode: Update with subcollections support and active game context
+            // During game mode: Continue auto-saving for real-time updates
             saveCurrentLineupToGame()
             saveLineupToUserDefaults()
             gameStateManager.activeGameState?.lineupPositions = lineupPositions
-            
-            // Use active game-specific save with game ID context
             teamManager.updateTeam(team, activeGameId: selectedGame?.id)
-            print("ðŸŽ¯ GAME MODE: Using active game save")
+            print("GAME MODE: Using active game save")
         } else {
-            // CHANGED: During lineup planning, only save locally - no Firebase
+            // During lineup planning: Only save locally, mark as unsaved
             saveCurrentLineupToGame()
             saveLineupToUserDefaults()
-            print("ðŸ“ LINEUP PLANNING: Local save only - no Firebase sync")
+            hasUnsavedPlanningChanges = true
+            print("LINEUP PLANNING: Local save only - marked as unsaved")
         }
     }
     
@@ -1354,13 +1488,14 @@ struct ActiveGameBanner: View {
 
 struct SubstitutionPlannerView: View {
     let team: Team
-    @State var game: Game
+    @Binding var game: Game  // Changed back to @Binding
     let lineupPositions: [LineupPosition]
-    let onSave: (Game) -> Void
+    let onPlanningDataChanged: () -> Void
+    // Remove: let onSave: (Game) -> Void
     
     @Environment(\.presentationMode) var presentationMode
     @State private var useAutoSubstitutions = false
-    @EnvironmentObject var teamManager: TeamManager  // ADD THIS
+    @EnvironmentObject var teamManager: TeamManager
     
     var body: some View {
         NavigationView {
@@ -1424,7 +1559,6 @@ struct SubstitutionPlannerView: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Save") {
                         saveGamePlanningData()
-                        onSave(game)
                         presentationMode.wrappedValue.dismiss()
                     }
                 }
@@ -1435,30 +1569,19 @@ struct SubstitutionPlannerView: View {
         }
     }
     
-    // NEW: Save planning data to Firebase immediately
     private func saveGamePlanningData() {
-        Task {
-            do {
-                // Update the game in the team
-                if let gameIndex = team.games.firstIndex(where: { $0.id == game.id }) {
-                    var updatedTeam = team
-                    updatedTeam.games[gameIndex] = game
-                    
-                    // Save to Firebase using subcollection method
-                    if team.useSubcollections {
-                        try await teamManager.firebaseManager.saveGameWithSubcollections(game, in: team)
-                    } else {
-                        try await teamManager.firebaseManager.saveTeam(updatedTeam)
-                    }
-                    
-                    print("✅ Saved substitution planning data to Firebase")
-                }
-            } catch {
-                print("❌ Failed to save planning data: \(error)")
-            }
-        }
+        // Just trigger the callback to mark changes as unsaved
+        onPlanningDataChanged()
+    }
+
+    init(team: Team, game: Binding<Game>, lineupPositions: [LineupPosition], onPlanningDataChanged: @escaping () -> Void) {
+        self.team = team
+        self._game = game
+        self.lineupPositions = lineupPositions
+        self.onPlanningDataChanged = onPlanningDataChanged
     }
 }
+
 struct PositionChangeView: View {
     let team: Team
     @Binding var game: Game
@@ -2118,6 +2241,7 @@ struct IndividualSubstitutionPlanner: View {
         game.plannedSubstitutions.removeAll()
         game.plannedPositionChanges.removeAll()
         onPlanningDataChanged()
+    }
     
     private func shareSubstitutionPlan() {
         let substitutionPlanView = SubstitutionPlanShareView(

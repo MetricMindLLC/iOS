@@ -636,7 +636,7 @@ class FirebaseManager: NSObject, ObservableObject {
         }
     }
     
-    private func saveGameWithSubcollections(_ game: Game, in team: Team) async throws {
+    func saveGameWithSubcollections(_ game: Game, in team: Team) async throws {
         guard team.useSubcollections else { return }
 
         let gameRef = db.collection("teams").document(team.id.uuidString)
@@ -691,6 +691,83 @@ class FirebaseManager: NSObject, ObservableObject {
         
         let gameData = try Firestore.Encoder().encode(gameDataForFirebase)
         try await gameRef.setData(gameData)
+    }
+    
+    func saveGamePlanningOnly(_ game: Game, in team: Team) async throws {
+        guard team.useSubcollections else {
+            try await saveTeam(team)
+            return
+        }
+        
+        let gameRef = db.collection("teams").document(team.id.uuidString)
+            .collection("games").document(game.id.uuidString)
+        
+        // Create update dictionary manually to match Firebase structure
+        var planningUpdate: [String: Any] = [:]
+        
+        // Convert LineupPosition array to Firebase format
+        if let startingLineup = game.startingLineup {
+            let lineupArray = startingLineup.map { lineupPosition in
+                return [
+                    "playerId": lineupPosition.playerId?.uuidString ?? "",
+                    "position": lineupPosition.position.rawValue,
+                    "fieldPosition": [lineupPosition.fieldPosition.x, lineupPosition.fieldPosition.y]
+                ]
+            }
+            planningUpdate["startingLineup"] = lineupArray
+        } else {
+            planningUpdate["startingLineup"] = []
+        }
+        
+        if let actualStartingLineup = game.actualStartingLineup {
+            let actualLineupArray = actualStartingLineup.map { lineupPosition in
+                return [
+                    "playerId": lineupPosition.playerId?.uuidString ?? "",
+                    "position": lineupPosition.position.rawValue,
+                    "fieldPosition": [lineupPosition.fieldPosition.x, lineupPosition.fieldPosition.y]
+                ]
+            }
+            planningUpdate["actualStartingLineup"] = actualLineupArray
+        } else {
+            planningUpdate["actualStartingLineup"] = []
+        }
+        
+        // Formation - simple string
+        if let formation = game.formation {
+            planningUpdate["formation"] = formation.rawValue
+        }
+        
+        // Convert planned substitutions to Firebase format
+        let plannedSubsArray = game.plannedSubstitutions.map { sub in
+            return [
+                "id": sub.id.uuidString,
+                "playerIn": sub.playerIn.uuidString,
+                "playerOut": sub.playerOut.uuidString,
+                "plannedMinute": sub.plannedMinute,
+                "reason": sub.reason.rawValue,
+                "targetPosition": sub.targetPosition.rawValue,
+                "isExecuted": sub.isExecuted,
+                "subGroupIndex": sub.subGroupIndex ?? 0
+            ]
+        }
+        planningUpdate["plannedSubstitutions"] = plannedSubsArray
+        
+        // Convert planned position changes (if they exist)
+        let posChangesArray = game.plannedPositionChanges.map { change in
+            // Adjust this based on your actual PlannedPositionChange structure
+            return [
+                "id": change.id.uuidString // Removed optional chaining
+                // Add other fields as needed based on your model
+            ]
+        }
+        planningUpdate["plannedPositionChanges"] = posChangesArray
+        
+        // Simple fields
+        planningUpdate["useAutoSubstitutions"] = game.useAutoSubstitutions
+        planningUpdate["substitutionNotes"] = game.substitutionNotes
+        
+        try await gameRef.updateData(planningUpdate)
+        print("✅ Updated only planning fields in game document")
     }
     
     func updatePractice(_ practice: Practice, in team: Team) async throws {
