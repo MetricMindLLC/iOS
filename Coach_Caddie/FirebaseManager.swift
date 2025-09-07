@@ -186,12 +186,11 @@ class FirebaseManager: NSObject, ObservableObject {
                     print("📋 Saved \(actualStartingLineup.count) lineup positions for game vs \(game.opponent)")
                 }
                 
-                // NOW save the main game document WITHOUT nested arrays
                 var gameDataForFirebase = game
                 gameDataForFirebase.auditLog = []  // Clear the array, not nil
                 gameDataForFirebase.playerStats = []
                 gameDataForFirebase.actualStartingLineup = []  // Clear the array, not nil
-                
+
                 let gameData = try Firestore.Encoder().encode(gameDataForFirebase)
                 try await gameRef.setData(gameData)
             }
@@ -246,6 +245,47 @@ class FirebaseManager: NSObject, ObservableObject {
         return team
     }
 
+    func deserializePlannedPositionChanges(from gameData: [String: Any]) -> [PlannedPositionChange] {
+        print("🔍 DESERIALIZING: Checking for plannedPositionChanges in game data")
+        print("   Game data keys: \(gameData.keys.sorted())")
+        
+        guard let posChangesArray = gameData["plannedPositionChanges"] as? [[String: Any]] else {
+            print("❌ No plannedPositionChanges found in game data")
+            return []
+        }
+        
+        print("✅ Found \(posChangesArray.count) position changes to deserialize")
+        
+        let results: [PlannedPositionChange] = posChangesArray.compactMap { changeData -> PlannedPositionChange? in
+            guard let idString = changeData["id"] as? String,
+                  let id = UUID(uuidString: idString),
+                  let playerIdString = changeData["playerId"] as? String,
+                  let playerId = UUID(uuidString: playerIdString),
+                  let fromPositionRaw = changeData["fromPosition"] as? String,
+                  let fromPosition = Position(rawValue: fromPositionRaw),
+                  let toPositionRaw = changeData["toPosition"] as? String,
+                  let toPosition = Position(rawValue: toPositionRaw),
+                  let plannedMinute = changeData["plannedMinute"] as? Int else {
+                return nil
+            }
+            
+            var positionChange = PlannedPositionChange(
+                playerId: playerId,
+                fromPosition: fromPosition,
+                toPosition: toPosition,
+                plannedMinute: plannedMinute
+            )
+            
+            positionChange.isExecuted = changeData["isExecuted"] as? Bool ?? false
+            positionChange.actualMinute = changeData["actualMinute"] as? Int
+            positionChange.subGroupIndex = changeData["subGroupIndex"] as? Int
+            
+            return positionChange
+        }
+        
+        print("✅ Successfully deserialized \(results.count) position changes")
+        return results
+    }
     /// Saves only the specified game's data to Firebase subcollections - used during live games
     func saveActiveGameData(_ game: Game, in team: Team) async throws {
         guard team.useSubcollections else {
@@ -314,7 +354,7 @@ class FirebaseManager: NSObject, ObservableObject {
         gameDataForFirebase.actualStartingLineup = []  // Clear the array, not nil
         
         let gameData = try Firestore.Encoder().encode(gameDataForFirebase)
-        try await gameRef.setData(gameData)
+        try await gameRef.setData(gameData, merge: true)
         
         print("✅ ACTIVE game saved successfully: \(game.opponent)")
     }
@@ -737,7 +777,7 @@ class FirebaseManager: NSObject, ObservableObject {
             planningUpdate["formation"] = formation.rawValue
         }
         
-        // Convert planned substitutions to Firebase format
+        
         let plannedSubsArray = game.plannedSubstitutions.map { sub in
             return [
                 "id": sub.id.uuidString,
@@ -752,23 +792,43 @@ class FirebaseManager: NSObject, ObservableObject {
         }
         planningUpdate["plannedSubstitutions"] = plannedSubsArray
         
-        // Convert planned position changes (if they exist)
-        let posChangesArray = game.plannedPositionChanges.map { change in
-            // Adjust this based on your actual PlannedPositionChange structure
-            return [
-                "id": change.id.uuidString // Removed optional chaining
-                // Add other fields as needed based on your model
-            ]
+        // Always ensure plannedPositionChanges field exists, even if empty
+        if game.plannedPositionChanges.isEmpty {
+            planningUpdate["plannedPositionChanges"] = []
+        } else {
+            let posChangesArray = game.plannedPositionChanges.map { change in
+                return [
+                    "id": change.id.uuidString,
+                    "playerId": change.playerId.uuidString,
+                    "fromPosition": change.fromPosition.rawValue,
+                    "toPosition": change.toPosition.rawValue,
+                    "plannedMinute": change.plannedMinute,
+                    "isExecuted": change.isExecuted,
+                    "actualMinute": change.actualMinute ?? 0,
+                    "subGroupIndex": change.subGroupIndex ?? 0
+                ]
+            }
+            planningUpdate["plannedPositionChanges"] = posChangesArray
         }
-        planningUpdate["plannedPositionChanges"] = posChangesArray
         
         // Simple fields
         planningUpdate["useAutoSubstitutions"] = game.useAutoSubstitutions
         planningUpdate["substitutionNotes"] = game.substitutionNotes
-        
+
+        // DEBUG: Print what we're about to save
+        print("🔍 About to save to Firebase:")
+        print("   plannedSubstitutions count: \(game.plannedSubstitutions.count)")
+        print("   plannedPositionChanges count: \(game.plannedPositionChanges.count)")
+        print("   Keys being saved: \(planningUpdate.keys.sorted())")
+        if !game.plannedPositionChanges.isEmpty {
+            print("   First position change: \(game.plannedPositionChanges[0])")
+        }
+
         try await gameRef.updateData(planningUpdate)
-        print("✅ Updated only planning fields in game document")
+        print("✅ Updated planning fields including position changes in game document")
+        clearSubcollectionCache(for: team.id)
     }
+    
     
     func updatePractice(_ practice: Practice, in team: Team) async throws {
         guard let user = Auth.auth().currentUser else {
@@ -942,6 +1002,7 @@ class FirebaseManager: NSObject, ObservableObject {
         
         for document in snapshot.documents {
             var game = try Firestore.Decoder().decode(Game.self, from: document.data())
+            game.plannedPositionChanges = deserializePlannedPositionChanges(from: document.data())
             let gameRef = gamesRef.document(document.documentID)
             
             // Load audit log subcollection

@@ -1,6 +1,8 @@
 import SwiftUI
 import FirebaseAuth
 import UniformTypeIdentifiers
+import GoogleSignIn
+import FirebaseCore
 
 // MARK: - CSV Share Item
 class CSVShareItem: NSObject, UIActivityItemSource {
@@ -70,7 +72,7 @@ struct ImportOptionsView: View {
     var body: some View {
         NavigationView {
             Form {
-                Section {
+                Section(header: Text("Import Type")) {
                     Picker("Import Mode", selection: $importMode) {
                         ForEach(ImportMode.allCases, id: \.self) { mode in
                             Text(mode.rawValue).tag(mode)
@@ -81,12 +83,10 @@ struct ImportOptionsView: View {
                     Text(importMode.description)
                         .font(.caption)
                         .foregroundColor(.secondary)
-                } header: {
-                    Text("Import Type")
                 }
                 
                 if importMode == .playersOnly {
-                    Section {
+                    Section(header: Text("Target Team"), footer: Text("All players from the CSV will be added to this team, regardless of the team name in the CSV file.")) {
                         if teamManager.teams.isEmpty {
                             Text("No teams available")
                                 .foregroundColor(.secondary)
@@ -98,27 +98,18 @@ struct ImportOptionsView: View {
                                 }
                             }
                         }
-                    } header: {
-                        Text("Target Team")
-                    } footer: {
-                        Text("All players from the CSV will be added to this team, regardless of the team name in the CSV file.")
                     }
                 }
                 
-                Section {
+                Section(footer: Text("Select a CSV file with the correct format. Download the template to see the expected structure.")) {
                     Button("Select File to Import") {
-                        // Store the selected mode and team
                         onModeSelected(importMode, selectedTeamId)
-                        
-                        // Close current sheet first, then open file picker
                         presentationMode.wrappedValue.dismiss()
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                             showingImportPicker = true
                         }
                     }
                     .disabled(importMode == .playersOnly && selectedTeam == nil)
-                } footer: {
-                    Text("Select a CSV file with the correct format. Download the template to see the expected structure.")
                 }
             }
             .navigationTitle("Import Options")
@@ -188,7 +179,7 @@ struct ShareSettingsView: View {
     }
     
     private var joinTeamSection: some View {
-        Section {
+        Section(header: Text("Join Team"), footer: Text("Enter a 6-character invite code shared by a team coach.")) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     TextField("Enter Code", text: $joinCode)
@@ -215,15 +206,11 @@ struct ShareSettingsView: View {
                 }
             }
             .padding(.vertical, 4)
-        } header: {
-            Text("Join Team")
-        } footer: {
-            Text("Enter a 6-character invite code shared by a team coach.")
         }
     }
     
     private var yourTeamsSection: some View {
-        Section {
+        Section(header: Text("Your Teams")) {
             if teamManager.teams.isEmpty {
                 Text("No teams yet")
                     .foregroundColor(.secondary)
@@ -234,8 +221,6 @@ struct ShareSettingsView: View {
                     }
                 }
             }
-        } header: {
-            Text("Your Teams")
         }
     }
     
@@ -249,14 +234,13 @@ struct ShareSettingsView: View {
                 isJoining = false
                 if success {
                     joinCode = ""
-                } else {
-                    // Error - the teamManager should have set an error message
                 }
             }
         }
     }
 }
 
+// MARK: - Team Settings Detail View
 struct TeamSettingsDetailView: View {
     let team: Team
     @ObservedObject var teamManager: TeamManager
@@ -278,7 +262,6 @@ struct TeamSettingsDetailView: View {
                 memberManagementSection
                 inviteManagementSection
             } else {
-                // Show read-only info for non-coaches
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
                         Image(systemName: "info.circle")
@@ -325,9 +308,18 @@ struct TeamSettingsDetailView: View {
         }
     }
     
-    // MARK: - Team Member Management Section (NEW)
     private var memberManagementSection: some View {
-        Section {
+        Section(header: HStack {
+            Text("Team Members")
+            Spacer()
+            if !isLoadingMembers {
+                Button("Refresh") {
+                    loadTeamMembers()
+                }
+                .font(.caption)
+                .foregroundColor(.blue)
+            }
+        }, footer: Text(teamMembers.isEmpty ? "" : "Team members can access the team based on their assigned role. You cannot revoke your own access.")) {
             if isLoadingMembers {
                 HStack {
                     ProgressView()
@@ -368,7 +360,6 @@ struct TeamSettingsDetailView: View {
                         
                         Spacer()
                         
-                        // Don't allow revoking the team creator
                         if member.userId != Auth.auth().currentUser?.uid {
                             Button("Revoke") {
                                 memberToRevoke = member
@@ -381,27 +372,11 @@ struct TeamSettingsDetailView: View {
                     .padding(.vertical, 4)
                 }
             }
-        } header: {
-            HStack {
-                Text("Team Members")
-                Spacer()
-                if !isLoadingMembers {
-                    Button("Refresh") {
-                        loadTeamMembers()
-                    }
-                    .font(.caption)
-                    .foregroundColor(.blue)
-                }
-            }
-        } footer: {
-            if !teamMembers.isEmpty {
-                Text("Team members can access the team based on their assigned role. You cannot revoke your own access.")
-            }
         }
     }
     
     private var teamInfoSection: some View {
-        Section {
+        Section(header: Text("Team Information")) {
             HStack {
                 Text("Team Name")
                 Spacer()
@@ -422,13 +397,11 @@ struct TeamSettingsDetailView: View {
                 Text(team.dateCreated.formatted(date: .abbreviated, time: .omitted))
                     .foregroundColor(.secondary)
             }
-        } header: {
-            Text("Team Information")
         }
     }
     
     private var inviteManagementSection: some View {
-        Section {
+        Section(header: Text("Generate New Invites"), footer: Text("Generate codes for coaches (full access) or parents (limited access). Once someone joins using an invite, they'll appear in the Team Members section above.")) {
             Button(action: { showingShareCode = true }) {
                 HStack {
                     Image(systemName: "person.badge.plus")
@@ -438,7 +411,6 @@ struct TeamSettingsDetailView: View {
                 }
             }
             
-            // Display active invite codes
             if !generatedCodes.isEmpty {
                 ForEach(generatedCodes) { invite in
                     VStack(alignment: .leading, spacing: 8) {
@@ -472,21 +444,13 @@ struct TeamSettingsDetailView: View {
                     .padding(.vertical, 4)
                 }
             }
-        } header: {
-            Text("Generate New Invites")
-        } footer: {
-            Text("Generate codes for coaches (full access) or parents (limited access). Once someone joins using an invite, they'll appear in the Team Members section above.")
         }
     }
 
     private var isUserTeamCoach: Bool {
         guard let currentUser = Auth.auth().currentUser else {
-            print("🔍 No current Firebase user")
             return false
         }
-        print("🔍 TeamSettings - Current user UID: \(currentUser.uid)")
-        print("🔍 TeamSettings - Team coachUID: \(team.coachUID ?? "nil")")
-        print("🔍 TeamSettings - Match: \(team.coachUID == currentUser.uid)")
         return team.coachUID == currentUser.uid
     }
     
@@ -506,8 +470,6 @@ struct TeamSettingsDetailView: View {
         }
     }
     
-    // MARK: - Helper Methods (NEW)
-    
     private func loadTeamMembers() {
         isLoadingMembers = true
         
@@ -519,7 +481,6 @@ struct TeamSettingsDetailView: View {
                     self.isLoadingMembers = false
                 }
             } catch {
-                print("❌ Failed to load team members: \(error)")
                 await MainActor.run {
                     self.isLoadingMembers = false
                 }
@@ -536,18 +497,10 @@ struct TeamSettingsDetailView: View {
                 )
                 
                 await MainActor.run {
-                    // Remove from local list
                     teamMembers.removeAll { $0.userId == member.userId }
                     memberToRevoke = nil
-                    
-                    // Refresh the invite counts in case they want to generate new invites
-                    // The available invite count should increase after revoking access
                 }
-                
-                print("✅ Successfully revoked access for \(member.email)")
-                
             } catch {
-                print("❌ Failed to revoke access: \(error)")
                 await MainActor.run {
                     memberToRevoke = nil
                 }
@@ -563,6 +516,7 @@ struct TeamSettingsDetailView: View {
         }
     }
 }
+
 // MARK: - Team Invite Generator View
 struct TeamInviteGeneratorView: View {
     let team: Team
@@ -578,8 +532,6 @@ struct TeamInviteGeneratorView: View {
     @State private var viewDidAppear = false
     @State private var showCopiedFeedback = false
     @Environment(\.presentationMode) var presentationMode
-    
-    // State for remaining invites (loaded from Firebase)
     @State private var remainingCoachInvites: Int = 0
     @State private var remainingParentInvites: Int = 0
     @State private var remainingViewerInvites: Int = 0
@@ -600,7 +552,7 @@ struct TeamInviteGeneratorView: View {
     var body: some View {
         NavigationView {
             Form {
-                Section {
+                Section(header: Text("Invite Settings"), footer: Text(canGenerateInvite || isLoadingLimits ? "Choose the access level and expiration for this invite code." : "You've reached the maximum number of \(selectedAccessLevel.rawValue) invites for your \(authManager.currentUser?.subscriptionLevel.displayName ?? "current") plan. Upgrade to generate more invites.")) {
                     if isLoadingLimits {
                         HStack {
                             ProgressView()
@@ -655,7 +607,6 @@ struct TeamInviteGeneratorView: View {
                         }
                         .pickerStyle(WheelPickerStyle())
                         
-                        // Show remaining invites for selected access level
                         HStack {
                             Text("Remaining Invites")
                             Spacer()
@@ -672,20 +623,10 @@ struct TeamInviteGeneratorView: View {
                             }
                         }
                     }
-                } header: {
-                    Text("Invite Settings")
-                } footer: {
-                    if !canGenerateInvite && !isLoadingLimits {
-                        Text("You've reached the maximum number of \(selectedAccessLevel.rawValue) invites for your \(authManager.currentUser?.subscriptionLevel.displayName ?? "current") plan. Upgrade to generate more invites.")
-                            .foregroundColor(.red)
-                    } else {
-                        Text("Choose the access level and expiration for this invite code.")
-                    }
                 }
                 
-                // Subscription info section
                 if let user = authManager.currentUser, !isLoadingLimits {
-                    Section {
+                    Section(header: Text("Plan Limits")) {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Your Plan: \(user.subscriptionLevel.displayName)")
                                 .font(.headline)
@@ -711,13 +652,10 @@ struct TeamInviteGeneratorView: View {
                         
                         if user.subscriptionLevel == .trial || user.subscriptionLevel == .pro {
                             Button("Upgrade Plan") {
-                                // Handle upgrade - you can implement this later
-                                // For now, just show that it's available
+                                // Handle upgrade
                             }
                             .foregroundColor(.blue)
                         }
-                    } header: {
-                        Text("Plan Limits")
                     }
                 }
                 
@@ -730,9 +668,8 @@ struct TeamInviteGeneratorView: View {
                 }
                 
                 if let code = generatedCode {
-                    Section {
+                    Section(header: Text("Generated Code"), footer: Text("This code can be used once and expires in \(expirationDays) day\(expirationDays == 1 ? "" : "s").")) {
                         VStack(spacing: 16) {
-                            // Code Display
                             VStack(spacing: 8) {
                                 Text("Invite Code")
                                     .font(.caption)
@@ -747,7 +684,6 @@ struct TeamInviteGeneratorView: View {
                                     .textSelection(.enabled)
                             }
                             
-                            // Action Buttons
                             HStack(spacing: 20) {
                                 Button(action: copyCode) {
                                     HStack {
@@ -766,7 +702,6 @@ struct TeamInviteGeneratorView: View {
                                 }
                             }
                             
-                            // Preview Message
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("Share Message Preview:")
                                     .font(.caption)
@@ -780,10 +715,6 @@ struct TeamInviteGeneratorView: View {
                                     .foregroundColor(.secondary)
                             }
                         }
-                    } header: {
-                        Text("Generated Code")
-                    } footer: {
-                        Text("This code can be used once and expires in \(expirationDays) day\(expirationDays == 1 ? "" : "s").")
                     }
                 }
             }
@@ -816,16 +747,13 @@ struct TeamInviteGeneratorView: View {
         }
     }
     
-    // MARK: - Helper Methods
-    
     private func loadRemainingInvites() {
-        guard let user = authManager.currentUser else { return }
+        guard authManager.currentUser != nil else { return }
         
         isLoadingLimits = true
         
         Task {
             do {
-                // Load remaining invites for each access level
                 async let coachRemaining = teamManager.getRemainingInvites(for: team, accessLevel: .coach)
                 async let parentRemaining = teamManager.getRemainingInvites(for: team, accessLevel: .parent)
                 async let viewerRemaining = teamManager.getRemainingInvites(for: team, accessLevel: .viewer)
@@ -840,9 +768,7 @@ struct TeamInviteGeneratorView: View {
                 }
                 
             } catch {
-                print("❌ Failed to load remaining invites: \(error)")
                 await MainActor.run {
-                    // Fallback to computed values if Firebase fails
                     if let user = authManager.currentUser {
                         self.remainingCoachInvites = max(0, user.effectiveMaxCoachInvites)
                         self.remainingParentInvites = max(0, user.effectiveMaxParentInvites)
@@ -855,25 +781,21 @@ struct TeamInviteGeneratorView: View {
     }
     
     private func generateCode() {
-        print("🔍 Starting generateCode process")
         isGenerating = true
         errorMessage = nil
         
-        // First check if user has permission to generate codes
         guard let currentUser = Auth.auth().currentUser else {
             errorMessage = "Not authenticated. Please sign in again."
             isGenerating = false
             return
         }
         
-        // Check if user is team coach
         guard team.coachUID == currentUser.uid else {
             errorMessage = "Only team coaches can generate invite codes."
             isGenerating = false
             return
         }
         
-        // ENFORCE SUBSCRIPTION LIMITS
         guard canGenerateInvite else {
             let planName = authManager.currentUser?.subscriptionLevel.displayName ?? "current plan"
             errorMessage = "You've reached the maximum number of \(selectedAccessLevel.rawValue) invites for your \(planName). Upgrade to generate more invites."
@@ -883,9 +805,6 @@ struct TeamInviteGeneratorView: View {
         
         Task {
             do {
-                print("🔍 Checking subscription limits before generating invite")
-                
-                // Double-check limits before generating (in case of race conditions)
                 let currentUsage = getCurrentInviteUsage(for: selectedAccessLevel)
                 let maxAllowed: Int
                 switch selectedAccessLevel {
@@ -902,37 +821,29 @@ struct TeamInviteGeneratorView: View {
                     return
                 }
                 
-                print("✅ Subscription limits check passed - generating invite")
-                
-                // Use the regular method for now (you can implement the new one later)
                 if let code = await teamManager.generateInviteCode(for: team, accessLevel: selectedAccessLevel) {
                     let invite = GeneratedInvite(
                         code: code,
                         accessLevel: selectedAccessLevel,
-                        maxUses: 1, // Each invite code can only be used once
+                        maxUses: 1,
                         currentUses: 0,
                         expiresAt: Calendar.current.date(byAdding: .day, value: expirationDays, to: Date()) ?? Date()
                     )
                     
                     await MainActor.run {
-                        print("✅ Code generated successfully: \(code)")
                         self.generatedCode = code
                         self.onInviteGenerated(invite)
                         self.isGenerating = false
-                        
-                        // Reload remaining invites after successful generation
                         self.loadRemainingInvites()
                     }
                 } else {
                     await MainActor.run {
-                        print("❌ generateInviteCode returned nil")
                         self.errorMessage = teamManager.errorMessage ?? "Failed to generate invite code. Please try again."
                         self.isGenerating = false
                     }
                 }
             } catch {
                 await MainActor.run {
-                    print("❌ Exception during code generation: \(error)")
                     self.errorMessage = "Failed to generate invite code: \(error.localizedDescription)"
                     self.isGenerating = false
                 }
@@ -941,8 +852,6 @@ struct TeamInviteGeneratorView: View {
     }
     
     private func getCurrentInviteUsage(for accessLevel: AccessLevel) -> Int {
-        // This method is kept for backward compatibility
-        // The actual counting is now done in loadRemainingInvites()
         return 0
     }
     
@@ -972,7 +881,6 @@ struct TeamInviteGeneratorView: View {
             accessDetails = "read-only access to team information"
         }
         
-        // App Store link - replace with your actual App Store URL
         let appStoreURL = "https://apps.apple.com/app/coach-caddie/id123456789"
         
         let message = """
@@ -1001,25 +909,21 @@ struct TeamInviteGeneratorView: View {
         
         let message = createShareMessage(code: code)
         
-        // Create the activity view controller
         let activityVC = UIActivityViewController(
             activityItems: [message],
             applicationActivities: nil
         )
         
-        // Configure for iPad
         if let popover = activityVC.popoverPresentationController {
             popover.sourceView = UIApplication.shared.windows.first
             popover.sourceRect = CGRect(x: UIScreen.main.bounds.midX, y: UIScreen.main.bounds.midY, width: 0, height: 0)
             popover.permittedArrowDirections = []
         }
         
-        // Present the share sheet
         if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
            let window = windowScene.windows.first,
            let rootViewController = window.rootViewController {
             
-            // Find the topmost view controller
             var topController = rootViewController
             while let presentedViewController = topController.presentedViewController {
                 topController = presentedViewController
@@ -1029,6 +933,7 @@ struct TeamInviteGeneratorView: View {
         }
     }
 }
+
 // MARK: - Team Export Picker View
 struct TeamExportPickerView: View {
     let teams: [Team]
@@ -1038,7 +943,7 @@ struct TeamExportPickerView: View {
     var body: some View {
         NavigationView {
             List {
-                Section {
+                Section(header: Text("Select Team to Export"), footer: Text("Choose which team's player data you want to export as CSV.")) {
                     ForEach(teams, id: \.id) { team in
                         Button(action: {
                             onTeamSelected(team)
@@ -1067,10 +972,6 @@ struct TeamExportPickerView: View {
                             .padding(.vertical, 4)
                         }
                     }
-                } header: {
-                    Text("Select Team to Export")
-                } footer: {
-                    Text("Choose which team's player data you want to export as CSV.")
                 }
             }
             .navigationTitle("Export Team")
@@ -1106,19 +1007,18 @@ struct ProfileSettingsView: View {
     @State private var importMode: ImportOptionsView.ImportMode = .completeTeams
     @State private var targetTeamId: UUID?
     @State private var showingUpgradeModal = false
-    // NEW STATE VARIABLES FOR SUBSCRIPTION:
     @State private var showingSubscription = false
     @State private var showingTrialAlert = false
+    @State private var showingAccountDeleteConfirmation = false
+    @State private var isDeleting = false
+    @State private var accountDeletionError: String?
     
     var body: some View {
         NavigationView {
             Form {
                 userProfileSection
-                
-                // NEW: Show restoration section for cancelled users
                 subscriptionRestorationSection
                 
-                // Show regular subscription section only for non-cancelled users
                 if let user = authManager.currentUser, user.subscriptionLevel != .cancelled {
                     subscriptionSection
                 }
@@ -1143,12 +1043,50 @@ struct ProfileSettingsView: View {
                     Text("Are you sure you want to delete \(team.name)? This action cannot be undone.")
                 }
             }
+            .sheet(isPresented: $showingAccountDeleteConfirmation) {
+                AccountDeletionConfirmationView(
+                    isDeleting: $isDeleting,
+                    onConfirm: { confirmationText in
+                        handleAccountDeletion(confirmationText: confirmationText)
+                    },
+                    onCancel: {
+                        showingAccountDeleteConfirmation = false
+                        accountDeletionError = nil
+                    },
+                    errorMessage: accountDeletionError
+                )
+            }
             .sheet(isPresented: $showingUpgradeModal) {
-                ExpiredTrialUpgradeView()
+                NavigationView {
+                    VStack {
+                        Text("Upgrade Required")
+                            .font(.title)
+                        Text("Please upgrade your subscription to continue using all features.")
+                            .padding()
+                        Button("Close") {
+                            showingUpgradeModal = false
+                        }
+                        .padding()
+                    }
+                    .navigationTitle("Upgrade")
+                    .navigationBarTitleDisplayMode(.inline)
+                }
             }
             .sheet(isPresented: $showingSubscription) {
-                SubscriptionView()
-                    .environmentObject(authManager)
+                NavigationView {
+                    VStack {
+                        Text("Subscription Management")
+                            .font(.title)
+                        Text("Subscription features coming soon.")
+                            .padding()
+                        Button("Close") {
+                            showingSubscription = false
+                        }
+                        .padding()
+                    }
+                    .navigationTitle("Subscription")
+                    .navigationBarTitleDisplayMode(.inline)
+                }
             }
             .sheet(isPresented: $showingAbout) {
                 AboutView()
@@ -1206,14 +1144,12 @@ struct ProfileSettingsView: View {
                 }
             }
             .navigationTitle("Settings")
-            // NEW TRIAL CHECK:
             .onAppear {
                 checkTrialStatus()
             }
         }
     }
     
-    // NEW: Subscription restoration section for cancelled users
     private var subscriptionRestorationSection: some View {
         Section {
             if let user = authManager.currentUser,
@@ -1258,13 +1194,14 @@ struct ProfileSettingsView: View {
         } header: {
             if let user = authManager.currentUser, user.subscriptionLevel == .cancelled {
                 Text("Account Status")
+            } else {
+                EmptyView()
             }
         }
     }
     
-    // NEW SUBSCRIPTION SECTION - FIXED:
     private var subscriptionSection: some View {
-        Section {
+        Section(header: Text("Subscription"), footer: footerForSubscription) {
             if let user = authManager.currentUser {
                 HStack {
                     VStack(alignment: .leading) {
@@ -1283,8 +1220,6 @@ struct ProfileSettingsView: View {
                     
                     Spacer()
                     
-                    // FIXED: Only show upgrade button for trial, pro, or premium users
-                    // Do NOT show for sharedAccess, free (legacy), cancelled, or expired
                     if shouldShowUpgradeButton(for: user.subscriptionLevel) {
                         Button("Upgrade") {
                             showingSubscription = true
@@ -1293,7 +1228,6 @@ struct ProfileSettingsView: View {
                     }
                 }
                 
-                // FIXED: Show features based on membership type and subscription level
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(getFeaturesForUser(user).prefix(3), id: \.self) { feature in
                         HStack {
@@ -1308,20 +1242,17 @@ struct ProfileSettingsView: View {
                 }
                 .padding(.top, 8)
             }
-        } header: {
-            Text("Subscription")
-        } footer: {
-            // ADDED: Footer with cancellation instructions for paid users
-            if let user = authManager.currentUser,
-               isActivePaidSubscription(user.subscriptionLevel) {
-                Text("To manage or cancel your subscription, go to Settings > [Your Name] > Subscriptions on your device.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
         }
     }
+    
+    private var footerForSubscription: Text? {
+        if let user = authManager.currentUser,
+           isActivePaidSubscription(user.subscriptionLevel) {
+            return Text("To manage or cancel your subscription, go to Settings > [Your Name] > Subscriptions on your device.")
+        }
+        return nil
+    }
 
-    // ADDED: Helper to check if user has an active paid subscription
     private func isActivePaidSubscription(_ level: SubscriptionLevel) -> Bool {
         switch level {
         case .pro, .premium, .club:
@@ -1331,29 +1262,16 @@ struct ProfileSettingsView: View {
         }
     }
 
-    // ADDED: Helper function to determine who should see upgrade button
     private func shouldShowUpgradeButton(for subscriptionLevel: SubscriptionLevel) -> Bool {
         switch subscriptionLevel {
-        case .trial:
-            return true  // Trial users should be able to upgrade
-        case .pro:
-            return true  // Pro users can upgrade to Premium/Club
-        case .premium:
-            return true  // Premium users can upgrade to Club
-        case .sharedAccess:
-            return false // Shared access users get free access, no need to upgrade
-        case .free:
-            return false // Legacy free users already have everything
-        case .club:
-            return false // Already at highest tier
-        case .cancelled, .expired:
-            return true  // Allow reactivation
+        case .trial, .pro, .premium, .cancelled, .expired:
+            return true
+        case .sharedAccess, .free, .club:
+            return false
         }
     }
 
-    // ADDED: Get appropriate features based on user's actual role and subscription
     private func getFeaturesForUser(_ user: User) -> [String] {
-        // For shared access users, show features based on their membership type
         if user.subscriptionLevel == .sharedAccess {
             switch user.membershipType {
             case .coach:
@@ -1384,30 +1302,24 @@ struct ProfileSettingsView: View {
                 return ["Access to shared teams"]
             }
         } else {
-            // For other subscription levels, use the standard features
             return user.subscriptionLevel.features
         }
     }
     
-    // NEW HELPER METHOD:
     private func checkTrialStatus() {
         guard let user = authManager.currentUser else { return }
         
-        // Show alert when trial is ending (1 day left)
         if user.subscriptionLevel == .trial && user.trialDaysRemaining <= 1 {
             showingTrialAlert = true
         }
         
-        // Check for expired trial
         Task {
             try? await authManager.checkTrialStatus()
         }
     }
     
-    // MARK: - View Sections
-    
     private var userProfileSection: some View {
-        Section {
+        Section(header: Text("Profile")) {
             HStack {
                 Image(systemName: "person.circle.fill")
                     .font(.title2)
@@ -1429,51 +1341,52 @@ struct ProfileSettingsView: View {
                 Spacer()
             }
             .padding(.vertical, 4)
-        } header: {
-            Text("Profile")
         }
     }
     
     private var appSettingsSection: some View {
-        Section {
+        Section(header: Text("App Settings")) {
             Toggle("Auto-save Lineups", isOn: $teamManager.appSettings.autoSaveLineups)
-            
             Toggle("Haptic Feedback", isOn: $teamManager.appSettings.enableHapticFeedback)
-        } header: {
-            Text("App Settings")
         }
     }
     
     private var defaultSettingsSection: some View {
-        Section {
+        Section(header: Text("Default Settings")) {
             Picker("Player Sort Order", selection: $teamManager.appSettings.defaultSortOrder) {
                 ForEach(AppSettings.PlayerSortOrder.allCases, id: \.self) { order in
                     Text(order.rawValue).tag(order)
                 }
             }
-        } header: {
-            Text("Default Settings")
         }
     }
     
     private var teamsSection: some View {
-        Section {
-            // Team limit information
+        Section(header: HStack {
+            Text("Your Teams")
+            
             if let currentUser = authManager.currentUser,
-               currentUser.maxTeamsAllowed < 999 { // Don't show for unlimited accounts
+               currentUser.maxTeamsAllowed < 999 {
+                Spacer()
+                Text("\(teamManager.teamsICreated.count)/\(currentUser.maxTeamsAllowed)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }, footer: footerForTeams) {
+            if let currentUser = authManager.currentUser,
+               currentUser.maxTeamsAllowed < 999 {
                 HStack {
                     Image(systemName: "number.circle.fill")
                         .foregroundColor(.blue)
-                    Text("Teams Created")  // CHANGED: More specific label
+                    Text("Teams Created")
                     Spacer()
-                    Text("\(teamManager.teamsICreated.count)/\(currentUser.maxTeamsAllowed)")  // CHANGED: Use teamsICreated
+                    Text("\(teamManager.teamsICreated.count)/\(currentUser.maxTeamsAllowed)")
                         .foregroundColor(teamManager.teamsICreated.count >= currentUser.maxTeamsAllowed ? .red : .secondary)
                         .fontWeight(teamManager.teamsICreated.count >= currentUser.maxTeamsAllowed ? .semibold : .regular)
                 }
                 .padding(.vertical, 2)
             }
             
-            // Team list
             if teamManager.teams.isEmpty {
                 HStack {
                     Image(systemName: "exclamationmark.circle")
@@ -1482,11 +1395,9 @@ struct ProfileSettingsView: View {
                         .foregroundColor(.secondary)
                     Spacer()
                     
-                    // Show create team button if user can create teams
                     if teamManager.canCreateMoreTeams() {
                         Button("Create Team") {
                             // Handle team creation navigation
-                            // This would need to be passed in or handled via a delegate
                         }
                         .font(.caption)
                         .foregroundColor(.blue)
@@ -1501,9 +1412,8 @@ struct ProfileSettingsView: View {
                 .onDelete(perform: deleteTeams)
             }
             
-            // Show upgrade suggestion if at limit
             if let currentUser = authManager.currentUser,
-               teamManager.teamsICreated.count >= currentUser.maxTeamsAllowed,  // CHANGED: Use teamsICreated
+               teamManager.teamsICreated.count >= currentUser.maxTeamsAllowed,
                currentUser.maxTeamsAllowed < 999 {
                 HStack {
                     Image(systemName: "arrow.up.circle.fill")
@@ -1526,40 +1436,31 @@ struct ProfileSettingsView: View {
                 }
                 .padding(.vertical, 4)
             }
-        } header: {
-            HStack {
-                Text("Your Teams")
-                
-                if let currentUser = authManager.currentUser,
-                   currentUser.maxTeamsAllowed < 999 {
-                    Spacer()
-                    Text("\(teamManager.teamsICreated.count)/\(currentUser.maxTeamsAllowed)")  // CHANGED: Use teamsICreated
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-        } footer: {
-            if let currentUser = authManager.currentUser {
-                let planName = currentUser.subscriptionLevel.displayName
-                let maxTeams = currentUser.maxTeamsAllowed
-                let createdCount = teamManager.teamsICreated.count
-                let invitedCount = teamManager.teamsIWasInvitedTo.count
-                
-                if maxTeams < 999 {
-                    if createdCount >= maxTeams {
-                        Text("You've reached your team creation limit for the \(planName) plan." + (invitedCount > 0 ? " You're also a member of \(invitedCount) team\(invitedCount == 1 ? "" : "s") through invites (these don't count toward your limit)." : ""))
-                    } else {
-                        Text("Your \(planName) plan allows you to create up to \(maxTeams) team\(maxTeams == 1 ? "" : "s"). You've created \(createdCount)." + (invitedCount > 0 ? " You're also a member of \(invitedCount) team\(invitedCount == 1 ? "" : "s") through invites (these don't count toward your limit)." : ""))
-                    }
-                } else {
-                    Text("Unlimited team creation on your \(planName) plan." + (invitedCount > 0 ? " You're also a member of \(invitedCount) team\(invitedCount == 1 ? "" : "s") through invites." : ""))
-                }
-            }
         }
     }
     
+    private var footerForTeams: Text? {
+        if let currentUser = authManager.currentUser {
+            let planName = currentUser.subscriptionLevel.displayName
+            let maxTeams = currentUser.maxTeamsAllowed
+            let createdCount = teamManager.teamsICreated.count
+            let invitedCount = teamManager.teamsIWasInvitedTo.count
+            
+            if maxTeams < 999 {
+                if createdCount >= maxTeams {
+                    return Text("You've reached your team creation limit for the \(planName) plan." + (invitedCount > 0 ? " You're also a member of \(invitedCount) team\(invitedCount == 1 ? "" : "s") through invites (these don't count toward your limit)." : ""))
+                } else {
+                    return Text("Your \(planName) plan allows you to create up to \(maxTeams) team\(maxTeams == 1 ? "" : "s"). You've created \(createdCount)." + (invitedCount > 0 ? " You're also a member of \(invitedCount) team\(invitedCount == 1 ? "" : "s") through invites (these don't count toward your limit)." : ""))
+                }
+            } else {
+                return Text("Unlimited team creation on your \(planName) plan." + (invitedCount > 0 ? " You're also a member of \(invitedCount) team\(invitedCount == 1 ? "" : "s") through invites." : ""))
+            }
+        }
+        return nil
+    }
+    
     private var teamSharingSection: some View {
-        Section {
+        Section(header: Text("Team Sharing"), footer: Text("Generate invite codes to add coaches or parents to your teams.")) {
             NavigationLink(destination: ShareSettingsView(teamManager: teamManager)) {
                 HStack {
                     Image(systemName: "person.badge.plus")
@@ -1567,15 +1468,11 @@ struct ProfileSettingsView: View {
                     Text("Manage Team Invites")
                 }
             }
-        } header: {
-            Text("Team Sharing")
-        } footer: {
-            Text("Generate invite codes to add coaches or parents to your teams.")
         }
     }
     
     private var dataManagementSection: some View {
-        Section {
+        Section(header: Text("Data Management"), footer: Text(canImportData ? "If you're unable to edit certain fields or don't see expected data, try restarting the app. Data sync may take a moment to complete" : "Import functionality is only available to team coaches.")) {
             Button(action: {
                 handleExportAction()
             }) {
@@ -1591,7 +1488,6 @@ struct ProfileSettingsView: View {
             }
             .disabled(teamManager.teams.isEmpty || isPreparingExport)
             
-            // Only show import options to coaches
             if canImportData {
                 Button(action: {
                     handleTemplateDownload()
@@ -1609,7 +1505,6 @@ struct ProfileSettingsView: View {
                 .disabled(isPreparingTemplate)
                 
                 Button(action: {
-                    // Add small delay to prevent sheet conflicts
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                         showingImportOptions = true
                     }
@@ -1621,19 +1516,11 @@ struct ProfileSettingsView: View {
                     }
                 }
             }
-        } header: {
-            Text("Data Management")
-        } footer: {
-            if canImportData {
-                Text("If you're unable to edit certain fields or don't see expected data, try restarting the app.  Data sync may take a moment to complete")
-            } else {
-                Text("Import functionality is only available to team coaches.")
-            }
         }
     }
     
     private var aboutSection: some View {
-        Section {
+        Section(header: Text("About"), footer: Text("Need help? Contact our support team at CoachCaddie@metric-mind.com")) {
             Button(action: {
                 if let emailURL = URL(string: "mailto:CoachCaddie@metric-mind.com?subject=Coach Caddie Support Request") {
                     if UIApplication.shared.canOpenURL(emailURL) {
@@ -1671,17 +1558,11 @@ struct ProfileSettingsView: View {
                         .foregroundColor(.secondary)
                 }
             }
-        } header: {
-            Text("About")
-        } footer: {
-            Text("Need help? Contact our support team at CoachCaddie@metric-mind.com")
-                .font(.caption)
-                .foregroundColor(.secondary)
         }
     }
     
     private var accountSection: some View {
-        Section {
+        Section(header: Text("Account"), footer: Text("Deleting your account will permanently remove all your data including teams, players, games, and subscription information. This action cannot be undone.")) {
             HStack {
                 Image(systemName: "calendar.circle")
                     .foregroundColor(.gray)
@@ -1690,6 +1571,18 @@ struct ProfileSettingsView: View {
                     .foregroundColor(.secondary)
             }
             .padding(.vertical, 4)
+            
+            Button(action: {
+                showingAccountDeleteConfirmation = true
+            }) {
+                HStack {
+                    Image(systemName: "trash")
+                        .foregroundColor(.red)
+                    Text("Delete Account")
+                        .foregroundColor(.red)
+                }
+            }
+            .disabled(isDeleting)
             
             Button(action: {
                 authManager.signOutUser()
@@ -1701,15 +1594,10 @@ struct ProfileSettingsView: View {
                         .foregroundColor(.red)
                 }
             }
-        } header: {
-            Text("Account")
         }
     }
     
-    // MARK: - Helper Properties
-    
     private var canImportData: Bool {
-        // Only coaches with teams can import data, or coaches with the ability to create teams
         return teamManager.canCreateTeams() || hasCoachRoleInAnyTeam
     }
     
@@ -1720,22 +1608,43 @@ struct ProfileSettingsView: View {
         }
     }
     
-    
-    // MARK: - Helper Methods
+    private func handleAccountDeletion(confirmationText: String) {
+        guard confirmationText.lowercased() == "delete" else {
+            accountDeletionError = "Please type 'DELETE' to confirm"
+            return
+        }
+        
+        isDeleting = true
+        accountDeletionError = nil
+        
+        Task {
+            do {
+                try await authManager.hardDeleteAccount()
+                
+                await MainActor.run {
+                    teamManager.teams.removeAll()
+                    isDeleting = false
+                    showingAccountDeleteConfirmation = false
+                }
+            } catch {
+                await MainActor.run {
+                    isDeleting = false
+                    accountDeletionError = error.localizedDescription
+                }
+            }
+        }
+    }
     
     private func handleExportAction() {
         isPreparingExport = true
         
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             if teamManager.teams.count == 1 {
-                // If only one team, export it directly
                 exportSelectedTeam(teamManager.teams.first!)
             } else if teamManager.teams.count > 1 {
-                // If multiple teams, show picker
                 isPreparingExport = false
                 showingTeamExportPicker = true
             } else {
-                // No teams to export
                 isPreparingExport = false
             }
         }
@@ -1766,15 +1675,10 @@ struct ProfileSettingsView: View {
     }
     
     private func exportSelectedTeam(_ team: Team) {
-        // Your existing export logic stays the same...
         DispatchQueue.main.async {
-            // Create CSV export for selected team
             var csvContent = "Team Name,Player Name,Jersey Number,Positions,Age,Date of Birth,Parent Name,Parent Email,Parent Phone,Second Parent Name,Second Parent Email,Second Parent Phone,Emergency Contact,Emergency Phone,Medical Notes,Coach Notes\n"
             
             for player in team.players {
-
-                
-                // Clean up text fields to handle commas and quotes
                 let cleanTeamName = self.cleanCSVField(team.name)
                 let cleanPlayerName = self.cleanCSVField(player.name)
                 let cleanParentName = self.cleanCSVField(player.parentInfo.parentName)
@@ -1791,36 +1695,28 @@ struct ProfileSettingsView: View {
                 csvContent += "\(cleanTeamName),\(cleanPlayerName),\(player.jerseyNumber),\(cleanParentName),\(cleanParentEmail),\(cleanParentPhone),\(cleanSecondParentName),\(cleanSecondParentEmail),\(cleanSecondParentPhone),\(cleanEmergencyContact),\(cleanEmergencyPhone),\(cleanMedicalNotes),\(cleanCoachNotes)\n"
             }
             
-            // Create data with filename for sharing
             let fileName = "\(team.name.replacingOccurrences(of: " ", with: "_"))_export.csv"
             guard let csvData = csvContent.data(using: .utf8) else {
-                print("Failed to create CSV data")
                 self.isPreparingExport = false
                 return
             }
             
-            // Create a temporary item for sharing with a suggested filename
             let tempItem = CSVShareItem(data: csvData, filename: fileName)
-            
-            // Ensure share items are properly set before showing sheet
             self.shareItems = [tempItem]
             
-            // Longer delay to ensure proper state management
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 self.isPreparingExport = false
                 
-                // Double check that share items are still valid
                 if !self.shareItems.isEmpty {
                     self.showingShareSheet = true
                 } else {
-                    print("❌ Share items were cleared before presentation")
+                    print("⚠️ Share items were cleared before presentation")
                 }
             }
         }
     }
     
     private func downloadTemplate() {
-        // Your existing template logic stays the same...
         DispatchQueue.main.async {
             let csvTemplate = """
 Team Name,Player Name,Jersey Number,Positions,Age,Date of Birth,Parent Name,Parent Email,Parent Phone,Second Parent Name,Second Parent Email,Second Parent Phone,Emergency Contact,Emergency Phone,Medical Notes,Coach Notes
@@ -1838,29 +1734,22 @@ INSTRUCTIONS:
 7. Delete these instruction rows before importing
 """
             
-            // Create data with filename for sharing
             let fileName = "team_import_template.csv"
             guard let csvData = csvTemplate.data(using: .utf8) else {
-                print("Failed to create template data")
                 self.isPreparingTemplate = false
                 return
             }
             
-            // Create a temporary item for sharing with a suggested filename
             let tempItem = CSVShareItem(data: csvData, filename: fileName)
-            
-            // Ensure share items are properly set before showing sheet
             self.shareItems = [tempItem]
             
-            // Longer delay to ensure proper state management
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 self.isPreparingTemplate = false
                 
-                // Double check that share items are still valid
                 if !self.shareItems.isEmpty {
                     self.showingShareSheet = true
                 } else {
-                    print("❌ Template share items were cleared before presentation")
+                    print("⚠️ Template share items were cleared before presentation")
                 }
             }
         }
@@ -1869,9 +1758,6 @@ INSTRUCTIONS:
     private func handleCSVImport(_ result: Result<URL, Error>) {
         switch result {
         case .success(let url):
-            print("📁 Selected file: \(url.lastPathComponent)")
-            
-            // Start accessing security-scoped resource
             guard url.startAccessingSecurityScopedResource() else {
                 importResult = ImportResult(
                     success: false,
@@ -1884,20 +1770,16 @@ INSTRUCTIONS:
             }
             
             defer {
-                // Always stop accessing the resource when done
                 url.stopAccessingSecurityScopedResource()
             }
             
             do {
                 let csvContent = try String(contentsOf: url, encoding: .utf8)
-                print("📄 Successfully read file content (\(csvContent.count) characters)")
-                
                 let result = processCSVImport(csvContent)
                 importResult = result
                 showingImportResult = true
                 
             } catch {
-                print("❌ Failed to read CSV file: \(error)")
                 importResult = ImportResult(
                     success: false,
                     teamsImported: 0,
@@ -1908,7 +1790,6 @@ INSTRUCTIONS:
             }
             
         case .failure(let error):
-            print("❌ File picker failed: \(error)")
             importResult = ImportResult(
                 success: false,
                 teamsImported: 0,
@@ -1920,7 +1801,6 @@ INSTRUCTIONS:
     }
     
     private func processCSVImport(_ csvContent: String) -> ImportResult {
-        // Your existing CSV processing logic...
         let lines = csvContent.components(separatedBy: .newlines)
         guard lines.count > 1 else {
             return ImportResult(
@@ -1931,7 +1811,6 @@ INSTRUCTIONS:
             )
         }
         
-        // Skip header row and instruction rows
         let dataLines = lines.dropFirst().filter { line in
             !line.isEmpty &&
             !line.hasPrefix("INSTRUCTIONS:") &&
@@ -1948,7 +1827,6 @@ INSTRUCTIONS:
         var teamsImported = 0
         var errors: [String] = []
         
-        // Get target team for "Players Only" mode
         var targetTeam: Team?
         if importMode == .playersOnly, let teamId = targetTeamId {
             if let teamIndex = teamManager.teams.firstIndex(where: { $0.id == teamId }) {
@@ -1956,7 +1834,6 @@ INSTRUCTIONS:
             }
         }
         
-        // Process each line individually and update teams immediately
         for line in dataLines {
             let fields = parseCSVLine(line)
             guard fields.count >= 3 else {
@@ -1975,7 +1852,6 @@ INSTRUCTIONS:
                 continue
             }
             
-            // Determine which team to use
             let teamName: String
             let useTargetTeam: Bool
             
@@ -1987,11 +1863,9 @@ INSTRUCTIONS:
                 useTargetTeam = false
             }
             
-            // Parse positions
             let positionsString = fields.count > 3 ? fields[3] : ""
             let positions = positionsString.isEmpty ? ["MID"] : positionsString.components(separatedBy: "|").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             
-            // Parse date of birth (optional)
             var dateOfBirth: Date?
             if fields.count > 5 && !fields[5].isEmpty {
                 let dateFormatter = DateFormatter()
@@ -1999,7 +1873,6 @@ INSTRUCTIONS:
                 dateOfBirth = dateFormatter.date(from: fields[5])
             }
             
-            // Create player
             var player = Player(
                 name: playerName,
                 jerseyNumber: jerseyNumber,
@@ -2021,12 +1894,9 @@ INSTRUCTIONS:
             player.medicalNotes = fields.count > 14 && !fields[14].isEmpty ? fields[14] : nil
             player.notes = fields.count > 15 && !fields[15].isEmpty ? fields[15] : nil
             
-            // Find or create team and add player immediately
             if let existingTeamIndex = teamManager.teams.firstIndex(where: { $0.name == teamName }) {
-                // Found existing team
                 let existingTeam = teamManager.teams[existingTeamIndex]
                 
-                // Check for duplicate jersey numbers ONLY in this specific team
                 let duplicateInThisTeam = existingTeam.players.contains { $0.jerseyNumber == jerseyNumber }
                 if duplicateInThisTeam {
                     errors.append("Duplicate jersey number \(jerseyNumber) in team \(teamName)")
@@ -2034,13 +1904,10 @@ INSTRUCTIONS:
                 }
                 
                 teamManager.teams[existingTeamIndex].players.append(player)
-                
-                // Force update the team
                 teamManager.updateTeam(teamManager.teams[existingTeamIndex])
                 playersImported += 1
                 
             } else if !useTargetTeam {
-                // Create new team (only in Complete Teams mode)
                 var newTeam = Team(
                     name: teamName,
                     format: .elevenVEleven,
@@ -2051,7 +1918,6 @@ INSTRUCTIONS:
                     season: nil
                 )
                 
-                // Set coach UID for new teams
                 if let currentUser = Auth.auth().currentUser {
                     newTeam.coachUID = currentUser.uid
                 }
@@ -2062,12 +1928,10 @@ INSTRUCTIONS:
                 teamsImported += 1
                 playersImported += 1
             } else {
-                // This shouldn't happen in Players Only mode
                 errors.append("Target team not found")
             }
         }
         
-        // Create result message
         var message = "Successfully imported \(playersImported) player(s)"
         if teamsImported > 0 {
             message += " and created \(teamsImported) new team(s)"
@@ -2098,15 +1962,12 @@ INSTRUCTIONS:
             
             if char == "\"" {
                 if insideQuotes && i < line.index(before: line.endIndex) && line[line.index(after: i)] == "\"" {
-                    // Escaped quote
                     currentField += "\""
                     i = line.index(after: i)
                 } else {
-                    // Toggle quote state
                     insideQuotes.toggle()
                 }
             } else if char == "," && !insideQuotes {
-                // Field separator
                 fields.append(currentField)
                 currentField = ""
             } else {
@@ -2116,9 +1977,7 @@ INSTRUCTIONS:
             i = line.index(after: i)
         }
         
-        // Add the last field
         fields.append(currentField)
-        
         return fields
     }
 }
@@ -2134,7 +1993,7 @@ struct AboutView: View {
                 VStack(spacing: 24) {
                     appIconSection
                     descriptionSection
-                    comingSoonSection // NEW SECTION
+                    comingSoonSection
                     footerSection
                 }
                 .padding()
@@ -2200,10 +2059,8 @@ struct AboutView: View {
         }
     }
     
-    // NEW COMING SOON SECTION
     private var comingSoonSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            // Header
             HStack {
                 Image(systemName: "sparkles.rectangle.stack")
                     .font(.title2)
@@ -2214,9 +2071,7 @@ struct AboutView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             
-            // Features
             VStack(alignment: .leading, spacing: 14) {
-                // AI Drill Coach
                 ComingSoonFeatureRow(
                     icon: "sparkles",
                     iconColor: .purple,
@@ -2224,7 +2079,6 @@ struct AboutView: View {
                     description: "Get personalized drill variations and coaching tips powered by AI. Ask questions about any drill and receive instant suggestions to adapt for your team's skill level."
                 )
                 
-                // Team Messaging
                 ComingSoonFeatureRow(
                     icon: "message.badge",
                     iconColor: .green,
@@ -2232,7 +2086,6 @@ struct AboutView: View {
                     description: "Built-in chat for coaches, players, and parents. Send announcements, coordinate schedules, and keep everyone connected."
                 )
                 
-                // Season Planner
                 ComingSoonFeatureRow(
                     icon: "calendar.badge.clock",
                     iconColor: .orange,
@@ -2240,7 +2093,6 @@ struct AboutView: View {
                     description: "Toggle between seasons for long term tracking and seasonal comparison"
                 )
                 
-                // Player Development
                 ComingSoonFeatureRow(
                     icon: "chart.line.uptrend.xyaxis",
                     iconColor: .blue,
@@ -2248,7 +2100,6 @@ struct AboutView: View {
                     description: "Track individual player skill development with metrics and progress reports for parents."
                 )
                 
-                // Tournament Manager
                 ComingSoonFeatureRow(
                     icon: "trophy.fill",
                     iconColor: .yellow,
@@ -2256,7 +2107,6 @@ struct AboutView: View {
                     description: "Organize and track tournament brackets, schedules, and results all in one place."
                 )
                 
-                // Weather Integration
                 ComingSoonFeatureRow(
                     icon: "cloud.sun.fill",
                     iconColor: .cyan,
@@ -2264,7 +2114,6 @@ struct AboutView: View {
                     description: "Automatic weather monitoring for practice and game days with push notifications for changes."
                 )
                 
-                // Drill Sharing
                 ComingSoonFeatureRow(
                     icon: "square.and.arrow.up.on.square",
                     iconColor: .indigo,
@@ -2273,7 +2122,6 @@ struct AboutView: View {
                 )
             }
             
-            // Footer note
             Text("We're constantly working to make Coach Caddie better. Have a feature request? Send us an email at CoachCaddie@metric-mind.com")
                 .font(.caption)
                 .foregroundColor(.secondary)
@@ -2329,6 +2177,106 @@ struct ComingSoonFeatureRow: View {
     }
 }
 
+// MARK: - Account Deletion Confirmation View
+struct AccountDeletionConfirmationView: View {
+    @Binding var isDeleting: Bool
+    let onConfirm: (String) -> Void
+    let onCancel: () -> Void
+    let errorMessage: String?
+    
+    @State private var confirmationText = ""
+    @Environment(\.presentationMode) var presentationMode
+    
+    private var canDelete: Bool {
+        return confirmationText.lowercased() == "delete"
+    }
+    
+    var body: some View {
+        NavigationView {
+            Form {
+                Section(header: Text("Warning")) {
+                    VStack(alignment: .leading, spacing: 16) {
+                        HStack {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundColor(.red)
+                                .font(.title2)
+                            Text("Permanent Account Deletion")
+                                .font(.headline)
+                                .foregroundColor(.red)
+                        }
+                        
+                        Text("This action will permanently delete your account and ALL associated data including:")
+                            .font(.subheadline)
+                        
+                        VStack(alignment: .leading, spacing: 4) {
+                            Label("All teams you created", systemImage: "checkmark")
+                            Label("All player information", systemImage: "checkmark")
+                            Label("All game and practice records", systemImage: "checkmark")
+                            Label("All statistics and performance data", systemImage: "checkmark")
+                            Label("Your subscription and billing information", systemImage: "checkmark")
+                        }
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        
+                        Text("This action cannot be undone and your data cannot be recovered.")
+                            .font(.subheadline)
+                            .foregroundColor(.red)
+                            .fontWeight(.semibold)
+                    }
+                }
+                
+                Section(header: Text("Confirmation Required"), footer: Text("Type 'DELETE' exactly as shown to confirm account deletion.")) {
+                    TextField("Type 'DELETE' to confirm", text: $confirmationText)
+                        .autocapitalization(.none)
+                        .disableAutocorrection(true)
+                        .disabled(isDeleting)
+                }
+                
+                if let error = errorMessage {
+                    Section(header: Text("Error")) {
+                        Text(error)
+                            .foregroundColor(.red)
+                            .font(.caption)
+                    }
+                }
+                
+                Section {
+                    Button(action: {
+                        onConfirm(confirmationText)
+                    }) {
+                        HStack {
+                            if isDeleting {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                                Text("Deleting Account...")
+                            } else {
+                                Image(systemName: "trash")
+                                Text("Delete My Account Permanently")
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .foregroundColor(.white)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .disabled(!canDelete || isDeleting)
+                    .tint(.red)
+                }
+            }
+            .navigationTitle("Delete Account")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        onCancel()
+                    }
+                    .disabled(isDeleting)
+                }
+            }
+        }
+    }
+}
+
 // MARK: - Share Sheet
 struct ShareSheet: UIViewControllerRepresentable {
     let activityItems: [Any]
@@ -2337,7 +2285,6 @@ struct ShareSheet: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> UIActivityViewController {
         let controller = UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
         
-        // Set completion handler to properly dismiss
         controller.completionWithItemsHandler = { (activityType, completed, returnedItems, error) in
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 self.presentationMode.wrappedValue.dismiss()

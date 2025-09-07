@@ -1384,7 +1384,7 @@ enum GameAuditEventType: String, Codable, CaseIterable {
 }
 
 struct PlannedPositionChange: Identifiable, Codable, Equatable {
-    let id = UUID()
+    var id = UUID()  // Changed from 'let' to 'var' to allow setting
     var playerId: UUID
     var fromPosition: Position
     var toPosition: Position
@@ -1392,6 +1392,15 @@ struct PlannedPositionChange: Identifiable, Codable, Equatable {
     var isExecuted: Bool = false
     var actualMinute: Int?
     var subGroupIndex: Int? = nil
+    
+    // Add custom initializer that accepts ID
+    init(id: UUID = UUID(), playerId: UUID, fromPosition: Position, toPosition: Position, plannedMinute: Int) {
+        self.id = id
+        self.playerId = playerId
+        self.fromPosition = fromPosition
+        self.toPosition = toPosition
+        self.plannedMinute = plannedMinute
+    }
 }
 
 

@@ -533,7 +533,7 @@ struct LineupView: View {
         
         if game.startingLineup == nil || game.startingLineup?.isEmpty == true {
             game.startingLineup = lineupPositions  // Preserve original starting lineup
-            print("ðŸ’¾ Saved starting lineup with \(lineupPositions.count) positions")
+            print("Ã°Å¸â€™Â¾ Saved starting lineup with \(lineupPositions.count) positions")
         }
 
         // CRITICAL: Initialize game data structure for subcollections
@@ -582,7 +582,7 @@ struct LineupView: View {
         checkAndExecutePlannedSubstitutions()
         startGameTimer()
         
-        print("â° Initialized time tracking for \(game.playerStats.count) starting players")
+        print("Ã¢ÂÂ° Initialized time tracking for \(game.playerStats.count) starting players")
     }
     
     private func exitGameMode() {
@@ -613,9 +613,9 @@ struct LineupView: View {
     
     private func endGame() {
         let gameId = selectedGame?.id.uuidString ?? "nil"
-        print("ðŸ END GAME ACTION STARTED - Game ID: \(gameId)")
-        print("ðŸ Game has \(selectedGame?.playerStats.count ?? 0) player stats before processing")
-        print("ðŸ Current game isCompleted: \(selectedGame?.isCompleted ?? false)")
+        print("Ã°Å¸ÂÂ END GAME ACTION STARTED - Game ID: \(gameId)")
+        print("Ã°Å¸ÂÂ Game has \(selectedGame?.playerStats.count ?? 0) player stats before processing")
+        print("Ã°Å¸ÂÂ Current game isCompleted: \(selectedGame?.isCompleted ?? false)")
         
         // Add game end to audit log
         gameStateManager.addAuditEntry(
@@ -623,48 +623,48 @@ struct LineupView: View {
             gameTime: gameStateManager.auditLogTime,
             details: "Game ended"
         )
-        print("ðŸ“ Added game end to audit log")
+        print("Ã°Å¸â€œÂ Added game end to audit log")
         
         // Complete all the critical game saving steps
         guard let currentGame = selectedGame else {
-            print("âŒ ERROR: selectedGame is nil, cannot process game completion")
+            print("Ã¢ÂÅ’ ERROR: selectedGame is nil, cannot process game completion")
             return
         }
         
         var updatedGame = currentGame
-        print("ðŸŽ® Processing game: \(updatedGame.opponent) - \(updatedGame.id)")
+        print("Ã°Å¸Å½Â® Processing game: \(updatedGame.opponent) - \(updatedGame.id)")
         
         // 1. Save final audit log from gameStateManager
         if let activeState = gameStateManager.activeGameState {
             updatedGame.auditLog = activeState.auditLog
-            print("ðŸ“‹ Saved \(updatedGame.auditLog?.count ?? 0) audit log entries")
+            print("Ã°Å¸â€œâ€¹ Saved \(updatedGame.auditLog?.count ?? 0) audit log entries")
             
             // Save formation from active state
             updatedGame.formation = activeState.formation
-            print("ðŸ“ Saved formation: \(updatedGame.formation?.rawValue ?? "none")")
+            print("Ã°Å¸â€œÂ Saved formation: \(updatedGame.formation?.rawValue ?? "none")")
         }
         
         // 2. The playerStats and substitutions are already in updatedGame (currentGame)
         // They've been updated throughout the game via updatePlayerStats and executeAutomaticSubstitution
-        print("ðŸ“Š Game has \(updatedGame.playerStats.count) player stats")
-        print("ðŸ”„ Game has \(updatedGame.substitutions.count) substitutions")
+        print("Ã°Å¸â€œÅ  Game has \(updatedGame.playerStats.count) player stats")
+        print("Ã°Å¸â€â€ž Game has \(updatedGame.substitutions.count) substitutions")
         
         // 3. Save starting lineup (if not already saved)
         if updatedGame.startingLineup == nil || updatedGame.startingLineup?.isEmpty == true {
-            print("âš ï¸ WARNING: startingLineup missing - should have been set at game start!")
+            print("Ã¢Å¡ Ã¯Â¸Â WARNING: startingLineup missing - should have been set at game start!")
         }
         
         // 4. Save actual starting lineup used during game
         updatedGame.actualStartingLineup = lineupPositions
-        print("ðŸŽ¯ Updated actual current lineup with \(lineupPositions.count) positions")
+        print("Ã°Å¸Å½Â¯ Updated actual current lineup with \(lineupPositions.count) positions")
         
         // 5. CRITICAL: Mark game as completed
         updatedGame.isCompleted = true
-        print("âœ… Marked game as completed: \(updatedGame.isCompleted)")
+        print("Ã¢Å“â€¦ Marked game as completed: \(updatedGame.isCompleted)")
         
         // 6. Close out any remaining time entries for players still on field
         let finalMinute = gameStateManager.calculatedMinute
-        print("â±ï¸ Final game time: \(finalMinute) minutes")
+        print("Ã¢ÂÂ±Ã¯Â¸Â Final game time: \(finalMinute) minutes")
         
         var playersWithOpenTime = 0
         for index in updatedGame.playerStats.indices {
@@ -680,10 +680,10 @@ struct LineupView: View {
             }
             updatedGame.playerStats[index].minutesPlayed = totalMinutes
         }
-        print("â±ï¸ Closed time entries for \(playersWithOpenTime) players")
+        print("Ã¢ÂÂ±Ã¯Â¸Â Closed time entries for \(playersWithOpenTime) players")
         
         // 7. Reset player game stats before recalculating from audit log
-        print("ðŸ”„ Resetting player stats before recalculating from audit log")
+        print("Ã°Å¸â€â€ž Resetting player stats before recalculating from audit log")
         for index in updatedGame.playerStats.indices {
             // Keep minutes played as calculated above
             let savedMinutes = updatedGame.playerStats[index].minutesPlayed
@@ -706,7 +706,7 @@ struct LineupView: View {
         // 8. Consolidate stats from audit log to ensure accuracy
         var statsUpdated = 0
         if let auditLog = updatedGame.auditLog {
-            print("ðŸ“Š Processing \(auditLog.count) audit log entries for stats")
+            print("Ã°Å¸â€œÅ  Processing \(auditLog.count) audit log entries for stats")
             for entry in auditLog {
                 guard let playerId = entry.playerId else { continue }
                 
@@ -746,10 +746,10 @@ struct LineupView: View {
                 }
             }
         }
-        print("ðŸ“Š Updated \(statsUpdated) individual stats from audit log")
+        print("Ã°Å¸â€œÅ  Updated \(statsUpdated) individual stats from audit log")
         
         // 9. Update season stats for all players who participated
-        print("ðŸ† Updating season stats for players")
+        print("Ã°Å¸Ââ€  Updating season stats for players")
         var seasonStatsUpdated = 0
         
         // Create a mutable copy of the team
@@ -768,28 +768,28 @@ struct LineupView: View {
                 updatedTeam.players[playerIndex].seasonStats.gamesPlayed += 1
                 seasonStatsUpdated += 1
                 
-                print("ðŸ† Updated season stats for \(updatedTeam.players[playerIndex].name)")
+                print("Ã°Å¸Ââ€  Updated season stats for \(updatedTeam.players[playerIndex].name)")
             }
         }
-        print("ðŸ† Updated season stats for \(seasonStatsUpdated) players")
+        print("Ã°Å¸Ââ€  Updated season stats for \(seasonStatsUpdated) players")
         
         // 10. Update game in team games array
         if let gameIndex = updatedTeam.games.firstIndex(where: { $0.id == updatedGame.id }) {
             updatedTeam.games[gameIndex] = updatedGame
-            print("ðŸŽ® Updated game in team games array")
+            print("Ã°Å¸Å½Â® Updated game in team games array")
         } else {
-            print("âŒ Could not find game in team games array")
+            print("Ã¢ÂÅ’ Could not find game in team games array")
         }
         
-        print("ðŸŽ® Team has \(updatedTeam.games.count) games")
-        print("ðŸŽ® Final game state - isCompleted: \(updatedGame.isCompleted), playerStats: \(updatedGame.playerStats.count), auditLog: \(updatedGame.auditLog?.count ?? 0), substitutions: \(updatedGame.substitutions.count)")
+        print("Ã°Å¸Å½Â® Team has \(updatedTeam.games.count) games")
+        print("Ã°Å¸Å½Â® Final game state - isCompleted: \(updatedGame.isCompleted), playerStats: \(updatedGame.playerStats.count), auditLog: \(updatedGame.auditLog?.count ?? 0), substitutions: \(updatedGame.substitutions.count)")
         
         // 11. Update TeamManager's teams array FIRST
         if let teamIndex = teamManager.teams.firstIndex(where: { $0.id == updatedTeam.id }) {
             teamManager.teams[teamIndex] = updatedTeam
-            print("ðŸ’¾ Updated TeamManager's teams array at index \(teamIndex)")
+            print("Ã°Å¸â€™Â¾ Updated TeamManager's teams array at index \(teamIndex)")
         } else {
-            print("âŒ Could not find team in TeamManager's teams array!")
+            print("Ã¢ÂÅ’ Could not find team in TeamManager's teams array!")
         }
 
         // 12. Update local references
@@ -798,44 +798,44 @@ struct LineupView: View {
 
         // 13. DEBUG: Verify the updated game is in the team
         if let completedGame = updatedTeam.games.first(where: { $0.id == updatedGame.id }) {
-            print("ðŸ” DEBUG: Found updated game in team - isCompleted: \(completedGame.isCompleted)")
-            print("ðŸ” DEBUG: Game playerStats count: \(completedGame.playerStats.count)")
-            print("ðŸ” DEBUG: Game auditLog count: \(completedGame.auditLog?.count ?? 0)")
-            print("ðŸ” DEBUG: Game substitutions count: \(completedGame.substitutions.count)")
-            print("ðŸ” DEBUG: Game actualStartingLineup count: \(completedGame.actualStartingLineup?.count ?? 0)")
+            print("Ã°Å¸â€Â DEBUG: Found updated game in team - isCompleted: \(completedGame.isCompleted)")
+            print("Ã°Å¸â€Â DEBUG: Game playerStats count: \(completedGame.playerStats.count)")
+            print("Ã°Å¸â€Â DEBUG: Game auditLog count: \(completedGame.auditLog?.count ?? 0)")
+            print("Ã°Å¸â€Â DEBUG: Game substitutions count: \(completedGame.substitutions.count)")
+            print("Ã°Å¸â€Â DEBUG: Game actualStartingLineup count: \(completedGame.actualStartingLineup?.count ?? 0)")
             
             if completedGame.isCompleted && !completedGame.playerStats.isEmpty {
-                print("ðŸ” DEBUG: âœ… GAME DATA LOOKS GOOD - should save to Firebase")
+                print("Ã°Å¸â€Â DEBUG: Ã¢Å“â€¦ GAME DATA LOOKS GOOD - should save to Firebase")
             } else {
-                print("ðŸ” DEBUG: âŒ GAME DATA IS MISSING")
+                print("Ã°Å¸â€Â DEBUG: Ã¢ÂÅ’ GAME DATA IS MISSING")
             }
         } else {
-            print("ðŸ” DEBUG: âŒ Could not find updated game in team!")
+            print("Ã°Å¸â€Â DEBUG: Ã¢ÂÅ’ Could not find updated game in team!")
         }
 
         // 14. CRITICAL: Prevent Firebase race conditions
-        print("ðŸ”‡ Preventing Firebase race conditions during game completion")
-        print("ðŸš« Requesting TeamManager to cancel pending Firebase updates")
+        print("Ã°Å¸â€â€¡ Preventing Firebase race conditions during game completion")
+        print("Ã°Å¸Å¡Â« Requesting TeamManager to cancel pending Firebase updates")
         
         // 15. Force immediate save with listener protection
-        print("ðŸ’¾ About to force immediate save with listener protection")
+        print("Ã°Å¸â€™Â¾ About to force immediate save with listener protection")
         Task {
             await teamManager.updateTeamImmediatelyForActiveGame(updatedTeam, activeGameId: updatedGame.id)
         }
-        print("ðŸ’¾ Immediate save completed")
+        print("Ã°Å¸â€™Â¾ Immediate save completed")
         
         // 16. Wait a moment then allow normal operations to resume
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-            print("ðŸ”Š Resuming normal Firebase operations after game completion")
+            print("Ã°Å¸â€Å  Resuming normal Firebase operations after game completion")
         }
         
-        print("âœ… Game completed and all data saved successfully")
+        print("Ã¢Å“â€¦ Game completed and all data saved successfully")
         
         // 17. Clear game state and UI
-        print("ðŸ§¹ Clearing game state and UI")
+        print("Ã°Å¸Â§Â¹ Clearing game state and UI")
         gameStateManager.endGameSession()
         gameStateManager.clearPersistedGameState()
-        print("ðŸ—‘ï¸ Cleared persisted game state")
+        print("Ã°Å¸â€”â€˜Ã¯Â¸Â Cleared persisted game state")
         
         // Clear lineup positions
         for index in lineupPositions.indices {
@@ -857,7 +857,7 @@ struct LineupView: View {
         let impactFeedback = UIImpactFeedbackGenerator(style: .heavy)
         impactFeedback.impactOccurred()
         
-        print("ðŸ END GAME ACTION COMPLETED")
+        print("Ã°Å¸ÂÂ END GAME ACTION COMPLETED")
     }
     // MARK: - Helper Methods
     private func enterActiveGameMode() {
@@ -920,7 +920,7 @@ struct LineupView: View {
         let impactFeedback = UIImpactFeedbackGenerator(style: .heavy)
         impactFeedback.impactOccurred()
         
-        print("ðŸ§¹ Cleared all game data including time tracking")
+        print("Ã°Å¸Â§Â¹ Cleared all game data including time tracking")
     }
     
     private func updateGameInTeam(_ game: Game) {
@@ -983,7 +983,7 @@ struct LineupView: View {
     private func initializeStartingLineupTime() {
         guard var game = selectedGame else { return }
         
-        print("â±ï¸ Initializing starting lineup time tracking...")
+        print("Ã¢ÂÂ±Ã¯Â¸Â Initializing starting lineup time tracking...")
         
         // Clear any existing time entries to prevent duplicates
         game.playerStats.removeAll()
@@ -996,7 +996,7 @@ struct LineupView: View {
                 playerStats.timeEntries.append(TimeEntry(enteredAt: 0, exitedAt: nil))
                 game.playerStats.append(playerStats)
                 
-                print("âœ… Initialized time tracking for starting player \(getPlayerName(playerId)) from minute 0")
+                print("Ã¢Å“â€¦ Initialized time tracking for starting player \(getPlayerName(playerId)) from minute 0")
             }
         }
         
@@ -1007,7 +1007,7 @@ struct LineupView: View {
         
         // FIXED: Use active game context for time initialization
         teamManager.updateTeam(team, activeGameId: game.id)
-        print("ðŸŽ¯ Completed starting lineup time initialization for \(game.playerStats.count) players")
+        print("Ã°Å¸Å½Â¯ Completed starting lineup time initialization for \(game.playerStats.count) players")
     }
     
     private func clearLineup() {
@@ -1180,7 +1180,7 @@ struct LineupView: View {
             gameStateManager.addAuditEntry(
                 eventType: .substitution,
                 gameTime: gameStateManager.auditLogTime,
-                details: "AUTO: \(getPlayerName(plannedSub.playerOut)) (\(plannedSub.targetPosition.abbreviation)) ↔ \(getPlayerName(plannedSub.playerIn)) (\(plannedSub.reason.rawValue))"
+                details: "AUTO: \(getPlayerName(plannedSub.playerOut)) (\(plannedSub.targetPosition.abbreviation)) â†” \(getPlayerName(plannedSub.playerIn)) (\(plannedSub.reason.rawValue))"
             )
             
             // Mark as executed
@@ -1204,7 +1204,7 @@ struct LineupView: View {
             let impactFeedback = UIImpactFeedbackGenerator(style: .heavy)
             impactFeedback.impactOccurred()
             
-            print("AUTO SUB: \(getPlayerName(plannedSub.playerOut)) ↔ \(getPlayerName(plannedSub.playerIn)) at \(currentMinute)'")
+            print("AUTO SUB: \(getPlayerName(plannedSub.playerOut)) â†” \(getPlayerName(plannedSub.playerIn)) at \(currentMinute)'")
         }
     }
     
@@ -1215,13 +1215,13 @@ struct LineupView: View {
         
         // Check if this position change was already executed as part of a pair
         if plannedPosChange.isExecuted {
-            print("⏭️ SKIP: Position change already executed for \(getPlayerName(plannedPosChange.playerId))")
+            print("â­ï¸ SKIP: Position change already executed for \(getPlayerName(plannedPosChange.playerId))")
             return
         }
         
         // Find the player who should be swapped (the one we're moving)
         guard let currentPlayerIndex = lineupPositions.firstIndex(where: { $0.playerId == plannedPosChange.playerId }) else {
-            print("❌ ERROR: Could not find player \(getPlayerName(plannedPosChange.playerId)) in current lineup for position swap")
+            print("âŒ ERROR: Could not find player \(getPlayerName(plannedPosChange.playerId)) in current lineup for position swap")
             return
         }
         
@@ -1232,12 +1232,12 @@ struct LineupView: View {
         guard let targetPlayerIndex = lineupPositions.firstIndex(where: { position in
             position.position == plannedPosChange.toPosition && position.playerId != plannedPosChange.playerId
         }) else {
-            print("❌ ERROR: Could not find a player currently playing \(plannedPosChange.toPosition.abbreviation) to swap with")
+            print("âŒ ERROR: Could not find a player currently playing \(plannedPosChange.toPosition.abbreviation) to swap with")
             return
         }
         
         guard let targetPlayerId = lineupPositions[targetPlayerIndex].playerId else {
-            print("❌ ERROR: Target position has no player assigned")
+            print("âŒ ERROR: Target position has no player assigned")
             return
         }
         
@@ -1254,7 +1254,7 @@ struct LineupView: View {
         gameStateManager.addAuditEntry(
             eventType: .positionChange,
             gameTime: gameStateManager.auditLogTime,
-            details: "AUTO SWAP: \(getPlayerName(plannedPosChange.playerId)) ↔ \(targetPlayerName) (\(actualCurrentPosition.abbreviation) ↔ \(plannedPosChange.toPosition.abbreviation))"
+            details: "AUTO SWAP: \(getPlayerName(plannedPosChange.playerId)) â†” \(targetPlayerName) (\(actualCurrentPosition.abbreviation) â†” \(plannedPosChange.toPosition.abbreviation))"
         )
         
         // Mark BOTH position changes as executed (since this is a paired swap)
@@ -1272,7 +1272,7 @@ struct LineupView: View {
         }) {
             game.plannedPositionChanges[pairedChangeIndex].isExecuted = true
             game.plannedPositionChanges[pairedChangeIndex].actualMinute = currentMinute
-            print("✅ PAIRED: Also marked paired position change as executed for \(targetPlayerName)")
+            print("âœ… PAIRED: Also marked paired position change as executed for \(targetPlayerName)")
         }
         
         // Update game state manager
@@ -1286,7 +1286,7 @@ struct LineupView: View {
         
         teamManager.updateTeam(team, activeGameId: game.id)
         
-        print("🔄 POSITION SWAP: \(getPlayerName(plannedPosChange.playerId)) ↔ \(targetPlayerName) at \(currentMinute)'")
+        print("ðŸ”„ POSITION SWAP: \(getPlayerName(plannedPosChange.playerId)) â†” \(targetPlayerName) at \(currentMinute)'")
     }
     
     private func executeAutomaticPositionChange(_ plannedPosChange: PlannedPositionChange) {
@@ -1303,7 +1303,7 @@ struct LineupView: View {
             gameStateManager.addAuditEntry(
                 eventType: .positionChange,
                 gameTime: gameStateManager.auditLogTime,
-                details: "AUTO: \(getPlayerName(plannedPosChange.playerId)) \(plannedPosChange.fromPosition.abbreviation) → \(plannedPosChange.toPosition.abbreviation)"
+                details: "AUTO: \(getPlayerName(plannedPosChange.playerId)) \(plannedPosChange.fromPosition.abbreviation) â†’ \(plannedPosChange.toPosition.abbreviation)"
             )
             
             // Mark as executed
@@ -1323,7 +1323,7 @@ struct LineupView: View {
             
             teamManager.updateTeam(team, activeGameId: game.id)
             
-            print("ðŸ”„ POSITION CHANGE: \(getPlayerName(plannedPosChange.playerId)) \(plannedPosChange.fromPosition.abbreviation) â†’ \(plannedPosChange.toPosition.abbreviation) at \(currentMinute)'")
+            print("Ã°Å¸â€â€ž POSITION CHANGE: \(getPlayerName(plannedPosChange.playerId)) \(plannedPosChange.fromPosition.abbreviation) Ã¢â€ â€™ \(plannedPosChange.toPosition.abbreviation) at \(currentMinute)'")
         }
     }
     
@@ -1680,7 +1680,7 @@ struct PositionChangeView: View {
         }
         
         let relevantSubs = game.plannedSubstitutions
-            .filter { $0.plannedMinute < minute }
+            .filter { $0.plannedMinute <= minute }
             .sorted { $0.plannedMinute < $1.plannedMinute }
         
         for sub in relevantSubs {
@@ -1694,13 +1694,13 @@ struct PositionChangeView: View {
     }
     
     private func getCurrentPosition(for player: Player, atMinute minute: Int) -> Position? {
-        // Use <= instead of < to include position changes AT the target minute
+        // Use the same updated logic as above
         let relevantSubs = game.plannedSubstitutions
-            .filter { $0.plannedMinute <= minute }  // Changed from
+            .filter { $0.plannedMinute <= minute }
             .sorted { $0.plannedMinute < $1.plannedMinute }
         
         let relevantPositionChanges = game.plannedPositionChanges
-            .filter { $0.plannedMinute <= minute && $0.playerId == player.id }  // Changed from
+            .filter { $0.plannedMinute < minute && $0.playerId == player.id }
             .sorted { $0.plannedMinute < $1.plannedMinute }
         
         var isOnField = false
@@ -1711,28 +1711,41 @@ struct PositionChangeView: View {
             currentPosition = startingPosition.position
         }
         
-        // Process events chronologically by minute
-        let allMinutes = Set(relevantSubs.map { $0.plannedMinute } + relevantPositionChanges.map { $0.plannedMinute }).sorted()
+        // Create chronological timeline
+        var allEvents: [(minute: Int, type: String, data: Any)] = []
         
-        for eventMinute in allMinutes {
-            // Apply position changes first for this minute
-            let posChangesThisMinute = relevantPositionChanges.filter { $0.plannedMinute == eventMinute }
-            if isOnField {
-                for posChange in posChangesThisMinute {
-                    currentPosition = posChange.toPosition
-                }
+        for sub in relevantSubs {
+            if sub.playerOut == player.id {
+                allEvents.append((minute: sub.plannedMinute, type: "subOut", data: sub))
+            } else if sub.playerIn == player.id {
+                allEvents.append((minute: sub.plannedMinute, type: "subIn", data: sub))
             }
-            
-            // Then apply substitutions for this minute
-            let subsThisMinute = relevantSubs.filter { $0.plannedMinute == eventMinute }
-            for sub in subsThisMinute {
-                if sub.playerOut == player.id {
+        }
+        
+        for posChange in relevantPositionChanges {
+            allEvents.append((minute: posChange.plannedMinute, type: "positionChange", data: posChange))
+        }
+        
+        allEvents.sort { $0.minute < $1.minute }
+        
+        for event in allEvents {
+            switch event.type {
+            case "subOut":
+                if let sub = event.data as? PlannedSubstitution, sub.playerOut == player.id {
                     isOnField = false
                     currentPosition = nil
-                } else if sub.playerIn == player.id {
+                }
+            case "subIn":
+                if let sub = event.data as? PlannedSubstitution, sub.playerIn == player.id {
                     isOnField = true
                     currentPosition = sub.targetPosition
                 }
+            case "positionChange":
+                if let posChange = event.data as? PlannedPositionChange, isOnField {
+                    currentPosition = posChange.toPosition
+                }
+            default:
+                break
             }
         }
         
@@ -1843,13 +1856,13 @@ struct PositionSwapView: View {
                             .foregroundColor(.secondary)
                         
                         HStack {
-                            Text("\(playerA.name) → \(posB.abbreviation)")
+                            Text("\(playerA.name) â†’ \(posB.abbreviation)")
                                 .font(.caption)
                                 .foregroundColor(.green)
                             
                             Spacer()
                             
-                            Text("\(playerB.name) → \(posA.abbreviation)")
+                            Text("\(playerB.name) â†’ \(posA.abbreviation)")
                                 .font(.caption)
                                 .foregroundColor(.green)
                         }
@@ -1900,7 +1913,6 @@ struct PositionSwapView: View {
         game.plannedPositionChanges.append(swapB)
     }
     
-    // Include the same helper functions from before
     private func calculatePlayersOnField(atMinute minute: Int) -> [Player] {
         var currentFieldPlayers = Set<UUID>()
         for position in lineupPositions {
@@ -1924,49 +1936,70 @@ struct PositionSwapView: View {
     }
     
     private func getCurrentPosition(for player: Player, atMinute minute: Int) -> Position? {
-        // Same logic as before
+        // Get all events before this minute, sorted chronologically
         let relevantSubs = game.plannedSubstitutions
             .filter { $0.plannedMinute <= minute }
             .sorted { $0.plannedMinute < $1.plannedMinute }
         
         let relevantPositionChanges = game.plannedPositionChanges
-            .filter { $0.plannedMinute <= minute && $0.playerId == player.id }
+            .filter { $0.plannedMinute < minute && $0.playerId == player.id }
             .sorted { $0.plannedMinute < $1.plannedMinute }
         
+        // Track player's status through all events chronologically
         var isOnField = false
         var currentPosition: Position? = nil
         
+        // First check if player is in starting lineup
         if let startingPosition = lineupPositions.first(where: { $0.playerId == player.id }) {
             isOnField = true
             currentPosition = startingPosition.position
         }
         
-        let allMinutes = Set(relevantSubs.map { $0.plannedMinute } + relevantPositionChanges.map { $0.plannedMinute }).sorted()
+        // Create a combined timeline of all events
+        var allEvents: [(minute: Int, type: String, data: Any)] = []
         
-        for eventMinute in allMinutes {
-            let posChangesThisMinute = relevantPositionChanges.filter { $0.plannedMinute == eventMinute }
-            if isOnField {
-                for posChange in posChangesThisMinute {
-                    currentPosition = posChange.toPosition
-                }
+        // Add substitutions to timeline
+        for sub in relevantSubs {
+            if sub.playerOut == player.id {
+                allEvents.append((minute: sub.plannedMinute, type: "subOut", data: sub))
+            } else if sub.playerIn == player.id {
+                allEvents.append((minute: sub.plannedMinute, type: "subIn", data: sub))
             }
-            
-            let subsThisMinute = relevantSubs.filter { $0.plannedMinute == eventMinute }
-            for sub in subsThisMinute {
-                if sub.playerOut == player.id {
+        }
+        
+        // Add position changes to timeline
+        for posChange in relevantPositionChanges {
+            allEvents.append((minute: posChange.plannedMinute, type: "positionChange", data: posChange))
+        }
+        
+        // Sort all events chronologically
+        allEvents.sort { $0.minute < $1.minute }
+        
+        // Apply events in chronological order
+        for event in allEvents {
+            switch event.type {
+            case "subOut":
+                if let sub = event.data as? PlannedSubstitution, sub.playerOut == player.id {
                     isOnField = false
                     currentPosition = nil
-                } else if sub.playerIn == player.id {
+                }
+            case "subIn":
+                if let sub = event.data as? PlannedSubstitution, sub.playerIn == player.id {
                     isOnField = true
                     currentPosition = sub.targetPosition
                 }
+            case "positionChange":
+                if let posChange = event.data as? PlannedPositionChange, isOnField {
+                    currentPosition = posChange.toPosition
+                }
+            default:
+                break
             }
         }
         
         return isOnField ? currentPosition : nil
     }
 }
-
 struct IndividualSubstitutionPlanner: View {
     let team: Team
     @Binding var game: Game
@@ -2191,35 +2224,35 @@ struct IndividualSubstitutionPlanner: View {
             .padding(.horizontal)
         }
         .sheet(isPresented: $showingAddSubstitution) {
-              AddSubstitutionView(
-                  team: team,
-                  game: $game,
-                  lineupPositions: lineupPositions,
-                  onSubstitutionAdded: {
-                      onPlanningDataChanged()  // NOTIFY OF CHANGES
-                  }
-              )
-          }
-          .sheet(isPresented: $showingMultiSubstitution) {
-              MultiSubstitutionView(
-                  team: team,
-                  game: $game,
-                  lineupPositions: lineupPositions,
-                  onSubstitutionsAdded: {
-                      onPlanningDataChanged()  // NOTIFY OF CHANGES
-                  }
-              )
-          }
-          .sheet(isPresented: $showingPositionChange) {
-              PositionSwapView(
-                  team: team,
-                  game: $game,
-                  lineupPositions: lineupPositions,
-                  onPositionChangeAdded: {
-                      onPlanningDataChanged()  // NOTIFY OF CHANGES
-                  }
-              )
-          }
+            AddSubstitutionView(
+                team: team,
+                game: $game,
+                lineupPositions: lineupPositions,
+                onSubstitutionAdded: {
+                    onPlanningDataChanged()  // NOTIFY OF CHANGES
+                }
+            )
+        }
+        .sheet(isPresented: $showingMultiSubstitution) {
+            MultiSubstitutionView(
+                team: team,
+                game: $game,
+                lineupPositions: lineupPositions,
+                onSubstitutionsAdded: {
+                    onPlanningDataChanged()  // NOTIFY OF CHANGES
+                }
+            )
+        }
+        .sheet(isPresented: $showingPositionChange) {
+            PositionSwapView(
+                team: team,
+                game: $game,
+                lineupPositions: lineupPositions,
+                onPositionChangeAdded: {
+                    onPlanningDataChanged()  // NOTIFY OF CHANGES
+                }
+            )
+        }
         .sheet(isPresented: $showingShareSheet) {
             if let image = shareImage {
                 ShareSheet(activityItems: [image])
@@ -2252,35 +2285,66 @@ struct IndividualSubstitutionPlanner: View {
         )
         
         let hostingController = UIHostingController(rootView: substitutionPlanView)
-        hostingController.view.backgroundColor = UIColor.systemBackground
+        hostingController.view.backgroundColor = UIColor.systemGroupedBackground
         
         let screenWidth = UIScreen.main.bounds.width
-        let maxHeight: CGFloat = 10000
+        let maxHeight: CGFloat = 8000  // Reduced from 15000 for better reliability
+        let minHeight: CGFloat = 400
         
-        let targetSize = CGSize(width: screenWidth, height: maxHeight)
-        hostingController.view.frame = CGRect(origin: .zero, size: targetSize)
+        // Set initial frame
+        hostingController.view.frame = CGRect(origin: .zero, size: CGSize(width: screenWidth, height: maxHeight))
         
+        // Add to a temporary window for proper rendering
+        let window = UIWindow(frame: UIScreen.main.bounds)
+        window.rootViewController = UIViewController()
+        window.makeKeyAndVisible()
+        window.rootViewController?.view.addSubview(hostingController.view)
+        
+        // Force layout
         hostingController.view.setNeedsLayout()
         hostingController.view.layoutIfNeeded()
         
-        let fittingSize = hostingController.view.systemLayoutSizeFitting(
+        // Calculate actual content size
+        let contentSize = hostingController.view.systemLayoutSizeFitting(
             CGSize(width: screenWidth, height: UIView.layoutFittingCompressedSize.height),
-            withHorizontalFittingPriority: UILayoutPriority.required,
-            verticalFittingPriority: UILayoutPriority.fittingSizeLevel)
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
         
-        let finalSize = CGSize(width: screenWidth, height: max(fittingSize.height + 100, 400))
+        // Set final size with reasonable constraints
+        let finalHeight = min(max(contentSize.height + 100, minHeight), maxHeight)
+        let finalSize = CGSize(width: screenWidth, height: finalHeight)
         
         hostingController.view.frame = CGRect(origin: .zero, size: finalSize)
         hostingController.view.setNeedsLayout()
         hostingController.view.layoutIfNeeded()
         
-        let renderer = UIGraphicsImageRenderer(size: finalSize)
-        let image = renderer.image { context in
-            hostingController.view.drawHierarchy(in: CGRect(origin: .zero, size: finalSize), afterScreenUpdates: true)
+        // Give the view time to settle
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            // Use iOS 10+ compatible rendering
+            UIGraphicsBeginImageContextWithOptions(finalSize, false, UIScreen.main.scale)
+            defer { UIGraphicsEndImageContext() }
+            
+            guard let context = UIGraphicsGetCurrentContext() else {
+                print("Failed to get graphics context")
+                return
+            }
+            
+            // Render the view
+            hostingController.view.layer.render(in: context)
+            
+            if let image = UIGraphicsGetImageFromCurrentImageContext() {
+                self.shareImage = image
+                self.showingShareSheet = true
+                print("Successfully generated share image - Size: \(finalSize)")
+            } else {
+                print("Failed to generate image from context")
+            }
+            
+            // Clean up
+            hostingController.view.removeFromSuperview()
+            window.isHidden = true
         }
-        
-        shareImage = image
-        showingShareSheet = true
     }
 }
 struct CompactPositionChangeRow: View {
@@ -2880,16 +2944,16 @@ struct MultiSubstitutionView: View {
     }
     
     private func getCurrentPosition(for player: Player, atMinute minute: Int) -> Position? {
-        // Get all substitutions before this minute, sorted chronologically
+        // Get all events before this minute, sorted chronologically
         let relevantSubs = game.plannedSubstitutions
-            .filter { $0.plannedMinute < minute }  // Keep < for subs
+            .filter { $0.plannedMinute <= minute }
             .sorted { $0.plannedMinute < $1.plannedMinute }
         
         let relevantPositionChanges = game.plannedPositionChanges
-            .filter { $0.plannedMinute < minute && $0.playerId == player.id }  // Keep < for position changes
+            .filter { $0.plannedMinute < minute && $0.playerId == player.id }
             .sorted { $0.plannedMinute < $1.plannedMinute }
         
-        // Track player's status through all substitutions
+        // Track player's status through all events chronologically
         var isOnField = false
         var currentPosition: Position? = nil
         
@@ -2899,17 +2963,45 @@ struct MultiSubstitutionView: View {
             currentPosition = startingPosition.position
         }
         
-        // Apply all substitutions chronologically
+        // Create a combined timeline of all events
+        var allEvents: [(minute: Int, type: String, data: Any)] = []
+        
+        // Add substitutions to timeline
         for sub in relevantSubs {
             if sub.playerOut == player.id {
-                // This player was substituted OUT
-                isOnField = false
-                currentPosition = nil
+                allEvents.append((minute: sub.plannedMinute, type: "subOut", data: sub))
             } else if sub.playerIn == player.id {
-                // This player was substituted IN
-                isOnField = true
-                // Use the targetPosition if available, otherwise fall back to finding the position
-                currentPosition = sub.targetPosition
+                allEvents.append((minute: sub.plannedMinute, type: "subIn", data: sub))
+            }
+        }
+        
+        // Add position changes to timeline
+        for posChange in relevantPositionChanges {
+            allEvents.append((minute: posChange.plannedMinute, type: "positionChange", data: posChange))
+        }
+        
+        // Sort all events chronologically
+        allEvents.sort { $0.minute < $1.minute }
+        
+        // Apply events in chronological order
+        for event in allEvents {
+            switch event.type {
+            case "subOut":
+                if let sub = event.data as? PlannedSubstitution, sub.playerOut == player.id {
+                    isOnField = false
+                    currentPosition = nil
+                }
+            case "subIn":
+                if let sub = event.data as? PlannedSubstitution, sub.playerIn == player.id {
+                    isOnField = true
+                    currentPosition = sub.targetPosition
+                }
+            case "positionChange":
+                if let posChange = event.data as? PlannedPositionChange, isOnField {
+                    currentPosition = posChange.toPosition
+                }
+            default:
+                break
             }
         }
         
@@ -2926,7 +3018,7 @@ struct MultiSubstitutionView: View {
         }
         
         let relevantSubs = game.plannedSubstitutions
-            .filter { $0.plannedMinute < minute }
+            .filter { $0.plannedMinute <= minute }
             .sorted { $0.plannedMinute < $1.plannedMinute }
         
         for sub in relevantSubs {
@@ -3143,7 +3235,6 @@ struct PlayerSubChip: View {
     }
 }
 
-// MARK: - Enhanced Add Substitution View with Smart Player Lists
 struct AddSubstitutionView: View {
     let team: Team
     @Binding var game: Game
@@ -3306,7 +3397,7 @@ struct AddSubstitutionView: View {
         
         // Apply all substitutions that happen before the selected minute
         let relevantSubs = game.plannedSubstitutions
-            .filter { $0.plannedMinute < minute }
+            .filter { $0.plannedMinute <= minute }
             .sorted { $0.plannedMinute < $1.plannedMinute }
         
         for sub in relevantSubs {
@@ -3353,12 +3444,16 @@ struct AddSubstitutionView: View {
     }
     
     private func getCurrentPosition(for player: Player, atMinute minute: Int) -> Position? {
-        // Get all substitutions before this minute, sorted chronologically
+        // Get all events before this minute, sorted chronologically
         let relevantSubs = game.plannedSubstitutions
-            .filter { $0.plannedMinute < minute }
+            .filter { $0.plannedMinute <= minute }
             .sorted { $0.plannedMinute < $1.plannedMinute }
         
-        // Track player's status through all substitutions
+        let relevantPositionChanges = game.plannedPositionChanges
+            .filter { $0.plannedMinute < minute && $0.playerId == player.id }
+            .sorted { $0.plannedMinute < $1.plannedMinute }
+        
+        // Track player's status through all events chronologically
         var isOnField = false
         var currentPosition: Position? = nil
         
@@ -3368,152 +3463,221 @@ struct AddSubstitutionView: View {
             currentPosition = startingPosition.position
         }
         
-        // Apply all substitutions chronologically
+        // Create a combined timeline of all events
+        var allEvents: [(minute: Int, type: String, data: Any)] = []
+        
+        // Add substitutions to timeline
         for sub in relevantSubs {
             if sub.playerOut == player.id {
-                // This player was substituted OUT
-                isOnField = false
-                currentPosition = nil
+                allEvents.append((minute: sub.plannedMinute, type: "subOut", data: sub))
             } else if sub.playerIn == player.id {
-                // This player was substituted IN
-                isOnField = true
-                // Use the targetPosition if available
-                currentPosition = sub.targetPosition
+                allEvents.append((minute: sub.plannedMinute, type: "subIn", data: sub))
+            }
+        }
+        
+        // Add position changes to timeline
+        for posChange in relevantPositionChanges {
+            allEvents.append((minute: posChange.plannedMinute, type: "positionChange", data: posChange))
+        }
+        
+        // Sort all events chronologically
+        allEvents.sort { $0.minute < $1.minute }
+        
+        // Apply events in chronological order
+        for event in allEvents {
+            switch event.type {
+            case "subOut":
+                if let sub = event.data as? PlannedSubstitution, sub.playerOut == player.id {
+                    isOnField = false
+                    currentPosition = nil
+                }
+            case "subIn":
+                if let sub = event.data as? PlannedSubstitution, sub.playerIn == player.id {
+                    isOnField = true
+                    currentPosition = sub.targetPosition
+                }
+            case "positionChange":
+                if let posChange = event.data as? PlannedPositionChange, isOnField {
+                    currentPosition = posChange.toPosition
+                }
+            default:
+                break
             }
         }
         
         return isOnField ? currentPosition : nil
     }
 }
-// MARK: - SubstitutionPlanShareView
+// MARK: - Simplified SubstitutionPlanShareView (FIXED for large content)
 struct SubstitutionPlanShareView: View {
     let game: Game
     let team: Team
     let lineupPositions: [LineupPosition]
     let groupedSubstitutions: [(groupIndex: Int, groupName: String, substitutions: [PlannedSubstitution])]
     
+    // Create combined timeline of events
+    private func createCombinedTimeline() -> [TimelineEvent] {
+        var events: [Int: TimelineEvent] = [:]
+        
+        // Add substitutions
+        for sub in game.plannedSubstitutions {
+            let minute = sub.plannedMinute
+            if events[minute] == nil {
+                events[minute] = TimelineEvent(minute: minute, substitutions: [], positionChanges: [])
+            }
+            events[minute]?.substitutions.append(sub)
+        }
+        
+        // Add position changes
+        for posChange in game.plannedPositionChanges {
+            let minute = posChange.plannedMinute
+            if events[minute] == nil {
+                events[minute] = TimelineEvent(minute: minute, substitutions: [], positionChanges: [])
+            }
+            events[minute]?.positionChanges.append(posChange)
+        }
+        
+        return events.values.sorted { $0.minute < $1.minute }
+    }
+    
     private var playingTimeData: [(Player, Int)] {
         calculateProjectedPlayingTime()
     }
     
     var body: some View {
-        VStack(spacing: 20) {
-            // Header
-            VStack(spacing: 12) {
+        VStack(spacing: 16) {
+            // Header - Simplified
+            VStack(spacing: 8) {
                 Text("Substitution Plan")
-                    .font(.title)
+                    .font(.title2)
                     .bold()
                 
                 Text("vs \(game.opponent)")
-                    .font(.title2)
+                    .font(.headline)
                     .foregroundColor(.secondary)
                 
-                Text(game.date.formatted(.dateTime.weekday(.wide).month(.wide).day().hour().minute()))
+                Text(game.date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
                     .font(.subheadline)
                     .foregroundColor(.secondary)
             }
             .padding()
             .background(Color(.systemBackground))
+            .cornerRadius(12)
             
-            if groupedSubstitutions.isEmpty {
-                Text("No substitutions planned")
+            if groupedSubstitutions.isEmpty && game.plannedPositionChanges.isEmpty {
+                Text("No substitutions or position changes planned")
                     .foregroundColor(.secondary)
                     .padding()
             } else {
-                // Substitution Groups
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("Planned Substitutions")
+                // Timeline Section - Simplified
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Game Plan Timeline")
                         .font(.headline)
                         .padding(.horizontal)
                     
-                    ForEach(groupedSubstitutions, id: \.groupIndex) { group in
-                        VStack(alignment: .leading, spacing: 12) {
-                            // Group Header
-                            HStack {
-                                Text(group.groupName)
-                                    .font(.subheadline)
-                                    .fontWeight(.semibold)
-                                    .foregroundColor(.blue)
-                                
-                                if let firstSub = group.substitutions.first {
-                                    Text("(~\(firstSub.plannedMinute) minutes)")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
-                                
-                                Spacer()
-                                
-                                Text("\(group.substitutions.count) subs")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(Color.blue.opacity(0.1))
-                            .cornerRadius(8)
-                            
-                            // Substitutions in Group
-                            VStack(spacing: 8) {
-                                ForEach(group.substitutions.sorted { $0.plannedMinute < $1.plannedMinute }) { sub in
-                                    ShareableSubstitutionRow(substitution: sub, team: team)
-                                }
-                            }
-                            .padding(.horizontal, 8)
-                        }
-                        .padding()
-                        .background(Color(.systemGray6))
-                        .cornerRadius(12)
-                    }
-                }
-                .padding(.horizontal)
-                
-                // Playing Time Summary
-                if !playingTimeData.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Projected Playing Time")
-                            .font(.headline)
-                            .padding(.horizontal)
-                        
-                        LazyVGrid(columns: [
-                            GridItem(.flexible()),
-                            GridItem(.flexible())
-                        ], spacing: 8) {
-                            ForEach(playingTimeData, id: \.0.id) { player, minutes in
+                    // Create combined timeline of all events
+                    let allEvents = createCombinedTimeline()
+                    
+                    VStack(spacing: 8) {
+                        ForEach(allEvents, id: \.minute) { event in
+                            VStack(alignment: .leading, spacing: 8) {
+                                // Event Header - Simplified
                                 HStack {
-                                    Text("\(player.jerseyNumber)")
-                                        .font(.caption)
-                                        .fontWeight(.bold)
-                                        .foregroundColor(.white)
-                                        .frame(width: 20, height: 20)
-                                        .background(Circle().fill(getPlayingTimeColor(minutes: minutes)))
-                                    
-                                    Text(player.name.components(separatedBy: " ").first ?? "")
-                                        .font(.caption)
-                                        .lineLimit(1)
+                                    Text("Minute \(event.minute)")
+                                        .font(.subheadline)
+                                        .fontWeight(.semibold)
+                                        .foregroundColor(.blue)
                                     
                                     Spacer()
                                     
-                                    Text("\(minutes)m")
+                                    Text("\(event.substitutions.count + event.positionChanges.count) changes")
                                         .font(.caption)
-                                        .bold()
-                                        .foregroundColor(getPlayingTimeColor(minutes: minutes))
+                                        .foregroundColor(.secondary)
                                 }
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 4)
-                                .background(Color(.systemBackground))
+                                .background(Color.blue.opacity(0.1))
                                 .cornerRadius(6)
+                                
+                                // Substitutions for this minute
+                                ForEach(event.substitutions.sorted(by: { $0.plannedMinute < $1.plannedMinute })) { sub in
+                                    SimpleSubstitutionRow(substitution: sub, team: team)
+                                }
+                                
+                                // Position changes for this minute
+                                ForEach(event.positionChanges.sorted(by: { $0.plannedMinute < $1.plannedMinute })) { posChange in
+                                    SimplePositionChangeRow(positionChange: posChange, team: team)
+                                }
                             }
+                            .padding(8)
+                            .background(Color(.systemGray6).opacity(0.5))
+                            .cornerRadius(8)
                         }
-                        .padding(.horizontal)
                     }
                 }
+                .padding(.horizontal)
             }
+            
+            // Playing Time Summary - Simplified
+            if !playingTimeData.isEmpty && playingTimeData.count <= 20 { // Limit for rendering
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Projected Playing Time")
+                        .font(.headline)
+                        .padding(.horizontal)
+                    
+                    // Use simple VStack instead of LazyVGrid for better rendering
+                    VStack(spacing: 4) {
+                        ForEach(Array(playingTimeData.prefix(15).enumerated()), id: \.offset) { index, playerTime in
+                            let (player, minutes) = playerTime
+                            HStack {
+                                Text("#\(player.jerseyNumber)")
+                                    .font(.caption)
+                                    .fontWeight(.bold)
+                                    .frame(width: 25)
+                                
+                                Text(player.name.components(separatedBy: " ").first ?? "")
+                                    .font(.caption)
+                                    .lineLimit(1)
+                                
+                                Spacer()
+                                
+                                Text("\(minutes)m")
+                                    .font(.caption)
+                                    .bold()
+                                    .foregroundColor(getPlayingTimeColor(minutes: minutes))
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 2)
+                        }
+                    }
+                    .padding(.horizontal)
+                }
+            }
+            
+            // Coaching Notes - Simplified
+            if let notes = game.substitutionNotes, !notes.isEmpty, notes.count < 500 { // Limit length
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Coaching Notes")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .padding(.horizontal)
+                    
+                    Text(notes)
+                        .font(.caption)
+                        .padding(8)
+                        .background(Color(.systemGray6))
+                        .cornerRadius(6)
+                        .padding(.horizontal)
+                }
+            }
+            
             // Footer
             Text("Generated by Soccer Coach App")
-                .font(.caption)
+                .font(.caption2)
                 .foregroundColor(.secondary)
-                .padding()
+                .padding(.top, 8)
         }
+        .padding()
         .background(Color(.systemGroupedBackground))
     }
     
@@ -3566,6 +3730,119 @@ struct SubstitutionPlanShareView: View {
         case 0.01..<0.25: return .red
         default: return .gray
         }
+    }
+}
+
+// MARK: - Simple Timeline Event structure
+struct TimelineEvent {
+    let minute: Int
+    var substitutions: [PlannedSubstitution]
+    var positionChanges: [PlannedPositionChange]
+}
+
+// MARK: - Simple Substitution Row (for share sheet)
+struct SimpleSubstitutionRow: View {
+    let substitution: PlannedSubstitution
+    let team: Team
+    
+    var playerOut: Player? {
+        team.players.first { $0.id == substitution.playerOut }
+    }
+    
+    var playerIn: Player? {
+        team.players.first { $0.id == substitution.playerIn }
+    }
+    
+    var body: some View {
+        HStack(spacing: 6) {
+            Text("SUB:")
+                .font(.caption2)
+                .fontWeight(.bold)
+                .foregroundColor(.green)
+            
+            if let playerOut = playerOut {
+                Text("#\(playerOut.jerseyNumber) \(playerOut.name.components(separatedBy: " ").first ?? "")")
+                    .font(.caption)
+                    .foregroundColor(.red)
+            }
+            
+            Image(systemName: "arrow.right")
+                .font(.caption2)
+                .foregroundColor(.blue)
+            
+            if let playerIn = playerIn {
+                Text("#\(playerIn.jerseyNumber) \(playerIn.name.components(separatedBy: " ").first ?? "")")
+                    .font(.caption)
+                    .foregroundColor(.green)
+            }
+            
+            Text("(\(substitution.targetPosition.abbreviation))")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+            
+            Spacer()
+            
+            Text(substitution.reason.rawValue)
+                .font(.caption2)
+                .foregroundColor(.secondary)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Color(.systemBackground))
+        .cornerRadius(4)
+    }
+}
+
+// MARK: - Simple Position Change Row (for share sheet)
+struct SimplePositionChangeRow: View {
+    let positionChange: PlannedPositionChange
+    let team: Team
+    
+    var player: Player? {
+        team.players.first { $0.id == positionChange.playerId }
+    }
+    
+    var body: some View {
+        HStack(spacing: 6) {
+            Text("POS:")
+                .font(.caption2)
+                .fontWeight(.bold)
+                .foregroundColor(.purple)
+            
+            if let player = player {
+                Text("#\(player.jerseyNumber) \(player.name.components(separatedBy: " ").first ?? "")")
+                    .font(.caption)
+                    .foregroundColor(.purple)
+            }
+            
+            Text(positionChange.fromPosition.abbreviation)
+                .font(.caption2)
+                .fontWeight(.bold)
+                .foregroundColor(.red)
+                .padding(.horizontal, 3)
+                .padding(.vertical, 1)
+                .background(Color.red.opacity(0.1))
+                .cornerRadius(3)
+            
+            Image(systemName: "arrow.triangle.swap")
+                .font(.caption2)
+                .foregroundColor(.purple)
+            
+            Text(positionChange.toPosition.abbreviation)
+                .font(.caption2)
+                .fontWeight(.bold)
+                .foregroundColor(.green)
+                .padding(.horizontal, 3)
+                .padding(.vertical, 1)
+                .background(Color.green.opacity(0.1))
+                .cornerRadius(3)
+            
+            Spacer()
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Color(.systemBackground))
+        .cornerRadius(4)
     }
 }
 
@@ -3786,7 +4063,7 @@ struct UpcomingGameRowView: View {
                             .fontWeight(.medium)
                         
                         if let location = game.location {
-                            Text("â€¢ \(location)")
+                            Text("Ã¢â‚¬Â¢ \(location)")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -3877,7 +4154,7 @@ struct CompletedGameRowView: View {
                             .fontWeight(.medium)
                         
                         if let location = game.location {
-                            Text("â€¢ \(location)")
+                            Text("Ã¢â‚¬Â¢ \(location)")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -5102,12 +5379,12 @@ struct ModernGameModeView: View {
             case .goal, .redCard:
                 // Critical events - save immediately for live view with active game context
                 await teamManager.updateTeamImmediatelyForActiveGame(team, activeGameId: game.id)
-                print("ðŸš¨ Critical event - immediate sync for live view")
+                print("Ã°Å¸Å¡Â¨ Critical event - immediate sync for live view")
                 
             case .yellowCard, .save, .assist:
                 // Important events - use live game debounce (1.5 seconds) with active game context
                 teamManager.updateTeam(team, activeGameId: game.id)
-                print("âš¡ Important event - fast sync for live view")
+                print("Ã¢Å¡Â¡ Important event - fast sync for live view")
                 
             default:
                 // Other events - normal debounced sync with active game context
@@ -5115,7 +5392,7 @@ struct ModernGameModeView: View {
             }
         }
         
-        print("âœ… Updated stats for \(player.name): \(event.rawValue)")
+        print("Ã¢Å“â€¦ Updated stats for \(player.name): \(event.rawValue)")
     }
     
     // MARK: - Audit Log Management (unchanged)
@@ -5807,7 +6084,7 @@ struct ModernGameModeView: View {
             gameStateManager.addAuditEntry(
                 eventType: .substitution,
                 gameTime: gameStateManager.auditLogTime,
-                details: "\(playerOut.name) ↔ \(playerIn.name) (\(substitutionReason.rawValue))"
+                details: "\(playerOut.name) â†” \(playerIn.name) (\(substitutionReason.rawValue))"
             )
             
             presentationMode.wrappedValue.dismiss()

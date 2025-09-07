@@ -844,6 +844,45 @@ class FirebaseAuthManager: ObservableObject {
         print("✅ Voided all invite codes for user: \(userUID)")
     }
 
+    // MARK: - Account Deletion
+    func hardDeleteAccount() async throws {
+        guard let currentUser = Auth.auth().currentUser else {
+            throw NSError(domain: "Auth", code: -1, userInfo: [NSLocalizedDescriptionKey: "No current user to delete"])
+        }
+        
+        let userUID = currentUser.uid
+        print("🗑️ Starting hard delete for user: \(userUID)")
+        
+        // First delete all user data from Firestore using existing method
+        do {
+            try await hardDeleteUserData(for: userUID)
+        } catch {
+            print("⚠️ Error deleting user data: \(error)")
+            throw error
+        }
+        
+        // Then delete the Firebase Auth account
+        do {
+            try await currentUser.delete()
+        } catch {
+            print("⚠️ Error deleting Firebase Auth account: \(error)")
+            throw error
+        }
+        
+        // Clear local state
+        await MainActor.run {
+            self.isAuthenticated = false
+            self.currentUser = nil
+            self.currentCoach = nil
+            self.needsMembershipSelection = false
+            
+            // Clear local data
+            NotificationCenter.default.post(name: Notification.Name("ClearLocalData"), object: nil)
+            
+            print("✅ Account hard deleted successfully")
+        }
+    }
+
     private func hardDeleteUserData(for userUID: String) async throws {
         print("🗑️ Hard deleting all data for user: \(userUID)")
         
