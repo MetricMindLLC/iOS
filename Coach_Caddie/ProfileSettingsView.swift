@@ -1007,8 +1007,10 @@ struct ProfileSettingsView: View {
     @State private var importMode: ImportOptionsView.ImportMode = .completeTeams
     @State private var targetTeamId: UUID?
     @State private var showingUpgradeModal = false
+    // Subscription state variables (from working file)
     @State private var showingSubscription = false
     @State private var showingTrialAlert = false
+    // Delete account state variables (from delete file)
     @State private var showingAccountDeleteConfirmation = false
     @State private var isDeleting = false
     @State private var accountDeletionError: String?
@@ -1057,36 +1059,11 @@ struct ProfileSettingsView: View {
                 )
             }
             .sheet(isPresented: $showingUpgradeModal) {
-                NavigationView {
-                    VStack {
-                        Text("Upgrade Required")
-                            .font(.title)
-                        Text("Please upgrade your subscription to continue using all features.")
-                            .padding()
-                        Button("Close") {
-                            showingUpgradeModal = false
-                        }
-                        .padding()
-                    }
-                    .navigationTitle("Upgrade")
-                    .navigationBarTitleDisplayMode(.inline)
-                }
+                ExpiredTrialUpgradeView()
             }
             .sheet(isPresented: $showingSubscription) {
-                NavigationView {
-                    VStack {
-                        Text("Subscription Management")
-                            .font(.title)
-                        Text("Subscription features coming soon.")
-                            .padding()
-                        Button("Close") {
-                            showingSubscription = false
-                        }
-                        .padding()
-                    }
-                    .navigationTitle("Subscription")
-                    .navigationBarTitleDisplayMode(.inline)
-                }
+                SubscriptionView()
+                    .environmentObject(authManager)
             }
             .sheet(isPresented: $showingAbout) {
                 AboutView()
@@ -1137,7 +1114,7 @@ struct ProfileSettingsView: View {
                 Button("Upgrade") {
                     showingSubscription = true
                 }
-                Button("Continue Trial", role: .cancel) { }
+                Button("OK", role: .cancel) { }  // Changed from "Continue Trial" to "OK"
             } message: {
                 if let user = authManager.currentUser, user.subscriptionLevel == .trial {
                     Text("You have \(user.trialDaysRemaining) days remaining in your free trial. Upgrade now to continue using all features after the trial ends.")
@@ -1309,8 +1286,14 @@ struct ProfileSettingsView: View {
     private func checkTrialStatus() {
         guard let user = authManager.currentUser else { return }
         
-        if user.subscriptionLevel == .trial && user.trialDaysRemaining <= 1 {
+        // Only show trial alert if trial is still active (more than 0 days remaining)
+        if user.subscriptionLevel == .trial && user.trialDaysRemaining > 0 && user.trialDaysRemaining <= 1 {
             showingTrialAlert = true
+        }
+        
+        // If trial is expired (0 or negative days), show upgrade modal instead
+        if user.subscriptionLevel == .trial && user.trialDaysRemaining <= 0 {
+            showingUpgradeModal = true
         }
         
         Task {
@@ -1622,9 +1605,25 @@ struct ProfileSettingsView: View {
                 try await authManager.hardDeleteAccount()
                 
                 await MainActor.run {
+                    // Clear all local data
                     teamManager.teams.removeAll()
+                    
+                    // Close the deletion modal first
                     isDeleting = false
                     showingAccountDeleteConfirmation = false
+                    
+                    // Add a small delay to ensure the sheet dismisses, then force a complete logout
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        // Force complete logout and return to auth flow
+                        authManager.signOutUser()
+                        
+                        // Additional cleanup to ensure state is properly reset
+                        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                           let window = scene.windows.first {
+                            // Force the root view to refresh by clearing any presented views
+                            window.rootViewController?.dismiss(animated: false)
+                        }
+                    }
                 }
             } catch {
                 await MainActor.run {

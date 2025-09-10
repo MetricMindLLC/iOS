@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleIdentifier</key>
-    <string>MetricMind.Coach-Caddie</string>
+    <string>metricmind.coachcaddie</string>
     <key>CFBundleDisplayName</key>
     <string>Coach Caddie</string>
     <key>CFBundleName</key>
@@ -34,13 +34,25 @@
         <string>UIInterfaceOrientationLandscapeRight</string>
     </array>
     
-    <!-- Google Sign-In Configuration -->
+    <!-- Google Sign-In and Apple Sign-In Configuration -->
     <key>CFBundleURLTypes</key>
     <array>
+        <!-- Google Sign-In URL Scheme -->
         <dict>
+            <key>CFBundleURLName</key>
+            <string>com.googleusercontent.apps.941273680737-fft7eial6bktekljl31m0t28ial4cogq</string>
             <key>CFBundleURLSchemes</key>
             <array>
-                <string>com.googleusercontent.apps.941273680737-t30cu5f69lob53fd3p0qpk3f8tifg5g0</string>
+                <string>com.googleusercontent.apps.941273680737-fft7eial6bktekljl31m0t28ial4cogq</string>
+            </array>
+        </dict>
+        <!-- Apple Sign-In URL Scheme -->
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>AppleSignIn</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>metricmind.coachcaddie</string>
             </array>
         </dict>
     </array>

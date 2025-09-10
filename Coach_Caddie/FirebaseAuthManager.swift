@@ -5,8 +5,10 @@ import GoogleSignIn
 import FirebaseCore
 import StoreKit
 import Foundation
+import AuthenticationServices
+import CryptoKit
 
-class FirebaseAuthManager: ObservableObject {
+class FirebaseAuthManager: NSObject, ObservableObject {
     @Published var isAuthenticated = false
     @Published var currentUser: User?
     @Published var isLoading = false
@@ -16,9 +18,16 @@ class FirebaseAuthManager: ObservableObject {
 
     private let db = Firestore.firestore()
     private var authStateHandle: AuthStateDidChangeListenerHandle?
+    
+    // Apple Sign-In properties
+    private var currentNonce: String?
+    private var appleContinuation: CheckedContinuation<Void, Error>?
+    private var pendingInviteCode: String?
+    private var pendingInviteAccessLevel: AccessLevel?
 
-    init() {
-        print("🔍 FirebaseAuthManager: Initializing")
+    override init() {
+        print("🔥 FirebaseAuthManager: Initializing")
+        super.init()
         setupAuthStateListener()
     }
 
@@ -29,26 +38,26 @@ class FirebaseAuthManager: ObservableObject {
     }
 
     private func setupAuthStateListener() {
-        print("🔍 FirebaseAuthManager: Setting up auth state listener")
+        print("🔥 FirebaseAuthManager: Setting up auth state listener")
         authStateHandle = Auth.auth().addStateDidChangeListener { [weak self] _, firebaseUser in
-            print("🔍 FirebaseAuthManager: Auth state changed - user: \(firebaseUser?.uid ?? "nil")")
+            print("🔥 FirebaseAuthManager: Auth state changed - user: \(firebaseUser?.uid ?? "nil")")
             
             DispatchQueue.main.async {
                 if let firebaseUser = firebaseUser {
-                    print("🔍 FirebaseAuthManager: User found, isAnonymous: \(firebaseUser.isAnonymous)")
+                    print("🔥 FirebaseAuthManager: User found, isAnonymous: \(firebaseUser.isAnonymous)")
                     // Only authenticate if user is NOT anonymous
                     if !firebaseUser.isAnonymous {
-                        print("🔍 FirebaseAuthManager: Loading user profile for non-anonymous user")
+                        print("🔥 FirebaseAuthManager: Loading user profile for non-anonymous user")
                         Task {
                             await self?.loadUserProfile(for: firebaseUser)
                         }
                     } else {
                         // If user is anonymous, sign them out and reset state
-                        print("🔍 FirebaseAuthManager: Signing out anonymous user")
+                        print("🔥 FirebaseAuthManager: Signing out anonymous user")
                         self?.signOutUser()
                     }
                 } else {
-                    print("🔍 FirebaseAuthManager: No user found, clearing state")
+                    print("🔥 FirebaseAuthManager: No user found, clearing state")
                     self?.isAuthenticated = false
                     self?.currentUser = nil
                     self?.currentCoach = nil
@@ -62,9 +71,9 @@ class FirebaseAuthManager: ObservableObject {
     }
 
     func checkAuthenticationStatus() {
-        print("🔍 FirebaseAuthManager: Checking authentication status")
+        print("🔥 FirebaseAuthManager: Checking authentication status")
         if let firebaseUser = Auth.auth().currentUser {
-            print("🔍 FirebaseAuthManager: Current user found: \(firebaseUser.uid), isAnonymous: \(firebaseUser.isAnonymous)")
+            print("🔥 FirebaseAuthManager: Current user found: \(firebaseUser.uid), isAnonymous: \(firebaseUser.isAnonymous)")
             // Only proceed if user is NOT anonymous
             if !firebaseUser.isAnonymous {
                 Task {
@@ -72,18 +81,18 @@ class FirebaseAuthManager: ObservableObject {
                 }
             } else {
                 // Sign out anonymous users
-                print("🔍 FirebaseAuthManager: Signing out anonymous user")
+                print("🔥 FirebaseAuthManager: Signing out anonymous user")
                 signOutUser()
             }
         } else {
-            print("🔍 FirebaseAuthManager: No current user found")
+            print("🔥 FirebaseAuthManager: No current user found")
         }
     }
 
     // MARK: - Sign In Methods
     
     func signIn(email: String, password: String) async throws {
-        print("🔍 FirebaseAuthManager: Starting email sign in")
+        print("🔥 FirebaseAuthManager: Starting email sign in")
         await MainActor.run {
             isLoading = true
             errorMessage = nil
@@ -104,7 +113,7 @@ class FirebaseAuthManager: ObservableObject {
     }
     
     func signInWithGoogle(presenting viewController: UIViewController) async throws {
-        print("🔍 FirebaseAuthManager: Starting Google sign in")
+        print("🔥 FirebaseAuthManager: Starting Google sign in")
         await MainActor.run {
             isLoading = true
             errorMessage = nil
@@ -117,17 +126,17 @@ class FirebaseAuthManager: ObservableObject {
                 throw NSError(domain: "GoogleSignIn", code: -1, userInfo: [NSLocalizedDescriptionKey: "No client ID found"])
             }
             
-            print("🔍 FirebaseAuthManager: Client ID found, configuring Google Sign-In")
+            print("🔥 FirebaseAuthManager: Client ID found, configuring Google Sign-In")
             
             // Configure Google Sign-In
             let config = GIDConfiguration(clientID: clientID)
             GIDSignIn.sharedInstance.configuration = config
             
             // Perform sign in
-            print("🔍 FirebaseAuthManager: Presenting Google Sign-In")
+            print("🔥 FirebaseAuthManager: Presenting Google Sign-In")
             let result = try await GIDSignIn.sharedInstance.signIn(withPresenting: viewController)
             
-            print("🔍 FirebaseAuthManager: Google Sign-In completed, getting tokens")
+            print("🔥 FirebaseAuthManager: Google Sign-In completed, getting tokens")
             guard let idToken = result.user.idToken?.tokenString else {
                 print("❌ FirebaseAuthManager: Failed to get ID token")
                 throw NSError(domain: "GoogleSignIn", code: -2, userInfo: [NSLocalizedDescriptionKey: "Failed to get ID token"])
@@ -136,11 +145,11 @@ class FirebaseAuthManager: ObservableObject {
             let accessToken = result.user.accessToken.tokenString
             
             // Create Firebase credential
-            print("🔍 FirebaseAuthManager: Creating Firebase credential")
+            print("🔥 FirebaseAuthManager: Creating Firebase credential")
             let credential = GoogleAuthProvider.credential(withIDToken: idToken, accessToken: accessToken)
             
             // Sign in with Firebase
-            print("🔍 FirebaseAuthManager: Signing in with Firebase")
+            print("🔥 FirebaseAuthManager: Signing in with Firebase")
             let authResult = try await Auth.auth().signIn(with: credential)
             print("✅ FirebaseAuthManager: Signed in with Google: \(authResult.user.uid)")
             
@@ -155,6 +164,83 @@ class FirebaseAuthManager: ObservableObject {
         }
     }
     
+    // MARK: - Apple Sign-In Methods
+    
+    func signInWithApple() async throws {
+        print("🍎 FirebaseAuthManager: Starting Apple sign in")
+        await MainActor.run {
+            isLoading = true
+            errorMessage = nil
+        }
+        
+        do {
+            let nonce = randomNonceString()
+            currentNonce = nonce
+            
+            let appleIDProvider = ASAuthorizationAppleIDProvider()
+            let request = appleIDProvider.createRequest()
+            request.requestedScopes = [.fullName, .email]
+            request.nonce = sha256(nonce)
+            
+            let authorizationController = ASAuthorizationController(authorizationRequests: [request])
+            authorizationController.delegate = self
+            authorizationController.presentationContextProvider = self
+            
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                self.appleContinuation = continuation
+                authorizationController.performRequests()
+            }
+        } catch {
+            print("❌ FirebaseAuthManager: Apple sign in failed: \(error)")
+            await MainActor.run {
+                self.errorMessage = error.localizedDescription
+                self.isLoading = false
+            }
+            throw error
+        }
+    }
+    
+    private func randomNonceString(length: Int = 32) -> String {
+        precondition(length > 0)
+        let charset: [Character] = Array("0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._")
+        var result = ""
+        var remainingLength = length
+        
+        while remainingLength > 0 {
+            let randoms: [UInt8] = (0..<16).map { _ in
+                var random: UInt8 = 0
+                let errorCode = SecRandomCopyBytes(kSecRandomDefault, 1, &random)
+                if errorCode != errSecSuccess {
+                    fatalError("Unable to generate nonce. SecRandomCopyBytes failed with OSStatus \(errorCode)")
+                }
+                return random
+            }
+            
+            randoms.forEach { random in
+                if remainingLength == 0 {
+                    return
+                }
+                
+                if random < charset.count {
+                    result.append(charset[Int(random)])
+                    remainingLength -= 1
+                }
+            }
+        }
+        
+        return result
+    }
+    
+    private func sha256(_ input: String) -> String {
+        let inputData = Data(input.utf8)
+        let hashedData = SHA256.hash(data: inputData)
+        let hashString = hashedData.compactMap {
+            String(format: "%02x", $0)
+        }.joined()
+        
+        return hashString
+    }
+    
     // MARK: - Legacy Invite Codes
     private let legacyInviteCodes = [
         "COACHJHUTCH2689",     // For friends and family
@@ -165,7 +251,7 @@ class FirebaseAuthManager: ObservableObject {
     }
 
     func signUp(name: String, email: String, password: String, legacyCode: String? = nil) async throws {
-        print("🔍 FirebaseAuthManager: Starting sign up")
+        print("🔥 FirebaseAuthManager: Starting sign up")
         await MainActor.run {
             isLoading = true
             errorMessage = nil
@@ -220,7 +306,7 @@ class FirebaseAuthManager: ObservableObject {
     // MARK: - Membership Type Management (FIXED FOR SWIFT 6)
     
     func updateMembershipType(_ membershipType: MembershipType) async throws {
-        print("🔍 FirebaseAuthManager: Updating membership type to: \(membershipType.rawValue)")
+        print("🔥 FirebaseAuthManager: Updating membership type to: \(membershipType.rawValue)")
         guard let firebaseUser = Auth.auth().currentUser,
               let currentUser = currentUser else {
             print("❌ FirebaseAuthManager: No current user for membership update")
@@ -246,7 +332,7 @@ class FirebaseAuthManager: ObservableObject {
         
         // Update local state on main actor
         await MainActor.run {
-            print("🔍 FirebaseAuthManager: Updating local auth state")
+            print("🔥 FirebaseAuthManager: Updating local auth state")
             self.currentUser = updatedUser
             self.needsMembershipSelection = false
             self.isAuthenticated = true
@@ -265,7 +351,7 @@ class FirebaseAuthManager: ObservableObject {
             )
             
             print("✅ FirebaseAuthManager: Membership type updated successfully")
-            print("🔍 Final state - isAuthenticated: \(self.isAuthenticated), needsMembershipSelection: \(self.needsMembershipSelection)")
+            print("🔥 Final state - isAuthenticated: \(self.isAuthenticated), needsMembershipSelection: \(self.needsMembershipSelection)")
         }
     }
     
@@ -306,7 +392,7 @@ class FirebaseAuthManager: ObservableObject {
         
         // Update local state on main actor
         await MainActor.run {
-            print("🔍 FirebaseAuthManager: Updating local auth state")
+            print("🔥 FirebaseAuthManager: Updating local auth state")
             self.currentUser = updatedUser
             self.needsMembershipSelection = false
             self.isAuthenticated = true
@@ -325,41 +411,41 @@ class FirebaseAuthManager: ObservableObject {
             )
             
             print("✅ FirebaseAuthManager: Membership type and subscription updated successfully")
-            print("🔍 Final state - isAuthenticated: \(self.isAuthenticated), needsMembershipSelection: \(self.needsMembershipSelection)")
+            print("🔥 Final state - isAuthenticated: \(self.isAuthenticated), needsMembershipSelection: \(self.needsMembershipSelection)")
         }
     }
     
     // MARK: - User Profile Management
     func loadUserProfile(for firebaseUser: FirebaseAuth.User) async {
-        print("🔍 FirebaseAuthManager: Loading user profile for: \(firebaseUser.uid)")
+        print("🔥 FirebaseAuthManager: Loading user profile for: \(firebaseUser.uid)")
         await MainActor.run {
             isLoading = true
         }
         
         do {
-            print("🔍 FirebaseAuthManager: Fetching user document from Firestore")
+            print("🔥 FirebaseAuthManager: Fetching user document from Firestore")
             // FORCE FRESH READ FROM SERVER, NOT CACHE
             let doc = try await db.collection("users")
                 .document(firebaseUser.uid)
                 .getDocument(source: .server)
             
             if doc.exists {
-                print("🔍 FirebaseAuthManager: User document exists, decoding")
+                print("🔥 FirebaseAuthManager: User document exists, decoding")
                 // Load existing user
                 let user = try doc.data(as: User.self)
-                print("🔍 FirebaseAuthManager: User decoded - email: \(user.email ?? "nil"), membershipType: \(user.membershipType?.rawValue ?? "nil")")
+                print("🔥 FirebaseAuthManager: User decoded - email: \(user.email ?? "nil"), membershipType: \(user.membershipType?.rawValue ?? "nil")")
                 
                 await MainActor.run {
                     self.currentUser = user
                     
                     // Check if user needs to select membership type
                     if user.membershipType == nil {
-                        print("🔍 FirebaseAuthManager: User needs membership selection")
+                        print("🔥 FirebaseAuthManager: User needs membership selection")
                         self.needsMembershipSelection = true
                         // IMPORTANT: Keep them authenticated so they can fix their account
                         self.isAuthenticated = true  // Changed from false
                     } else {
-                        print("🔍 FirebaseAuthManager: User has membership type, authenticating")
+                        print("🔥 FirebaseAuthManager: User has membership type, authenticating")
                         self.needsMembershipSelection = false
                         self.isAuthenticated = true
                         
@@ -377,10 +463,10 @@ class FirebaseAuthManager: ObservableObject {
                     }
                     
                     self.isLoading = false
-                    print("🔍 FirebaseAuthManager: Profile loaded - isAuthenticated: \(self.isAuthenticated), needsMembershipSelection: \(self.needsMembershipSelection)")
+                    print("🔥 FirebaseAuthManager: Profile loaded - isAuthenticated: \(self.isAuthenticated), needsMembershipSelection: \(self.needsMembershipSelection)")
                 }
             } else {
-                print("🔍 FirebaseAuthManager: User document doesn't exist, creating new user")
+                print("🔥 FirebaseAuthManager: User document doesn't exist, creating new user")
                 // Create new user profile without membership type
                 let user = User(
                     id: UUID(),
@@ -399,7 +485,7 @@ class FirebaseAuthManager: ObservableObject {
                     self.needsMembershipSelection = true
                     self.isAuthenticated = true  // Keep them authenticated
                     self.isLoading = false
-                    print("🔍 FirebaseAuthManager: New user state - isAuthenticated: \(self.isAuthenticated), needsMembershipSelection: \(self.needsMembershipSelection)")
+                    print("🔥 FirebaseAuthManager: New user state - isAuthenticated: \(self.isAuthenticated), needsMembershipSelection: \(self.needsMembershipSelection)")
                 }
             }
         } catch {
@@ -428,7 +514,7 @@ class FirebaseAuthManager: ObservableObject {
             return
         }
         
-        print("🔍 FirebaseAuthManager: Saving user profile to Firestore")
+        print("🔥 FirebaseAuthManager: Saving user profile to Firestore")
         let data = try Firestore.Encoder().encode(user)
         try await db.collection("users").document(firebaseUser.uid).setData(data)
         print("✅ FirebaseAuthManager: User profile saved successfully")
@@ -437,7 +523,7 @@ class FirebaseAuthManager: ObservableObject {
     // MARK: - Sign Out
     
     func signOutUser() {
-        print("🔍 FirebaseAuthManager: Signing out user")
+        print("🔥 FirebaseAuthManager: Signing out user")
         do {
             try Auth.auth().signOut()
             self.isAuthenticated = false
@@ -456,7 +542,7 @@ class FirebaseAuthManager: ObservableObject {
     }
     
     func signUpWithInvite(email: String, password: String, displayName: String, inviteCode: String, inviteAccessLevel: AccessLevel) async throws {
-        print("🔐 FirebaseAuthManager: Starting sign up with invite")
+        print("🔥 FirebaseAuthManager: Starting sign up with invite")
         await MainActor.run {
             isLoading = true
             errorMessage = nil
@@ -533,9 +619,48 @@ class FirebaseAuthManager: ObservableObject {
         }
     }
     
+    // MARK: - Apple Sign-In with Invite
+    func signUpWithAppleAndInvite(inviteCode: String, inviteAccessLevel: AccessLevel) async throws {
+        print("🍎 FirebaseAuthManager: Starting Apple sign up with invite")
+        await MainActor.run {
+            isLoading = true
+            errorMessage = nil
+        }
+        
+        do {
+            let nonce = randomNonceString()
+            currentNonce = nonce
+            
+            let appleIDProvider = ASAuthorizationAppleIDProvider()
+            let request = appleIDProvider.createRequest()
+            request.requestedScopes = [.fullName, .email]
+            request.nonce = sha256(nonce)
+            
+            let authorizationController = ASAuthorizationController(authorizationRequests: [request])
+            authorizationController.delegate = self
+            authorizationController.presentationContextProvider = self
+            
+            // Store invite info for use in Apple callback
+            self.pendingInviteCode = inviteCode
+            self.pendingInviteAccessLevel = inviteAccessLevel
+            
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                self.appleContinuation = continuation
+                authorizationController.performRequests()
+            }
+        } catch {
+            print("❌ FirebaseAuthManager: Apple sign up with invite failed: \(error)")
+            await MainActor.run {
+                self.errorMessage = error.localizedDescription
+                self.isLoading = false
+            }
+            throw error
+        }
+    }
+    
     // MARK: - NEW METHOD: Update Membership Type Only (Preserve Existing Subscription)
     func updateMembershipTypeOnly(_ membershipType: MembershipType) async throws {
-        print("🔍 FirebaseAuthManager: Updating membership type only to: \(membershipType.rawValue), preserving existing subscription")
+        print("🔥 FirebaseAuthManager: Updating membership type only to: \(membershipType.rawValue), preserving existing subscription")
         guard let firebaseUser = Auth.auth().currentUser,
               let currentUser = currentUser else {
             print("❌ FirebaseAuthManager: No current user for membership update")
@@ -563,7 +688,7 @@ class FirebaseAuthManager: ObservableObject {
         
         // Update local state on main actor
         await MainActor.run {
-            print("🔍 FirebaseAuthManager: Updating local auth state")
+            print("🔥 FirebaseAuthManager: Updating local auth state")
             self.currentUser = updatedUser
             self.needsMembershipSelection = false
             self.isAuthenticated = true
@@ -582,14 +707,15 @@ class FirebaseAuthManager: ObservableObject {
             )
             
             print("✅ FirebaseAuthManager: Membership type updated successfully (subscription level preserved)")
-            print("🔍 Final state - isAuthenticated: \(self.isAuthenticated), needsMembershipSelection: \(self.needsMembershipSelection)")
+            print("🔥 Final state - isAuthenticated: \(self.isAuthenticated), needsMembershipSelection: \(self.needsMembershipSelection)")
         }
     }
+    
     // MARK: - Subscription Management (UPDATED)
     
     /// Update subscription level after successful StoreKit purchase
     func updateSubscriptionLevel(_ level: SubscriptionLevel, transactionId: String? = nil) async throws {
-        print("🔍 FirebaseAuthManager: Updating subscription level to: \(level.rawValue)")
+        print("🔥 FirebaseAuthManager: Updating subscription level to: \(level.rawValue)")
         guard let currentUser = currentUser else {
             throw NSError(domain: "Auth", code: -1, userInfo: [NSLocalizedDescriptionKey: "No current user"])
         }
@@ -609,7 +735,7 @@ class FirebaseAuthManager: ObservableObject {
         
         // Store transaction ID for future reference
         if let transactionId = transactionId {
-            print("🔍 FirebaseAuthManager: Recording transaction ID: \(transactionId)")
+            print("🔥 FirebaseAuthManager: Recording transaction ID: \(transactionId)")
             // You could add a transactionHistory field to User model if needed
         }
         
@@ -633,7 +759,7 @@ class FirebaseAuthManager: ObservableObject {
     
     /// Handle subscription purchase result from StoreKit (UPDATED)
     func handlePurchaseResult(_ transaction: StoreKit.Transaction) async throws {
-        print("🔍 FirebaseAuthManager: Handling purchase result for product: \(transaction.productID)")
+        print("🔥 FirebaseAuthManager: Handling purchase result for product: \(transaction.productID)")
         
         let subscriptionLevel: SubscriptionLevel
         
@@ -769,21 +895,22 @@ class FirebaseAuthManager: ObservableObject {
     func checkTrialStatus() async throws {
         guard let currentUser = currentUser else { return }
         
-        // Check if trial has expired and auto-convert to Pro
-        if currentUser.subscriptionLevel == .trial && currentUser.isTrialExpired {
-            print("🔄 Trial expired - converting to Pro subscription")
+        // Simply mark trial as used when expired, but DON'T auto-upgrade
+        if currentUser.subscriptionLevel == .trial && currentUser.isTrialExpired && !currentUser.hasUsedTrial {
+            print("🔄 Trial expired - marking as used (no auto-upgrade)")
             
-            // Create updated user with Pro subscription
+            // Only update hasUsedTrial flag, keep subscription as trial
             let updatedUser = User(
                 id: currentUser.id,
                 firebaseUID: currentUser.firebaseUID,
                 email: currentUser.email,
                 membershipType: currentUser.membershipType,
                 dateJoined: currentUser.dateJoined,
-                subscriptionLevel: .pro,
+                subscriptionLevel: .expired,  // Keep as trial - don't auto-upgrade!
                 trialStartDate: currentUser.trialStartDate,
                 cancellationDate: currentUser.cancellationDate,
-                dataRetentionEndDate: currentUser.dataRetentionEndDate
+                dataRetentionEndDate: currentUser.dataRetentionEndDate,
+                hasUsedTrial: true  // Mark trial as used
             )
             
             try await saveUserProfile(updatedUser)
@@ -792,10 +919,13 @@ class FirebaseAuthManager: ObservableObject {
                 self.currentUser = updatedUser
             }
             
-            // Here you would trigger the App Store subscription purchase
-            // This is where you'd integrate with StoreKit
-            // You might want to show a notification to the user about the conversion
-            await showTrialExpiredNotification()
+            // Notify UI that trial has expired (for showing upgrade modal)
+            await MainActor.run {
+                NotificationCenter.default.post(
+                    name: Notification.Name("TrialExpired"),
+                    object: nil
+                )
+            }
         }
     }
     
@@ -844,7 +974,6 @@ class FirebaseAuthManager: ObservableObject {
         print("✅ Voided all invite codes for user: \(userUID)")
     }
 
-    // MARK: - Account Deletion
     func hardDeleteAccount() async throws {
         guard let currentUser = Auth.auth().currentUser else {
             throw NSError(domain: "Auth", code: -1, userInfo: [NSLocalizedDescriptionKey: "No current user to delete"])
@@ -853,7 +982,7 @@ class FirebaseAuthManager: ObservableObject {
         let userUID = currentUser.uid
         print("🗑️ Starting hard delete for user: \(userUID)")
         
-        // First delete all user data from Firestore using existing method
+        // First delete all user data from Firestore
         do {
             try await hardDeleteUserData(for: userUID)
         } catch {
@@ -861,25 +990,29 @@ class FirebaseAuthManager: ObservableObject {
             throw error
         }
         
-        // Then delete the Firebase Auth account
+        // Try to delete the Firebase Auth account
         do {
             try await currentUser.delete()
-        } catch {
-            print("⚠️ Error deleting Firebase Auth account: \(error)")
-            throw error
+            print("✅ Firebase Auth account deleted")
+        } catch let error as NSError {
+            if error.code == 17014 { // ERROR_REQUIRES_RECENT_LOGIN
+                print("⚠️ Recent authentication required - signing out user instead")
+                // Data is already deleted, just sign out
+            } else {
+                print("⚠️ Error deleting Firebase Auth account: \(error)")
+                throw error
+            }
         }
         
-        // Clear local state
+        // Clear local state and sign out regardless
         await MainActor.run {
             self.isAuthenticated = false
             self.currentUser = nil
             self.currentCoach = nil
             self.needsMembershipSelection = false
             
-            // Clear local data
             NotificationCenter.default.post(name: Notification.Name("ClearLocalData"), object: nil)
-            
-            print("✅ Account hard deleted successfully")
+            print("✅ Account data deleted and user signed out")
         }
     }
 
@@ -924,6 +1057,150 @@ class FirebaseAuthManager: ObservableObject {
         }
         
         print("✅ Hard deleted all data for user: \(userUID)")
+    }
+}
+
+// MARK: - Apple Sign-In Delegate
+extension FirebaseAuthManager: ASAuthorizationControllerDelegate, ASAuthorizationControllerPresentationContextProviding {
+    
+    func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let window = windowScene.windows.first else {
+            fatalError("No window available")
+        }
+        return window
+    }
+    
+    func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization authorization: ASAuthorization) {
+        guard let nonce = currentNonce else {
+            print("❌ Invalid state: A login callback was received, but no login request was sent.")
+            appleContinuation?.resume(throwing: NSError(domain: "AppleSignIn", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid state"]))
+            return
+        }
+        
+        guard let appleIDCredential = authorization.credential as? ASAuthorizationAppleIDCredential,
+              let appleIDToken = appleIDCredential.identityToken,
+              let idTokenString = String(data: appleIDToken, encoding: .utf8) else {
+            print("❌ Unable to fetch identity token")
+            appleContinuation?.resume(throwing: NSError(domain: "AppleSignIn", code: -2, userInfo: [NSLocalizedDescriptionKey: "Unable to fetch identity token"]))
+            return
+        }
+        
+        let credential = OAuthProvider.appleCredential(withIDToken: idTokenString, rawNonce: nonce, fullName: appleIDCredential.fullName)
+        
+        Task {
+            do {
+                let result = try await Auth.auth().signIn(with: credential)
+                print("✅ FirebaseAuthManager: Signed in with Apple: \(result.user.uid)")
+                
+                // Check if this is an invite-based signup
+                if let inviteCode = pendingInviteCode,
+                   let accessLevel = pendingInviteAccessLevel {
+                    
+                    // Handle invite-based signup
+                    let membershipType: MembershipType = accessLevel == .coach ? .coach : .teamInvite
+                    let subscriptionLevel: SubscriptionLevel = .sharedAccess
+                    
+                    // Get display name from Apple ID credential
+                    var displayName = result.user.displayName
+                    if displayName == nil || displayName?.isEmpty == true {
+                        if let fullName = appleIDCredential.fullName {
+                            let formatter = PersonNameComponentsFormatter()
+                            displayName = formatter.string(from: fullName)
+                        }
+                    }
+                    
+                    // Create user profile
+                    let user = User(
+                        id: UUID(),
+                        firebaseUID: result.user.uid,
+                        email: result.user.email ?? "",
+                        membershipType: membershipType,
+                        dateJoined: Date(),
+                        subscriptionLevel: subscriptionLevel
+                    )
+                    
+                    try await saveUserProfile(user)
+                    
+                    // Join the team
+                    let firebaseManager = FirebaseManager.shared
+                    let _ = try await firebaseManager.joinTeamWithCode(inviteCode)
+                    
+                    await MainActor.run {
+                        self.currentUser = user
+                        self.needsMembershipSelection = false
+                        self.isAuthenticated = true
+                        self.isLoading = false
+                        
+                        // Create legacy coach object
+                        self.currentCoach = Coach(
+                            id: user.id,
+                            firebaseUID: user.firebaseUID,
+                            name: displayName ?? user.email ?? "User",
+                            email: user.email ?? "",
+                            phone: "",
+                            teams: [],
+                            subscriptionLevel: user.subscriptionLevel,
+                            dateJoined: user.dateJoined
+                        )
+                        
+                        // Clear pending invite info
+                        self.pendingInviteCode = nil
+                        self.pendingInviteAccessLevel = nil
+                        
+                        print("✅ FirebaseAuthManager: Apple user signed up and joined team with \(subscriptionLevel.rawValue) access")
+                    }
+                } else {
+                    // Regular Apple sign-in
+                    await loadUserProfile(for: result.user)
+                }
+                
+                appleContinuation?.resume()
+                appleContinuation = nil
+                
+            } catch {
+                print("❌ FirebaseAuthManager: Apple sign in failed: \(error)")
+                await MainActor.run {
+                    self.errorMessage = error.localizedDescription
+                    self.isLoading = false
+                }
+                appleContinuation?.resume(throwing: error)
+                appleContinuation = nil
+            }
+        }
+    }
+    
+    func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {
+        print("❌ Apple Sign-In failed: \(error)")
+        
+        Task {
+            await MainActor.run {
+                self.isLoading = false
+                
+                // Handle user cancellation gracefully
+                if let authError = error as? ASAuthorizationError {
+                    switch authError.code {
+                    case .canceled:
+                        self.errorMessage = nil // Don't show error for user cancellation
+                    case .unknown:
+                        self.errorMessage = "Apple Sign-In failed. Please try again."
+                    case .invalidResponse:
+                        self.errorMessage = "Invalid response from Apple. Please try again."
+                    case .notHandled:
+                        self.errorMessage = "Apple Sign-In not handled. Please try again."
+                    case .failed:
+                        self.errorMessage = "Apple Sign-In failed. Please try again."
+                    @unknown default:
+                        self.errorMessage = "An unknown error occurred with Apple Sign-In."
+                    }
+                } else {
+                    self.errorMessage = error.localizedDescription
+                }
+            }
+        }
+        
+        appleContinuation?.resume(throwing: error)
+        appleContinuation = nil
     }
 }
 

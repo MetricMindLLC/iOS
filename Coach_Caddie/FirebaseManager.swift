@@ -1140,7 +1140,6 @@ class FirebaseManager: NSObject, ObservableObject {
         return practices
     }
     
-    // MARK: - Individual Subcollection Updates
     func savePlayerToSubcollection(_ player: Player, in team: Team) async throws {
         guard team.useSubcollections else { return }
         
@@ -1149,6 +1148,8 @@ class FirebaseManager: NSObject, ObservableObject {
         
         let playerData = try Firestore.Encoder().encode(player)
         try await playerRef.setData(playerData)
+        
+        print("✅ Saved player \(player.name) to subcollection with updated stats")
     }
     
     func saveGameToSubcollection(_ game: Game, in team: Team) async throws {

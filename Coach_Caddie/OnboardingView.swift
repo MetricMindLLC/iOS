@@ -1,7 +1,7 @@
 import SwiftUI
 import FirebaseAuth
-import GoogleSignIn
 import FirebaseFirestore
+import AuthenticationServices
 
 struct OnboardingView: View {
     @EnvironmentObject var authManager: FirebaseAuthManager
@@ -9,7 +9,7 @@ struct OnboardingView: View {
     @State private var showingSignIn = false
     @State private var showingSignUp = false
     @State private var showingInviteFlow = false
-    @State private var isLoadingGoogle = false
+    @State private var isLoadingApple = false
     @State private var errorMessage: String?
     @State private var showError = false
     
@@ -67,34 +67,29 @@ struct OnboardingView: View {
                         }
                         .padding(.horizontal)
                         
-                        // Sign in with Google - Updated with Google logo from assets
-                        Button(action: signInWithGoogle) {
+                        // Sign in with Apple
+                        Button(action: signInWithApple) {
                             HStack(spacing: 12) {
-                                if isLoadingGoogle {
+                                if isLoadingApple {
                                     ProgressView()
-                                        .progressViewStyle(CircularProgressViewStyle(tint: .gray))
+                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
                                         .scaleEffect(0.8)
                                 } else {
-                                    Image("google-logo")
-                                        .resizable()
-                                        .frame(width: 20, height: 20)
+                                    Image(systemName: "apple.logo")
+                                        .font(.system(size: 20, weight: .semibold))
                                     
-                                    Text("Sign in with Google")
-                                        .fontWeight(.medium)
+                                    Text("Sign in with Apple")
+                                        .fontWeight(.semibold)
                                 }
                             }
-                            .foregroundColor(.black.opacity(0.87))
+                            .foregroundColor(.white)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 16)
-                            .background(Color.white)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .stroke(Color(.systemGray4), lineWidth: 1)
-                            )
+                            .background(Color.black)
                             .cornerRadius(12)
                             .padding(.horizontal)
                         }
-                        .disabled(isLoadingGoogle)
+                        .disabled(isLoadingApple)
                         
                         // Sign In
                         Button(action: { showingSignIn = true }) {
@@ -207,39 +202,34 @@ struct OnboardingView: View {
         }
     }
     
-    private func signInWithGoogle() {
-        isLoadingGoogle = true
+    // Apple Sign-In method
+    private func signInWithApple() {
+        isLoadingApple = true
         
         Task {
             do {
-                guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                      let rootViewController = windowScene.windows.first?.rootViewController else {
-                    throw NSError(domain: "GoogleSignIn", code: -1, userInfo: [NSLocalizedDescriptionKey: "No presenting view controller found"])
-                }
-                
-                var presentingViewController = rootViewController
-                while let presented = presentingViewController.presentedViewController {
-                    presentingViewController = presented
-                }
-                
-                try await authManager.signInWithGoogle(presenting: presentingViewController)
+                try await authManager.signInWithApple()
                 
                 await MainActor.run {
-                    isLoadingGoogle = false
+                    isLoadingApple = false
                 }
             } catch {
                 await MainActor.run {
-                    isLoadingGoogle = false
+                    isLoadingApple = false
+                    // Don't show error for user cancellation
+                    if let authError = error as? ASAuthorizationError, authError.code == .canceled {
+                        return
+                    }
                     errorMessage = error.localizedDescription
                     showError = true
-                    print("Google Sign-In Error: \\(error)")
+                    print("Apple Sign-In Error: \(error)")
                 }
             }
         }
     }
 }
 
-// MARK: - NEW: Invite Code Flow View
+// MARK: - Invite Code Flow View (Google Sign-In Removed)
 struct InviteCodeFlowView: View {
     @EnvironmentObject var authManager: FirebaseAuthManager
     @EnvironmentObject var teamManager: TeamManager
@@ -250,7 +240,7 @@ struct InviteCodeFlowView: View {
     @State private var validatedInvite: TeamInvite?
     @State private var isValidating = false
     @State private var validationError: String?
-    @State private var isLoadingGoogle = false
+    @State private var isLoadingApple = false
     
     enum InviteFlowStep {
         case enterCode
@@ -372,7 +362,7 @@ struct InviteCodeFlowView: View {
         }
     }
     
-    // MARK: - Step 2: Choose Authentication (UPDATED - removed "Sign in with Email")
+    // MARK: - Step 2: Choose Authentication (Google Sign-In Removed)
     private var chooseAuthView: some View {
         VStack(spacing: 24) {
             if let invite = validatedInvite {
@@ -409,32 +399,28 @@ struct InviteCodeFlowView: View {
                     .cornerRadius(12)
                 }
                 
-                Button(action: signInWithGoogleForInvite) {
+                // Apple Sign-In option
+                Button(action: signInWithAppleForInvite) {
                     HStack(spacing: 12) {
-                        if isLoadingGoogle {
+                        if isLoadingApple {
                             ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: .gray))
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
                                 .scaleEffect(0.8)
                         } else {
-                            Image("google-logo")
-                                .resizable()
-                                .frame(width: 20, height: 20)
+                            Image(systemName: "apple.logo")
+                                .font(.system(size: 20, weight: .semibold))
                             
-                            Text("Create Account with Google")
-                                .fontWeight(.medium)
+                            Text("Create Account with Apple")
+                                .fontWeight(.semibold)
                         }
                     }
-                    .foregroundColor(.black.opacity(0.87))
+                    .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 16)
-                    .background(Color.white)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color(.systemGray4), lineWidth: 1)
-                    )
+                    .background(Color.black)
                     .cornerRadius(12)
                 }
-                .disabled(isLoadingGoogle)
+                .disabled(isLoadingApple)
             }
             .padding(.horizontal)
             
@@ -523,49 +509,32 @@ struct InviteCodeFlowView: View {
         return invite
     }
     
-    // MARK: - NEW: Special Google Sign-In for Invite Flow
-    private func signInWithGoogleForInvite() {
+    // MARK: - Apple Sign-In for Invite Flow
+    private func signInWithAppleForInvite() {
         guard let invite = validatedInvite else { return }
         
-        isLoadingGoogle = true
+        isLoadingApple = true
         
         Task {
             do {
-                guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                      let rootViewController = windowScene.windows.first?.rootViewController else {
-                    return
-                }
-                
-                var presentingViewController = rootViewController
-                while let presented = presentingViewController.presentedViewController {
-                    presentingViewController = presented
-                }
-                
-                // Sign in with Google
-                try await authManager.signInWithGoogle(presenting: presentingViewController)
-                
-                // IMPORTANT: After Google sign-in, immediately set up the user for invite-based access
-                // This prevents the membership selection screen from appearing
-                
-                // Determine membership type based on invite access level
-                let membershipType: MembershipType = invite.accessLevel == .coach ? .coach : .teamInvite
-                
-                // Update the user's membership type WITHOUT changing subscription
-                // They should get sharedAccess subscription as they're joining via invite
-                try await authManager.updateMembershipTypeAndSubscription(
-                    membershipType: membershipType,
-                    subscriptionLevel: .sharedAccess
+                try await authManager.signUpWithAppleAndInvite(
+                    inviteCode: inviteCode.uppercased(),
+                    inviteAccessLevel: invite.accessLevel
                 )
                 
                 await MainActor.run {
-                    isLoadingGoogle = false
+                    isLoadingApple = false
                     currentStep = .joiningTeam
                     joinTeamAfterAuth()
                 }
             } catch {
                 await MainActor.run {
-                    isLoadingGoogle = false
-                    print("Google Sign-In Error for invite: \(error)")
+                    isLoadingApple = false
+                    // Don't show error for user cancellation
+                    if let authError = error as? ASAuthorizationError, authError.code == .canceled {
+                        return
+                    }
+                    print("Apple Sign-In Error for invite: \(error)")
                 }
             }
         }
@@ -741,9 +710,7 @@ struct InviteCreateAccountView: View {
     }
 }
 
-// Rest of the file remains the same (SignUpView, SignInView, ForgotPasswordView)...
-// [INCLUDING ALL THE REST OF THE ORIGINAL CODE FROM SignUpView onwards, unchanged]
-
+// MARK: - Sign Up View (Google Sign-In Removed)
 struct SignUpView: View {
     @EnvironmentObject var authManager: FirebaseAuthManager
     @Environment(\.presentationMode) var presentationMode
@@ -753,6 +720,7 @@ struct SignUpView: View {
     @State private var confirmPassword = ""
     @State private var coachName = ""
     @State private var isLoading = false
+    @State private var isLoadingApple = false
     @State private var showError = false
     @State private var errorMessage = ""
     @State private var agreedToTerms = false
@@ -793,6 +761,51 @@ struct SignUpView: View {
             ScrollView {
                 VStack(spacing: 20) {
                     headerSection
+                    
+                    // Apple Sign-In option at top
+                    VStack(spacing: 12) {
+                        Text("Quick Sign Up")
+                            .font(.headline)
+                            .padding(.top)
+                        
+                        Button(action: signUpWithApple) {
+                            HStack(spacing: 12) {
+                                if isLoadingApple {
+                                    ProgressView()
+                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                        .scaleEffect(0.8)
+                                } else {
+                                    Image(systemName: "apple.logo")
+                                        .font(.system(size: 20, weight: .semibold))
+                                    
+                                    Text("Sign up with Apple")
+                                        .fontWeight(.semibold)
+                                }
+                            }
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.black)
+                            .cornerRadius(12)
+                        }
+                        .disabled(isLoadingApple)
+                        
+                        // Divider
+                        HStack {
+                            Rectangle()
+                                .fill(Color.gray.opacity(0.3))
+                                .frame(height: 1)
+                            Text("or")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .padding(.horizontal, 8)
+                            Rectangle()
+                                .fill(Color.gray.opacity(0.3))
+                                .frame(height: 1)
+                        }
+                    }
+                    .padding(.horizontal)
+                    
                     formSection
                     submitButton
                     Spacer()
@@ -957,7 +970,6 @@ struct SignUpView: View {
                         .keyboardType(.emailAddress)
                         .autocapitalization(.none)
                         .autocorrectionDisabled(true)
-                        // Removed .onPaste modifier as it's not available on TextField
                 }
                 .padding()
                 .background(Color(.systemGray6))
@@ -978,6 +990,7 @@ struct SignUpView: View {
             }
         }
     }
+    
     private var emailMatchIndicator: some View {
         HStack(spacing: 4) {
             if emailsMatch {
@@ -1161,6 +1174,33 @@ struct SignUpView: View {
     
     // MARK: - Methods
     
+    // Apple Sign-Up method
+    private func signUpWithApple() {
+        isLoadingApple = true
+        
+        Task {
+            do {
+                try await authManager.signInWithApple()
+                
+                await MainActor.run {
+                    isLoadingApple = false
+                    presentationMode.wrappedValue.dismiss()
+                }
+            } catch {
+                await MainActor.run {
+                    isLoadingApple = false
+                    // Don't show error for user cancellation
+                    if let authError = error as? ASAuthorizationError, authError.code == .canceled {
+                        return
+                    }
+                    errorMessage = error.localizedDescription
+                    showError = true
+                    print("Apple Sign-Up Error: \(error)")
+                }
+            }
+        }
+    }
+    
     private func signUp() {
         isLoading = true
         
@@ -1186,6 +1226,7 @@ struct SignUpView: View {
     }
 }
 
+// MARK: - Sign In View (Google Sign-In Removed)
 struct SignInView: View {
     @EnvironmentObject var authManager: FirebaseAuthManager
     @EnvironmentObject var teamManager: TeamManager
@@ -1193,6 +1234,7 @@ struct SignInView: View {
     @State private var email = ""
     @State private var password = ""
     @State private var isLoading = false
+    @State private var isLoadingApple = false
     @State private var showError = false
     @State private var errorMessage = ""
     @State private var showingForgotPassword = false
@@ -1219,6 +1261,46 @@ struct SignInView: View {
                             .foregroundColor(.secondary)
                     }
                     .padding(.top, 40)
+                    
+                    // Apple Sign-In option
+                    VStack(spacing: 12) {
+                        Button(action: signInWithApple) {
+                            HStack(spacing: 12) {
+                                if isLoadingApple {
+                                    ProgressView()
+                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                        .scaleEffect(0.8)
+                                } else {
+                                    Image(systemName: "apple.logo")
+                                        .font(.system(size: 20, weight: .semibold))
+                                    
+                                    Text("Sign in with Apple")
+                                        .fontWeight(.semibold)
+                                }
+                            }
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.black)
+                            .cornerRadius(12)
+                        }
+                        .disabled(isLoadingApple)
+                        
+                        // Divider
+                        HStack {
+                            Rectangle()
+                                .fill(Color.gray.opacity(0.3))
+                                .frame(height: 1)
+                            Text("or")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .padding(.horizontal, 8)
+                            Rectangle()
+                                .fill(Color.gray.opacity(0.3))
+                                .frame(height: 1)
+                        }
+                    }
+                    .padding(.horizontal)
                     
                     // Form
                     VStack(spacing: 16) {
@@ -1340,6 +1422,40 @@ struct SignInView: View {
         }
     }
     
+    // Apple Sign-In method
+    private func signInWithApple() {
+        isLoadingApple = true
+        
+        Task {
+            do {
+                try await authManager.signInWithApple()
+                
+                await MainActor.run {
+                    isLoadingApple = false
+                    // Check if account needs recovery (membership type is nil)
+                    if authManager.needsMembershipSelection {
+                        // Account is stuck - show recovery options
+                        showingAccountRecovery = true
+                    } else {
+                        // Normal successful sign in
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    isLoadingApple = false
+                    // Don't show error for user cancellation
+                    if let authError = error as? ASAuthorizationError, authError.code == .canceled {
+                        return
+                    }
+                    errorMessage = error.localizedDescription
+                    showError = true
+                    print("Apple Sign-In Error: \(error)")
+                }
+            }
+        }
+    }
+    
     private func signIn() {
         isLoading = true
         
@@ -1386,7 +1502,7 @@ struct SignInView: View {
             } catch {
                 await MainActor.run {
                     isLoading = false
-                    errorMessage = "Failed to complete setup: \\(error.localizedDescription)"
+                    errorMessage = "Failed to complete setup: \(error.localizedDescription)"
                     showError = true
                 }
             }
@@ -1422,7 +1538,7 @@ struct SignInView: View {
             } catch {
                 await MainActor.run {
                     isLoading = false
-                    errorMessage = "Invalid invite code or failed to join team: \\(error.localizedDescription)"
+                    errorMessage = "Invalid invite code or failed to join team: \(error.localizedDescription)"
                     showError = true
                     recoveryInviteCode = ""
                 }

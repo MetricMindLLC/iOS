@@ -131,25 +131,25 @@ struct EnhancedQuickStatsView: View {
 //                .pickerStyle(.segmented)
 //            }
             
-            // Edit mode toggle - only show for Players tab
-            if selectedStatType == "Players" {
-                HStack {
-                    Spacer()
-                    Button(action: { isEditMode.toggle() }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: isEditMode ? "checkmark.circle.fill" : "pencil.circle")
-                            Text(isEditMode ? "Done" : "Edit")
-                        }
-                        .font(.subheadline)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(isEditMode ? Color.green : Color.blue)
-                        .foregroundColor(.white)
-                        .cornerRadius(8)
-                    }
-                }
-            }
-            
+//            // Edit mode toggle - only show for Players tab
+//            if selectedStatType == "Players" {
+//                HStack {
+//                    Spacer()
+//                    Button(action: { isEditMode.toggle() }) {
+//                        HStack(spacing: 4) {
+//                            Image(systemName: isEditMode ? "checkmark.circle.fill" : "pencil.circle")
+//                            Text(isEditMode ? "Done" : "Edit")
+//                        }
+//                        .font(.subheadline)
+//                        .padding(.horizontal, 12)
+//                        .padding(.vertical, 6)
+//                        .background(isEditMode ? Color.green : Color.blue)
+//                        .foregroundColor(.white)
+//                        .cornerRadius(8)
+//                    }
+//                }
+//            }
+//            
             // Stat type selector
             Picker("Stat Type", selection: $selectedStatType) {
                 Text("Overview").tag("Overview")
@@ -548,13 +548,22 @@ struct EnhancedQuickStatsView: View {
     }
 }
 
-// MARK: - Player Stats Card
 struct PlayerStatsCard: View {
     let player: Player
     let isEditMode: Bool
     let onStatChange: ((String, Int) -> Void)?
     @EnvironmentObject var teamManager: TeamManager
     let team: Team?
+    
+    // CRITICAL FIX: Get fresh player data from TeamManager
+    private var currentPlayer: Player {
+        guard let team = team,
+              let teamIndex = teamManager.teams.firstIndex(where: { $0.id == team.id }),
+              let playerIndex = teamManager.teams[teamIndex].players.firstIndex(where: { $0.id == player.id }) else {
+            return player // Fallback to original player if not found
+        }
+        return teamManager.teams[teamIndex].players[playerIndex]
+    }
     
     // Get visibility settings based on user role
     private var visibilitySettings: StatsVisibilitySettings {
@@ -574,39 +583,39 @@ struct PlayerStatsCard: View {
     
     var body: some View {
         HStack(spacing: 12) {
-            // Player info (unchanged)
+            // Player info - using currentPlayer for fresh data
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
                     Circle()
-                        .fill(player.preferredPositionEnum.color)
+                        .fill(currentPlayer.preferredPositionEnum.color)
                         .frame(width: 30, height: 30)
                         .overlay(
-                            Text("\(player.jerseyNumber)")
+                            Text("\(currentPlayer.jerseyNumber)")
                                 .font(.caption)
                                 .fontWeight(.bold)
                                 .foregroundColor(.white)
                         )
                     
-                    Text(player.name)
+                    Text(currentPlayer.name)
                         .font(.subheadline)
                         .fontWeight(.medium)
                 }
                 
-                Text(player.positions.joined(separator: "/"))
+                Text(currentPlayer.positions.joined(separator: "/"))
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .lineLimit(1)
             }
             .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             
-            // Stats with visibility controls
+            // Stats with visibility controls - using currentPlayer for fresh data
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
                     // Show stats based on visibility settings
                     Group {
                         if visibilitySettings.showGoals {
                             EditableStatsStatItem(
-                                value: player.seasonStats.goals,
+                                value: currentPlayer.seasonStats.goals,  // Using currentPlayer
                                 label: "Goals",
                                 isEditMode: isEditMode,
                                 onValueChange: { onStatChange?("goals", $0) }
@@ -615,7 +624,7 @@ struct PlayerStatsCard: View {
                         
                         if visibilitySettings.showAssists {
                             EditableStatsStatItem(
-                                value: player.seasonStats.assists,
+                                value: currentPlayer.seasonStats.assists,  // Using currentPlayer
                                 label: "Assists",
                                 isEditMode: isEditMode,
                                 onValueChange: { onStatChange?("assists", $0) }
@@ -624,7 +633,7 @@ struct PlayerStatsCard: View {
                         
                         if visibilitySettings.showShots {
                             EditableStatsStatItem(
-                                value: player.seasonStats.shots,
+                                value: currentPlayer.seasonStats.shots,  // Using currentPlayer
                                 label: "Shots",
                                 isEditMode: isEditMode,
                                 onValueChange: { onStatChange?("shots", $0) }
@@ -633,7 +642,7 @@ struct PlayerStatsCard: View {
                         
                         if visibilitySettings.showSaves {
                             EditableStatsStatItem(
-                                value: player.seasonStats.saves,
+                                value: currentPlayer.seasonStats.saves,  // Using currentPlayer
                                 label: "Saves",
                                 isEditMode: isEditMode,
                                 onValueChange: { onStatChange?("saves", $0) }
@@ -642,7 +651,7 @@ struct PlayerStatsCard: View {
                         
                         if visibilitySettings.showGoalsConceded {
                             EditableStatsStatItem(
-                                value: player.seasonStats.goalsConceded,
+                                value: currentPlayer.seasonStats.goalsConceded,  // Using currentPlayer
                                 label: "Goals Conceded",
                                 isEditMode: isEditMode,
                                 onValueChange: { onStatChange?("goalsConceded", $0) }
@@ -653,7 +662,7 @@ struct PlayerStatsCard: View {
                     Group {
                         if visibilitySettings.showYellowCards {
                             EditableStatsStatItem(
-                                value: player.seasonStats.yellowCards,
+                                value: currentPlayer.seasonStats.yellowCards,  // Using currentPlayer
                                 label: "Yellow",
                                 isEditMode: isEditMode,
                                 onValueChange: { onStatChange?("yellowCards", $0) }
@@ -662,7 +671,7 @@ struct PlayerStatsCard: View {
                         
                         if visibilitySettings.showRedCards {
                             EditableStatsStatItem(
-                                value: player.seasonStats.redCards,
+                                value: currentPlayer.seasonStats.redCards,  // Using currentPlayer
                                 label: "Red",
                                 isEditMode: isEditMode,
                                 onValueChange: { onStatChange?("redCards", $0) }
@@ -671,7 +680,7 @@ struct PlayerStatsCard: View {
                         
                         if visibilitySettings.showGamesPlayed {
                             EditableStatsStatItem(
-                                value: player.seasonStats.gamesPlayed,
+                                value: currentPlayer.seasonStats.gamesPlayed,  // Using currentPlayer
                                 label: "Games",
                                 isEditMode: isEditMode,
                                 onValueChange: { onStatChange?("gamesPlayed", $0) }
@@ -680,7 +689,7 @@ struct PlayerStatsCard: View {
                         
                         if visibilitySettings.showTotalPlayingTime, let team = team {
                             PlayingTimeStatItem(
-                                player: player,
+                                player: currentPlayer,  // Using currentPlayer
                                 team: team,
                                 isEditMode: isEditMode,
                                 onValueChange: { onStatChange?("minutesPlayed", $0) }
@@ -689,7 +698,7 @@ struct PlayerStatsCard: View {
                         
                         if visibilitySettings.showRelativePlayingTime, let team = team {
                             RelativePlayingTimeStatItem(
-                                player: player,
+                                player: currentPlayer,  // Using currentPlayer
                                 team: team
                             )
                         }
@@ -907,7 +916,7 @@ struct PlayerStatsTeamSection: View {
     }
     
     private func updatePlayerStat(player: Player, statType: String, newValue: Int) {
-        // Find the team and player to update
+        // Update TeamManager (existing code)
         guard let teamIndex = teamManager.teams.firstIndex(where: { $0.id == team.id }),
               let playerIndex = teamManager.teams[teamIndex].players.firstIndex(where: { $0.id == player.id }) else {
             return
@@ -919,26 +928,33 @@ struct PlayerStatsTeamSection: View {
             teamManager.teams[teamIndex].players[playerIndex].seasonStats.goals = newValue
         case "assists":
             teamManager.teams[teamIndex].players[playerIndex].seasonStats.assists = newValue
-        case "shots":
-            teamManager.teams[teamIndex].players[playerIndex].seasonStats.shots = newValue
-        case "saves":
-            teamManager.teams[teamIndex].players[playerIndex].seasonStats.saves = newValue
-        case "goalsConceded":
-            teamManager.teams[teamIndex].players[playerIndex].seasonStats.goalsConceded = newValue
-        case "yellowCards":
-            teamManager.teams[teamIndex].players[playerIndex].seasonStats.yellowCards = newValue
-        case "redCards":
-            teamManager.teams[teamIndex].players[playerIndex].seasonStats.redCards = newValue
-        case "gamesPlayed":
-            teamManager.teams[teamIndex].players[playerIndex].seasonStats.gamesPlayed = newValue
-        case "minutesPlayed":
-            teamManager.teams[teamIndex].players[playerIndex].seasonStats.minutesPlayed = newValue
+        // ... etc
         default:
             break
         }
         
-        // Save the changes
-        teamManager.updateTeam(teamManager.teams[teamIndex])
+        // NEW: Update any local team bindings that might exist
+        // This mirrors what automatic stats do
+        if let localTeamIndex = teamManager.teams.firstIndex(where: { $0.id == team.id }) {
+            let updatedTeam = teamManager.teams[localTeamIndex]
+            
+            // Force TeamManager to notify all observers
+            DispatchQueue.main.async {
+                self.teamManager.objectWillChange.send()
+            }
+            
+            // Save to Firebase
+            if updatedTeam.useSubcollections {
+                Task {
+                    try await teamManager.firebaseManager.savePlayerToSubcollection(
+                        updatedTeam.players[playerIndex],
+                        in: updatedTeam
+                    )
+                }
+            } else {
+                teamManager.updateTeam(updatedTeam)
+            }
+        }
     }
     // Add this method to PlayerStatsTeamSection
     private func recalculateStatsForTeam() {

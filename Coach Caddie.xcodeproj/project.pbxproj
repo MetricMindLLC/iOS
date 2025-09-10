@@ -34,6 +34,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		FE28D8092E707B8900BA491E /* Coach Caddie.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "Coach Caddie.entitlements"; sourceTree = "<group>"; };
+		FE5CD8272E6E0ED400B6B07E /* Coach CaddieDebug.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "Coach CaddieDebug.entitlements"; sourceTree = "<group>"; };
 		FE7B1A4B2E25702900F3F140 /* Coach Caddie.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Coach Caddie.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		FE7B1A582E25702B00F3F140 /* Coach CaddieTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Coach CaddieTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		FE7B1A622E25702B00F3F140 /* Coach CaddieUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Coach CaddieUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -92,6 +94,8 @@
 		FE7B1A422E25702900F3F140 = {
 			isa = PBXGroup;
 			children = (
+				FE28D8092E707B8900BA491E /* Coach Caddie.entitlements */,
+				FE5CD8272E6E0ED400B6B07E /* Coach CaddieDebug.entitlements */,
 				FE7B1A4D2E25702900F3F140 /* Coach_Caddie */,
 				FE7B1A5B2E25702B00F3F140 /* Coach_CaddieTests */,
 				FE7B1A652E25702B00F3F140 /* Coach_CaddieUITests */,
@@ -423,9 +427,10 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "Coach CaddieDebug.entitlements";
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 10;
+				CURRENT_PROJECT_VERSION = 14;
 				DEVELOPMENT_TEAM = N46B389T6Y;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -459,10 +464,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "Coach Caddie.entitlements";
 				CODE_SIGN_IDENTITY = "Apple Development";
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 10;
-				DEVELOPMENT_TEAM = N46B389T6Y;
+				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Distribution";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 14;
+				DEVELOPMENT_TEAM = "";
+				"DEVELOPMENT_TEAM[sdk=iphoneos*]" = N46B389T6Y;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Coach-Caddie-Info.plist";
@@ -480,6 +488,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = metricmind.coachcaddie;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
+				"PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]" = "MetricMinc LLC App Store Dist";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;

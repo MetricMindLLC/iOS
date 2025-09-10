@@ -61,13 +61,38 @@ struct ExpiredTrialUpgradeView: View {
                         .disabled(storeKit.purchaseInProgress)
                     }
                     
-                    // Basic Access Option
-                    Button("Continue with Limited Access") {
-                        // Allow basic read-only access
-                        dismiss()
+                    // Info text about access
+                    VStack(spacing: 8) {
+                        Text("You can still:")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                        
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.green)
+                                Text("View your existing team data")
+                                Spacer()
+                            }
+                            HStack {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.green)
+                                Text("Join teams using invite codes")
+                                Spacer()
+                            }
+                            HStack {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.green)
+                                Text("Export your data")
+                                Spacer()
+                            }
+                        }
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                     }
-                    .font(.subheadline)
-                    .foregroundColor(.blue)
+                    .padding()
+                    .background(Color(.systemGray6))
+                    .cornerRadius(8)
                     .padding(.top)
                 }
                 .padding()

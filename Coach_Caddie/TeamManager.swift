@@ -85,35 +85,38 @@ class TeamManager: ObservableObject {
         }
     }
     
-    var teamsICreated: [Team] {
-        guard let currentUser = Auth.auth().currentUser else { return [] }
-        
-        // Check if cache is still valid
-        if let cacheTime = teamOwnershipCacheTimestamp,
-           Date().timeIntervalSince(cacheTime) < teamOwnershipCacheExpiration,
-           !cachedTeamOwnership.isEmpty {
-            // Use cached results
-            let created = teams.filter { cachedTeamOwnership[$0.id] == true }
-            return created
-        }
-        
-        // Cache is expired or empty, recalculate and cache
-        cachedTeamOwnership.removeAll()
-        
-        for team in teams {
-            let isOwner = team.coachUID == currentUser.uid
-            cachedTeamOwnership[team.id] = isOwner
-        }
-        
-        teamOwnershipCacheTimestamp = Date()
-        
+var teamsICreated: [Team] {
+    guard let currentUser = Auth.auth().currentUser else { return [] }
+    
+    // Don't refresh cache if there are no teams
+    guard !teams.isEmpty else { return [] }
+    
+    // Check if cache is still valid
+    if let cacheTime = teamOwnershipCacheTimestamp,
+       Date().timeIntervalSince(cacheTime) < teamOwnershipCacheExpiration,
+       !cachedTeamOwnership.isEmpty {
+        // Use cached results
         let created = teams.filter { cachedTeamOwnership[$0.id] == true }
-        
-        // Only log once when cache is refreshed
-        print("🔍 Team ownership cache refreshed: \(created.count) out of \(teams.count) total teams")
-        
         return created
     }
+    
+    // Cache is expired or empty, recalculate and cache
+    cachedTeamOwnership.removeAll()
+    
+    for team in teams {
+        let isOwner = team.coachUID == currentUser.uid
+        cachedTeamOwnership[team.id] = isOwner
+    }
+    
+    teamOwnershipCacheTimestamp = Date()
+    
+    let created = teams.filter { cachedTeamOwnership[$0.id] == true }
+    
+    // Only log when cache is actually refreshed
+    print("🔍 Team ownership cache refreshed: \(created.count) out of \(teams.count) total teams")
+    
+    return created
+}
 
     var teamsIWasInvitedTo: [Team] {
         guard let currentUser = Auth.auth().currentUser else { return [] }
