@@ -68,28 +68,46 @@ struct OnboardingView: View {
                         .padding(.horizontal)
                         
                         // Sign in with Apple
-                        Button(action: signInWithApple) {
-                            HStack(spacing: 12) {
-                                if isLoadingApple {
-                                    ProgressView()
-                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                        .scaleEffect(0.8)
-                                } else {
-                                    Image(systemName: "apple.logo")
-                                        .font(.system(size: 20, weight: .semibold))
-                                    
-                                    Text("Sign in with Apple")
-                                        .fontWeight(.semibold)
+                        VStack(spacing: 8) {
+                            Button(action: signInWithApple) {
+                                HStack(spacing: 12) {
+                                    if isLoadingApple {
+                                        ProgressView()
+                                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                            .scaleEffect(0.8)
+                                    } else {
+                                        Image(systemName: "apple.logo")
+                                            .font(.system(size: 20, weight: .semibold))
+                                        
+                                        Text("Sign in with Apple")
+                                            .fontWeight(.semibold)
+                                    }
                                 }
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 16)
+                                .background(Color.black)
+                                .cornerRadius(12)
+                                .padding(.horizontal)
                             }
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 16)
-                            .background(Color.black)
-                            .cornerRadius(12)
+                            .disabled(isLoadingApple)
+                            
+                            // Policy disclaimer for Apple Sign-In
+                            HStack(spacing: 12) {
+                                Link("Terms", destination: URL(string: "https://www.metric-mind.com/coachcaddieterms")!)
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                
+                                Text("•")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                
+                                Link("Privacy", destination: URL(string: "https://www.metric-mind.com/coachcaddieprivacy")!)
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
                             .padding(.horizontal)
                         }
-                        .disabled(isLoadingApple)
                         
                         // Sign In
                         Button(action: { showingSignIn = true }) {
@@ -228,7 +246,6 @@ struct OnboardingView: View {
         }
     }
 }
-
 // MARK: - Invite Code Flow View (Google Sign-In Removed)
 struct InviteCodeFlowView: View {
     @EnvironmentObject var authManager: FirebaseAuthManager
@@ -399,28 +416,54 @@ struct InviteCodeFlowView: View {
                     .cornerRadius(12)
                 }
                 
-                // Apple Sign-In option
-                Button(action: signInWithAppleForInvite) {
-                    HStack(spacing: 12) {
-                        if isLoadingApple {
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                .scaleEffect(0.8)
-                        } else {
-                            Image(systemName: "apple.logo")
-                                .font(.system(size: 20, weight: .semibold))
+                // Apple Sign-In option with policy links
+                VStack(spacing: 12) {
+                    Button(action: signInWithAppleForInvite) {
+                        HStack(spacing: 12) {
+                            if isLoadingApple {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                    .scaleEffect(0.8)
+                            } else {
+                                Image(systemName: "apple.logo")
+                                    .font(.system(size: 20, weight: .semibold))
+                                
+                                Text("Create Account with Apple")
+                                    .fontWeight(.semibold)
+                            }
+                        }
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                        .background(Color.black)
+                        .cornerRadius(12)
+                    }
+                    .disabled(isLoadingApple)
+                    
+                    // Policy links for Apple Sign-In in invite flow
+                    VStack(spacing: 4) {
+                        Text("By creating an account, you agree to our")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        
+                        HStack(spacing: 16) {
+                            Link("Terms and Conditions", destination: URL(string: "https://www.metric-mind.com/coachcaddieterms")!)
+                                .font(.caption2)
+                                .foregroundColor(Color(red: 0.05, green: 0.15, blue: 0.35))
+                                .underline()
                             
-                            Text("Create Account with Apple")
-                                .fontWeight(.semibold)
+                            Text("and")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                            
+                            Link("Privacy Policy", destination: URL(string: "https://www.metric-mind.com/coachcaddieprivacy")!)
+                                .font(.caption2)
+                                .foregroundColor(Color(red: 0.05, green: 0.15, blue: 0.35))
+                                .underline()
                         }
                     }
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                    .background(Color.black)
-                    .cornerRadius(12)
+                    .padding(.top, 8)
                 }
-                .disabled(isLoadingApple)
             }
             .padding(.horizontal)
             
@@ -574,6 +617,8 @@ struct InviteCreateAccountView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var showError = false
+    @State private var agreedToTerms = false
+    @State private var showingTerms = false
     
     var isFormValid: Bool {
         !email.isEmpty &&
@@ -581,7 +626,8 @@ struct InviteCreateAccountView: View {
         !confirmPassword.isEmpty &&
         !displayName.isEmpty &&
         password == confirmPassword &&
-        password.count >= 6
+        password.count >= 6 &&
+        agreedToTerms
     }
     
     var body: some View {
@@ -651,6 +697,43 @@ struct InviteCreateAccountView: View {
                                 .foregroundColor(.red)
                         }
                     }
+                    
+                    // Terms and Privacy Agreement Section
+                    Button(action: { agreedToTerms.toggle() }) {
+                        HStack(spacing: 8) {
+                            Image(systemName: agreedToTerms ? "checkmark.square.fill" : "square")
+                                .foregroundColor(agreedToTerms ? Color(red: 0.13, green: 0.47, blue: 0.25) : .gray)
+                            
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(spacing: 0) {
+                                    Text("I agree to the ")
+                                        .font(.caption)
+                                        .foregroundColor(.primary)
+                                    
+                                    Button("Terms and Conditions") {
+                                        showingTerms = true
+                                    }
+                                    .font(.caption)
+                                    .foregroundColor(Color(red: 0.05, green: 0.15, blue: 0.35))
+                                    .underline()
+                                }
+                                
+                                HStack(spacing: 0) {
+                                    Text("and ")
+                                        .font(.caption)
+                                        .foregroundColor(.primary)
+                                    
+                                    Link("Privacy Policy", destination: URL(string: "https://www.metric-mind.com/coachcaddieprivacy")!)
+                                        .font(.caption)
+                                        .foregroundColor(Color(red: 0.05, green: 0.15, blue: 0.35))
+                                        .underline()
+                                }
+                            }
+                            
+                            Spacer()
+                        }
+                    }
+                    .buttonStyle(PlainButtonStyle())
                 }
                 
                 Button(action: createAccount) {
@@ -678,6 +761,9 @@ struct InviteCreateAccountView: View {
             Button("OK") { }
         } message: {
             Text(errorMessage ?? "An unknown error occurred")
+        }
+        .sheet(isPresented: $showingTerms) {
+            TermsAndConditionsView()
         }
     }
     
@@ -762,7 +848,7 @@ struct SignUpView: View {
                 VStack(spacing: 20) {
                     headerSection
                     
-                    // Apple Sign-In option at top
+                    // Apple Sign-In option at top with policy links
                     VStack(spacing: 12) {
                         Text("Quick Sign Up")
                             .font(.headline)
@@ -789,6 +875,29 @@ struct SignUpView: View {
                             .cornerRadius(12)
                         }
                         .disabled(isLoadingApple)
+                        
+                        // Policy links for Apple Sign-In
+                        VStack(spacing: 4) {
+                            Text("By signing up with Apple, you agree to our")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                            
+                            HStack(spacing: 16) {
+                                Link("Terms and Conditions", destination: URL(string: "https://www.metric-mind.com/coachcaddieterms")!)
+                                    .font(.caption2)
+                                    .foregroundColor(Color(red: 0.05, green: 0.15, blue: 0.35))
+                                    .underline()
+                                
+                                Text("and")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                
+                                Link("Privacy Policy", destination: URL(string: "https://www.metric-mind.com/coachcaddieprivacy")!)
+                                    .font(.caption2)
+                                    .foregroundColor(Color(red: 0.05, green: 0.15, blue: 0.35))
+                                    .underline()
+                            }
+                        }
                         
                         // Divider
                         HStack {
@@ -1127,17 +1236,30 @@ struct SignUpView: View {
                 Image(systemName: agreedToTerms ? "checkmark.square.fill" : "square")
                     .foregroundColor(agreedToTerms ? Color(red: 0.13, green: 0.47, blue: 0.25) : .gray)
                 
-                HStack(spacing: 0) {
-                    Text("I agree to the ")
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 0) {
+                        Text("I agree to the ")
+                            .font(.caption)
+                            .foregroundColor(.primary)
+                        
+                        Button("Terms and Conditions") {
+                            showingTerms = true
+                        }
                         .font(.caption)
-                        .foregroundColor(.primary)
-                    
-                    Button("Terms and Conditions") {
-                        showingTerms = true
+                        .foregroundColor(Color(red: 0.05, green: 0.15, blue: 0.35))
+                        .underline()
                     }
-                    .font(.caption)
-                    .foregroundColor(Color(red: 0.05, green: 0.15, blue: 0.35))
-                    .underline()
+                    
+                    HStack(spacing: 0) {
+                        Text("and ")
+                            .font(.caption)
+                            .foregroundColor(.primary)
+                        
+                        Link("Privacy Policy", destination: URL(string: "https://www.metric-mind.com/coachcaddieprivacy")!)
+                            .font(.caption)
+                            .foregroundColor(Color(red: 0.05, green: 0.15, blue: 0.35))
+                            .underline()
+                    }
                 }
                 
                 Spacer()

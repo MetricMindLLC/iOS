@@ -713,7 +713,7 @@ struct TeamGamesTab: View {
                 TeamEmptyGamesView(showingNewGame: $showingNewGame)
             } else {
                 List {
-                    ForEach(team.games.sorted(by: { $0.date > $1.date })) { game in
+                    ForEach(team.games.sorted(by: { $0.date < $1.date })) { game in
                         Button(action: {
                             selectedGame = game
                             showingGameDetail = true
