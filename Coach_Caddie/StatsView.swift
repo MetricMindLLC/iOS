@@ -132,24 +132,24 @@ struct EnhancedQuickStatsView: View {
 //            }
             
 //            // Edit mode toggle - only show for Players tab
-//            if selectedStatType == "Players" {
-//                HStack {
-//                    Spacer()
-//                    Button(action: { isEditMode.toggle() }) {
-//                        HStack(spacing: 4) {
-//                            Image(systemName: isEditMode ? "checkmark.circle.fill" : "pencil.circle")
-//                            Text(isEditMode ? "Done" : "Edit")
-//                        }
-//                        .font(.subheadline)
-//                        .padding(.horizontal, 12)
-//                        .padding(.vertical, 6)
-//                        .background(isEditMode ? Color.green : Color.blue)
-//                        .foregroundColor(.white)
-//                        .cornerRadius(8)
-//                    }
-//                }
-//            }
-//            
+            if selectedStatType == "Players" {
+                HStack {
+                    Spacer()
+                    Button(action: { isEditMode.toggle() }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: isEditMode ? "checkmark.circle.fill" : "pencil.circle")
+                            Text(isEditMode ? "Done" : "Edit")
+                        }
+                        .font(.subheadline)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(isEditMode ? Color.green : Color.blue)
+                        .foregroundColor(.white)
+                        .cornerRadius(8)
+                    }
+                }
+            }
+//
             // Stat type selector
             Picker("Stat Type", selection: $selectedStatType) {
                 Text("Overview").tag("Overview")
@@ -901,9 +901,9 @@ struct PlayerStatsTeamSection: View {
                             player: player,
                             isEditMode: isEditMode,
                             onStatChange: { statType, newValue in
-                                updatePlayerStat(player: player, statType: statType, newValue: newValue)
+                                updatePlayerStat(player: player, statType: statType, newValue: newValue, team: team)  // ADDED team parameter
                             },
-                            team: team  // NEW: Pass team for visibility settings
+                            team: team
                         )
                         .padding(.horizontal)
                         .background(Color(.systemBackground))
@@ -915,45 +915,54 @@ struct PlayerStatsTeamSection: View {
         }
     }
     
-    private func updatePlayerStat(player: Player, statType: String, newValue: Int) {
-        // Update TeamManager (existing code)
+    private func updatePlayerStat(player: Player, statType: String, newValue: Int, team: Team) {
+        // Find the team and player indices
         guard let teamIndex = teamManager.teams.firstIndex(where: { $0.id == team.id }),
               let playerIndex = teamManager.teams[teamIndex].players.firstIndex(where: { $0.id == player.id }) else {
+            print("⚠️ Could not find team or player indices")
             return
         }
         
-        // Update the specific stat
+        // Create a mutable copy of the player
+        var updatedPlayer = teamManager.teams[teamIndex].players[playerIndex]
+        
+        // Update the specific stat based on type
         switch statType {
         case "goals":
-            teamManager.teams[teamIndex].players[playerIndex].seasonStats.goals = newValue
+            updatedPlayer.seasonStats.goals = newValue
         case "assists":
-            teamManager.teams[teamIndex].players[playerIndex].seasonStats.assists = newValue
-        // ... etc
+            updatedPlayer.seasonStats.assists = newValue
+        case "shots":
+            updatedPlayer.seasonStats.shots = newValue
+        case "saves":
+            updatedPlayer.seasonStats.saves = newValue
+        case "goalsConceded":
+            updatedPlayer.seasonStats.goalsConceded = newValue
+        case "yellowCards":
+            updatedPlayer.seasonStats.yellowCards = newValue
+        case "redCards":
+            updatedPlayer.seasonStats.redCards = newValue
+        case "gamesPlayed":
+            updatedPlayer.seasonStats.gamesPlayed = newValue
+        case "minutesPlayed":
+            updatedPlayer.seasonStats.minutesPlayed = newValue
+        case "shotOnTarget":
+            updatedPlayer.seasonStats.shotOnTarget = newValue
         default:
-            break
+            print("⚠️ Unknown stat type: \(statType)")
+            return
         }
         
-        // NEW: Update any local team bindings that might exist
-        // This mirrors what automatic stats do
-        if let localTeamIndex = teamManager.teams.firstIndex(where: { $0.id == team.id }) {
-            let updatedTeam = teamManager.teams[localTeamIndex]
-            
-            // Force TeamManager to notify all observers
-            DispatchQueue.main.async {
-                self.teamManager.objectWillChange.send()
-            }
-            
-            // Save to Firebase
-            if updatedTeam.useSubcollections {
-                Task {
-                    try await teamManager.firebaseManager.savePlayerToSubcollection(
-                        updatedTeam.players[playerIndex],
-                        in: updatedTeam
-                    )
-                }
-            } else {
-                teamManager.updateTeam(updatedTeam)
-            }
+        print("✅ Updated \(statType) for \(player.name) to \(newValue)")
+        
+        // Use the TeamManager's updatePlayer method which handles saves efficiently
+        // This method already handles subcollections vs non-subcollections internally
+        // and only updates the player, not the entire team with all games
+        teamManager.updatePlayer(in: team, player: updatedPlayer)
+        
+        // Force UI refresh
+        DispatchQueue.main.async {
+            self.teamManager.objectWillChange.send()
         }
     }
     // Add this method to PlayerStatsTeamSection

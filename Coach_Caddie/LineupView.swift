@@ -533,7 +533,7 @@ struct LineupView: View {
         
         if game.startingLineup == nil || game.startingLineup?.isEmpty == true {
             game.startingLineup = lineupPositions  // Preserve original starting lineup
-            print("Ã°Å¸â€™Â¾ Saved starting lineup with \(lineupPositions.count) positions")
+            print("Saved starting lineup with \(lineupPositions.count) positions")
         }
 
         // CRITICAL: Initialize game data structure for subcollections
@@ -582,7 +582,7 @@ struct LineupView: View {
         checkAndExecutePlannedSubstitutions()
         startGameTimer()
         
-        print("Ã¢ÂÂ° Initialized time tracking for \(game.playerStats.count) starting players")
+        print("Initialized time tracking for \(game.playerStats.count) starting players")
     }
     
     private func exitGameMode() {
@@ -613,9 +613,9 @@ struct LineupView: View {
     
     private func endGame() {
         let gameId = selectedGame?.id.uuidString ?? "nil"
-        print("Ã°Å¸ÂÂ END GAME ACTION STARTED - Game ID: \(gameId)")
-        print("Ã°Å¸ÂÂ Game has \(selectedGame?.playerStats.count ?? 0) player stats before processing")
-        print("Ã°Å¸ÂÂ Current game isCompleted: \(selectedGame?.isCompleted ?? false)")
+        print("END GAME ACTION STARTED - Game ID: \(gameId)")
+        print("Game has \(selectedGame?.playerStats.count ?? 0) player stats before processing")
+        print("Current game isCompleted: \(selectedGame?.isCompleted ?? false)")
         
         // Add game end to audit log
         gameStateManager.addAuditEntry(
@@ -623,48 +623,48 @@ struct LineupView: View {
             gameTime: gameStateManager.auditLogTime,
             details: "Game ended"
         )
-        print("Ã°Å¸â€œÂ Added game end to audit log")
+        print("Added game end to audit log")
         
         // Complete all the critical game saving steps
         guard let currentGame = selectedGame else {
-            print("Ã¢ÂÅ’ ERROR: selectedGame is nil, cannot process game completion")
+            print("ERROR: selectedGame is nil, cannot process game completion")
             return
         }
         
         var updatedGame = currentGame
-        print("Ã°Å¸Å½Â® Processing game: \(updatedGame.opponent) - \(updatedGame.id)")
+        print("Processing game: \(updatedGame.opponent) - \(updatedGame.id)")
         
         // 1. Save final audit log from gameStateManager
         if let activeState = gameStateManager.activeGameState {
             updatedGame.auditLog = activeState.auditLog
-            print("Ã°Å¸â€œâ€¹ Saved \(updatedGame.auditLog?.count ?? 0) audit log entries")
+            print("Saved \(updatedGame.auditLog?.count ?? 0) audit log entries")
             
             // Save formation from active state
             updatedGame.formation = activeState.formation
-            print("Ã°Å¸â€œÂ Saved formation: \(updatedGame.formation?.rawValue ?? "none")")
+            print("Saved formation: \(updatedGame.formation?.rawValue ?? "none")")
         }
         
         // 2. The playerStats and substitutions are already in updatedGame (currentGame)
         // They've been updated throughout the game via updatePlayerStats and executeAutomaticSubstitution
-        print("Ã°Å¸â€œÅ  Game has \(updatedGame.playerStats.count) player stats")
-        print("Ã°Å¸â€â€ž Game has \(updatedGame.substitutions.count) substitutions")
+        print("Game has \(updatedGame.playerStats.count) player stats")
+        print("Game has \(updatedGame.substitutions.count) substitutions")
         
         // 3. Save starting lineup (if not already saved)
         if updatedGame.startingLineup == nil || updatedGame.startingLineup?.isEmpty == true {
-            print("Ã¢Å¡ Ã¯Â¸Â WARNING: startingLineup missing - should have been set at game start!")
+            print("WARNING: startingLineup missing - should have been set at game start!")
         }
         
         // 4. Save actual starting lineup used during game
         updatedGame.actualStartingLineup = lineupPositions
-        print("Ã°Å¸Å½Â¯ Updated actual current lineup with \(lineupPositions.count) positions")
+        print("Updated actual current lineup with \(lineupPositions.count) positions")
         
         // 5. CRITICAL: Mark game as completed
         updatedGame.isCompleted = true
-        print("Ã¢Å“â€¦ Marked game as completed: \(updatedGame.isCompleted)")
+        print("Marked game as completed: \(updatedGame.isCompleted)")
         
         // 6. Close out any remaining time entries for players still on field
         let finalMinute = gameStateManager.calculatedMinute
-        print("Ã¢ÂÂ±Ã¯Â¸Â Final game time: \(finalMinute) minutes")
+        print("Final game time: \(finalMinute) minutes")
         
         var playersWithOpenTime = 0
         for index in updatedGame.playerStats.indices {
@@ -680,10 +680,10 @@ struct LineupView: View {
             }
             updatedGame.playerStats[index].minutesPlayed = totalMinutes
         }
-        print("Ã¢ÂÂ±Ã¯Â¸Â Closed time entries for \(playersWithOpenTime) players")
+        print("Closed time entries for \(playersWithOpenTime) players")
         
         // 7. Reset player game stats before recalculating from audit log
-        print("Ã°Å¸â€â€ž Resetting player stats before recalculating from audit log")
+        print("Resetting player stats before recalculating from audit log")
         for index in updatedGame.playerStats.indices {
             // Keep minutes played as calculated above
             let savedMinutes = updatedGame.playerStats[index].minutesPlayed
@@ -706,7 +706,7 @@ struct LineupView: View {
         // 8. Consolidate stats from audit log to ensure accuracy
         var statsUpdated = 0
         if let auditLog = updatedGame.auditLog {
-            print("Ã°Å¸â€œÅ  Processing \(auditLog.count) audit log entries for stats")
+            print("Processing \(auditLog.count) audit log entries for stats")
             for entry in auditLog {
                 guard let playerId = entry.playerId else { continue }
                 
@@ -746,10 +746,10 @@ struct LineupView: View {
                 }
             }
         }
-        print("Ã°Å¸â€œÅ  Updated \(statsUpdated) individual stats from audit log")
+        print("Updated \(statsUpdated) individual stats from audit log")
         
         // 9. Update season stats for all players who participated
-        print("Ã°Å¸Ââ€  Updating season stats for players")
+        print("Updating season stats for players")
         var seasonStatsUpdated = 0
         
         // Create a mutable copy of the team
@@ -768,28 +768,28 @@ struct LineupView: View {
                 updatedTeam.players[playerIndex].seasonStats.gamesPlayed += 1
                 seasonStatsUpdated += 1
                 
-                print("Ã°Å¸Ââ€  Updated season stats for \(updatedTeam.players[playerIndex].name)")
+                print("Updated season stats for \(updatedTeam.players[playerIndex].name)")
             }
         }
-        print("Ã°Å¸Ââ€  Updated season stats for \(seasonStatsUpdated) players")
+        print("Updated season stats for \(seasonStatsUpdated) players")
         
         // 10. Update game in team games array
         if let gameIndex = updatedTeam.games.firstIndex(where: { $0.id == updatedGame.id }) {
             updatedTeam.games[gameIndex] = updatedGame
-            print("Ã°Å¸Å½Â® Updated game in team games array")
+            print("Updated game in team games array")
         } else {
-            print("Ã¢ÂÅ’ Could not find game in team games array")
+            print("Could not find game in team games array")
         }
         
-        print("Ã°Å¸Å½Â® Team has \(updatedTeam.games.count) games")
-        print("Ã°Å¸Å½Â® Final game state - isCompleted: \(updatedGame.isCompleted), playerStats: \(updatedGame.playerStats.count), auditLog: \(updatedGame.auditLog?.count ?? 0), substitutions: \(updatedGame.substitutions.count)")
+        print("Team has \(updatedTeam.games.count) games")
+        print("Final game state - isCompleted: \(updatedGame.isCompleted), playerStats: \(updatedGame.playerStats.count), auditLog: \(updatedGame.auditLog?.count ?? 0), substitutions: \(updatedGame.substitutions.count)")
         
         // 11. Update TeamManager's teams array FIRST
         if let teamIndex = teamManager.teams.firstIndex(where: { $0.id == updatedTeam.id }) {
             teamManager.teams[teamIndex] = updatedTeam
-            print("Ã°Å¸â€™Â¾ Updated TeamManager's teams array at index \(teamIndex)")
+            print("Updated TeamManager's teams array at index \(teamIndex)")
         } else {
-            print("Ã¢ÂÅ’ Could not find team in TeamManager's teams array!")
+            print("Could not find team in TeamManager's teams array!")
         }
 
         // 12. Update local references
@@ -798,44 +798,44 @@ struct LineupView: View {
 
         // 13. DEBUG: Verify the updated game is in the team
         if let completedGame = updatedTeam.games.first(where: { $0.id == updatedGame.id }) {
-            print("Ã°Å¸â€Â DEBUG: Found updated game in team - isCompleted: \(completedGame.isCompleted)")
-            print("Ã°Å¸â€Â DEBUG: Game playerStats count: \(completedGame.playerStats.count)")
-            print("Ã°Å¸â€Â DEBUG: Game auditLog count: \(completedGame.auditLog?.count ?? 0)")
-            print("Ã°Å¸â€Â DEBUG: Game substitutions count: \(completedGame.substitutions.count)")
-            print("Ã°Å¸â€Â DEBUG: Game actualStartingLineup count: \(completedGame.actualStartingLineup?.count ?? 0)")
+            print("DEBUG: Found updated game in team - isCompleted: \(completedGame.isCompleted)")
+            print("DEBUG: Game playerStats count: \(completedGame.playerStats.count)")
+            print("DEBUG: Game auditLog count: \(completedGame.auditLog?.count ?? 0)")
+            print("DEBUG: Game substitutions count: \(completedGame.substitutions.count)")
+            print("DEBUG: Game actualStartingLineup count: \(completedGame.actualStartingLineup?.count ?? 0)")
             
             if completedGame.isCompleted && !completedGame.playerStats.isEmpty {
-                print("Ã°Å¸â€Â DEBUG: Ã¢Å“â€¦ GAME DATA LOOKS GOOD - should save to Firebase")
+                print("DEBUG: GAME DATA LOOKS GOOD - should save to Firebase")
             } else {
-                print("Ã°Å¸â€Â DEBUG: Ã¢ÂÅ’ GAME DATA IS MISSING")
+                print("DEBUG: GAME DATA IS MISSING")
             }
         } else {
-            print("Ã°Å¸â€Â DEBUG: Ã¢ÂÅ’ Could not find updated game in team!")
+            print("DEBUG: Could not find updated game in team!")
         }
 
         // 14. CRITICAL: Prevent Firebase race conditions
-        print("Ã°Å¸â€â€¡ Preventing Firebase race conditions during game completion")
-        print("Ã°Å¸Å¡Â« Requesting TeamManager to cancel pending Firebase updates")
+        print("Preventing Firebase race conditions during game completion")
+        print("Requesting TeamManager to cancel pending Firebase updates")
         
         // 15. Force immediate save with listener protection
-        print("Ã°Å¸â€™Â¾ About to force immediate save with listener protection")
+        print("About to force immediate save with listener protection")
         Task {
             await teamManager.updateTeamImmediatelyForActiveGame(updatedTeam, activeGameId: updatedGame.id)
         }
-        print("Ã°Å¸â€™Â¾ Immediate save completed")
+        print("Immediate save completed")
         
         // 16. Wait a moment then allow normal operations to resume
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-            print("Ã°Å¸â€Å  Resuming normal Firebase operations after game completion")
+            print("Resuming normal Firebase operations after game completion")
         }
         
-        print("Ã¢Å“â€¦ Game completed and all data saved successfully")
+        print("Game completed and all data saved successfully")
         
         // 17. Clear game state and UI
-        print("Ã°Å¸Â§Â¹ Clearing game state and UI")
+        print("Clearing game state and UI")
         gameStateManager.endGameSession()
         gameStateManager.clearPersistedGameState()
-        print("Ã°Å¸â€”â€˜Ã¯Â¸Â Cleared persisted game state")
+        print("Cleared persisted game state")
         
         // Clear lineup positions
         for index in lineupPositions.indices {
@@ -857,7 +857,7 @@ struct LineupView: View {
         let impactFeedback = UIImpactFeedbackGenerator(style: .heavy)
         impactFeedback.impactOccurred()
         
-        print("Ã°Å¸ÂÂ END GAME ACTION COMPLETED")
+        print("END GAME ACTION COMPLETED")
     }
     // MARK: - Helper Methods
     private func enterActiveGameMode() {
@@ -920,7 +920,7 @@ struct LineupView: View {
         let impactFeedback = UIImpactFeedbackGenerator(style: .heavy)
         impactFeedback.impactOccurred()
         
-        print("Ã°Å¸Â§Â¹ Cleared all game data including time tracking")
+        print("Cleared all game data including time tracking")
     }
     
     private func updateGameInTeam(_ game: Game) {
@@ -983,7 +983,7 @@ struct LineupView: View {
     private func initializeStartingLineupTime() {
         guard var game = selectedGame else { return }
         
-        print("Ã¢ÂÂ±Ã¯Â¸Â Initializing starting lineup time tracking...")
+        print("Initializing starting lineup time tracking...")
         
         // Clear any existing time entries to prevent duplicates
         game.playerStats.removeAll()
@@ -996,7 +996,7 @@ struct LineupView: View {
                 playerStats.timeEntries.append(TimeEntry(enteredAt: 0, exitedAt: nil))
                 game.playerStats.append(playerStats)
                 
-                print("Ã¢Å“â€¦ Initialized time tracking for starting player \(getPlayerName(playerId)) from minute 0")
+                print("Initialized time tracking for starting player \(getPlayerName(playerId)) from minute 0")
             }
         }
         
@@ -1007,7 +1007,7 @@ struct LineupView: View {
         
         // FIXED: Use active game context for time initialization
         teamManager.updateTeam(team, activeGameId: game.id)
-        print("Ã°Å¸Å½Â¯ Completed starting lineup time initialization for \(game.playerStats.count) players")
+        print("Completed starting lineup time initialization for \(game.playerStats.count) players")
     }
     
     private func clearLineup() {
@@ -1323,7 +1323,7 @@ struct LineupView: View {
             
             teamManager.updateTeam(team, activeGameId: game.id)
             
-            print("Ã°Å¸â€â€ž POSITION CHANGE: \(getPlayerName(plannedPosChange.playerId)) \(plannedPosChange.fromPosition.abbreviation) Ã¢â€ â€™ \(plannedPosChange.toPosition.abbreviation) at \(currentMinute)'")
+            print("POSITION CHANGE: \(getPlayerName(plannedPosChange.playerId)) \(plannedPosChange.fromPosition.abbreviation)  \(plannedPosChange.toPosition.abbreviation) at \(currentMinute)'")
         }
     }
     
@@ -4063,7 +4063,7 @@ struct UpcomingGameRowView: View {
                             .fontWeight(.medium)
                         
                         if let location = game.location {
-                            Text("Ã¢â‚¬Â¢ \(location)")
+                            Text(" - \(location)")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -4154,7 +4154,7 @@ struct CompletedGameRowView: View {
                             .fontWeight(.medium)
                         
                         if let location = game.location {
-                            Text("Ã¢â‚¬Â¢ \(location)")
+                            Text(" - \(location)")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -5379,12 +5379,12 @@ struct ModernGameModeView: View {
             case .goal, .redCard:
                 // Critical events - save immediately for live view with active game context
                 await teamManager.updateTeamImmediatelyForActiveGame(team, activeGameId: game.id)
-                print("Ã°Å¸Å¡Â¨ Critical event - immediate sync for live view")
+                print("Critical event - immediate sync for live view")
                 
             case .yellowCard, .save, .assist:
                 // Important events - use live game debounce (1.5 seconds) with active game context
                 teamManager.updateTeam(team, activeGameId: game.id)
-                print("Ã¢Å¡Â¡ Important event - fast sync for live view")
+                print("Important event - fast sync for live view")
                 
             default:
                 // Other events - normal debounced sync with active game context
@@ -5392,7 +5392,7 @@ struct ModernGameModeView: View {
             }
         }
         
-        print("Ã¢Å“â€¦ Updated stats for \(player.name): \(event.rawValue)")
+        print("Updated stats for \(player.name): \(event.rawValue)")
     }
     
     // MARK: - Audit Log Management (unchanged)
@@ -6657,6 +6657,7 @@ struct GameDetailView: View {
     @State private var shareImage: UIImage?
     @State private var showingDeleteAlert = false
     @State private var showingOptionsMenu = false
+    @State private var showingEditGame = false
     @Environment(\.presentationMode) var presentationMode
     @EnvironmentObject var teamManager: TeamManager
     @EnvironmentObject var gameStateManager: GameStateManager
@@ -6841,6 +6842,9 @@ struct GameDetailView: View {
             ActionSheet(
                 title: Text("Game Options"),
                 buttons: [
+                    .default(Text("Edit Game")) {
+                        showingEditGame = true
+                    },
                     .default(Text("Share Game Report")) {
                         shareCurrentTab()
                     },
@@ -6855,6 +6859,10 @@ struct GameDetailView: View {
             if let image = shareImage {
                 ShareSheet(activityItems: [image])
             }
+        }
+        .sheet(isPresented: $showingEditGame) {
+            EditGameView(game: $game, team: .constant(team))
+                .environmentObject(teamManager)
         }
         .alert("Delete Game", isPresented: $showingDeleteAlert) {
             Button("Cancel", role: .cancel) { }

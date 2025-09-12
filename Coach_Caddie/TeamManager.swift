@@ -1521,11 +1521,52 @@ var teamsICreated: [Team] {
     }
     
     func updateGame(in team: Team, game: Game) {
+        print("🎯 TeamManager.updateGame() called")
+        print("   Team: \(team.name) (ID: \(team.id))")
+        print("   Game: \(game.opponent) (ID: \(game.id))")
+        
         if let teamIndex = teams.firstIndex(where: { $0.id == team.id }) {
+            print("   ✅ Found team at index \(teamIndex)")
+            
             if let gameIndex = teams[teamIndex].games.firstIndex(where: { $0.id == game.id }) {
+                print("   ✅ Found game at index \(gameIndex)")
+                print("   📝 Updating local game data...")
+                
                 teams[teamIndex].games[gameIndex] = game
-                updateTeam(teams[teamIndex])
+                teams[teamIndex].updateActivityTimestamp()
+                
+                print("   💾 Saving locally...")
+                debouncedSave()
+                
+                // Handle Firebase save efficiently based on subcollection support
+                if teams[teamIndex].useSubcollections && isOnline {
+                    // For subcollection teams, save only the updated game
+                    Task {
+                        do {
+                            guard await ensureAuthentication() else { return }
+                            print("   🎯 Saving ONLY this game to subcollection (not all 10 games)")
+                            try await firebaseManager.saveGameWithSubcollections(game, in: teams[teamIndex])
+                            print("   ✅ Updated single game in subcollection: \(game.opponent)")
+                        } catch {
+                            await MainActor.run {
+                                self.setError("Failed to update game: \(error.localizedDescription)")
+                                // Add to pending changes as fallback
+                                self.addToPendingChanges("update_game_\(game.id.uuidString)", action: "update_game", teamId: team.id.uuidString)
+                            }
+                        }
+                    }
+                } else {
+                    // For non-subcollection teams or offline, use full team update
+                    print("   📦 Using full team save (non-subcollection team or offline)")
+                    updateTeam(teams[teamIndex])
+                }
+                
+                print("   ✅ updateGame() completed")
+            } else {
+                print("   ❌ Game not found in team.games array!")
             }
+        } else {
+            print("   ❌ Team not found in teams array!")
         }
     }
     
