@@ -881,7 +881,7 @@ struct TeamInviteGeneratorView: View {
             accessDetails = "read-only access to team information"
         }
         
-        let appStoreURL = "https://apps.apple.com/app/coach-caddie/id123456789"
+        let appStoreURL = "https://apps.apple.com/us/app/coach-caddie/id6749924032"
         
         let message = """
         🏆 You've been invited to join "\(team.name)" as a \(accessDescription)!

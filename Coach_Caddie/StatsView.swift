@@ -131,24 +131,24 @@ struct EnhancedQuickStatsView: View {
 //                .pickerStyle(.segmented)
 //            }
             
-//            // Edit mode toggle - only show for Players tab
-            if selectedStatType == "Players" {
-                HStack {
-                    Spacer()
-                    Button(action: { isEditMode.toggle() }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: isEditMode ? "checkmark.circle.fill" : "pencil.circle")
-                            Text(isEditMode ? "Done" : "Edit")
-                        }
-                        .font(.subheadline)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(isEditMode ? Color.green : Color.blue)
-                        .foregroundColor(.white)
-                        .cornerRadius(8)
-                    }
-                }
-            }
+////            // Edit mode toggle - only show for Players tab
+//            if selectedStatType == "Players" {
+//                HStack {
+//                    Spacer()
+//                    Button(action: { isEditMode.toggle() }) {
+//                        HStack(spacing: 4) {
+//                            Image(systemName: isEditMode ? "checkmark.circle.fill" : "pencil.circle")
+//                            Text(isEditMode ? "Done" : "Edit")
+//                        }
+//                        .font(.subheadline)
+//                        .padding(.horizontal, 12)
+//                        .padding(.vertical, 6)
+//                        .background(isEditMode ? Color.green : Color.blue)
+//                        .foregroundColor(.white)
+//                        .cornerRadius(8)
+//                    }
+//                }
+//            }
 //
             // Stat type selector
             Picker("Stat Type", selection: $selectedStatType) {
