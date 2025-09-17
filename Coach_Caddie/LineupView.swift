@@ -4666,7 +4666,7 @@ struct ModernPlayerCard: View {
                 ZStack {
                     Circle()
                         .fill(team.primaryColor)
-                        .frame(width: 50, height: 50)
+                        .frame(width: 42, height: 42)
                     
                     Text(String(player.jerseyNumber))
                         .font(.headline)
@@ -4903,7 +4903,7 @@ struct ModernPositionMarker: View {
     
     // UPDATED: Adaptive chip sizing based on screen size and density
     private var adaptiveChipSize: CGFloat {
-        let baseSize: CGFloat = 48
+        let baseSize: CGFloat = 40
         let screenWidth = UIScreen.main.bounds.width
         let screenFactor = min(screenWidth / 375, 1.15) // Scale for larger screens
         return baseSize * screenFactor
@@ -5827,7 +5827,7 @@ struct ModernGameModeView: View {
                     ZStack {
                         Circle()
                             .fill(position.color)
-                            .frame(width: 48, height: 48)
+                            .frame(width: 40, height: 40)
                         
                         Text(String(player.jerseyNumber))
                             .font(.system(size: 16, weight: .bold))
@@ -5912,7 +5912,7 @@ struct ModernGameModeView: View {
                     ZStack {
                         Circle()
                             .fill(Color.gray.opacity(0.3))
-                            .frame(width: 50, height: 50)
+                            .frame(width: 42, height: 42)
                         
                         Text(String(player.jerseyNumber))
                             .font(.headline)

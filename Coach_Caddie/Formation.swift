@@ -12,12 +12,31 @@ enum Formation: String, CaseIterable, Codable {
     case formation541 = "5-4-1"
     case formation41212 = "4-1-2-1-2"
     
+    // NEW 11v11 formations
+    case formation4141 = "4-1-4-1"
+    case formation31312 = "3-1-3-1-2"
+    case formation3313 = "3-3-1-3"
+    case formation4222 = "4-2-2-2"
+    case formation5221 = "5-2-2-1"
+    case formation4321 = "4-3-2-1"
+    case formation3421 = "3-4-2-1"
+    case formation4132 = "4-1-3-2"
+    case formation523 = "5-2-3"
+    case formation3142 = "3-1-4-2"
+    case formation4411 = "4-4-1-1"
+    case formation5131 = "5-1-3-1"
+    
     // 7v7 formations
     case formation7v7_312 = "3-1-2"
     case formation7v7_213 = "2-1-3"
     case formation7v7_321 = "3-2-1"
     case formation7v7_222 = "2-2-2"
-    case formation7v7_231 = "2-3-1"  // NEW 7v7 formation
+    case formation7v7_231 = "2-3-1"
+    case formation7v7_141 = "1-4-1"
+    case formation7v7_132 = "1-3-2"
+    case formation7v7_123 = "1-2-3"
+    case formation7v7_411 = "4-1-1"
+    case formation7v7_212 = "2-1-2"
     
     // 9v9 formations
     case formation9v9_3212 = "3-2-1-2"
@@ -27,6 +46,13 @@ enum Formation: String, CaseIterable, Codable {
     case formation9v9_323 = "3-2-3"
     case formation9v9_332 = "3-3-2"
     case formation9v9_233 = "2-3-3"
+    case formation9v9_23221 = "2-3-2-1"
+    case formation9v9_251 = "2-5-1"
+    case formation9v9_3221 = "3-2-2-1"
+    case formation9v9_5111 = "5-1-1-1"
+    case formation9v9_4112 = "4-1-1-2"
+    case formation9v9_1331 = "1-3-3-1"
+    case formation9v9_1421 = "1-4-2-1"
     
     // 5v5 formations (NO goalkeeper)
     case formation5v5_1211 = "1-2-1-1"
@@ -114,6 +140,123 @@ enum Formation: String, CaseIterable, Codable {
                 .striker, .striker
             ]
             
+        // NEW 11v11 formations
+        case .formation4141:
+            return [
+                .goalkeeper,
+                .leftBack, .centerBack, .centerBack, .rightBack,
+                .defensiveMidfield,
+                .leftMidfield, .centerMidfield, .centerMidfield, .rightMidfield,
+                .striker
+            ]
+            
+        case .formation31312:
+            return [
+                .goalkeeper,
+                .centerBack, .centerBack, .centerBack,
+                .defensiveMidfield,
+                .leftMidfield, .centerMidfield, .rightMidfield,
+                .attackingMidfield,
+                .striker, .striker
+            ]
+            
+        case .formation3313:
+            return [
+                .goalkeeper,
+                .centerBack, .centerBack, .centerBack,
+                .leftMidfield, .centerMidfield, .rightMidfield,
+                .attackingMidfield,
+                .leftWing, .striker, .rightWing
+            ]
+            
+        case .formation4222:
+            return [
+                .goalkeeper,
+                .leftBack, .centerBack, .centerBack, .rightBack,
+                .centerMidfield, .centerMidfield,
+                .leftMidfield, .rightMidfield,
+                .striker, .striker
+            ]
+            
+        case .formation5221:
+            return [
+                .goalkeeper,
+                .leftBack, .centerBack, .centerBack, .centerBack, .rightBack,
+                .centerMidfield, .centerMidfield,
+                .leftMidfield, .rightMidfield,
+                .striker
+            ]
+            
+        case .formation4321:
+            return [
+                .goalkeeper,
+                .leftBack, .centerBack, .centerBack, .rightBack,
+                .leftMidfield, .centerMidfield, .rightMidfield,
+                .leftMidfield, .rightMidfield,
+                .striker
+            ]
+            
+        case .formation3421:
+            return [
+                .goalkeeper,
+                .centerBack, .centerBack, .centerBack,
+                .leftMidfield, .centerMidfield, .centerMidfield, .rightMidfield,
+                .leftMidfield, .rightMidfield,
+                .striker
+            ]
+            
+        case .formation4132:
+            return [
+                .goalkeeper,
+                .leftBack, .centerBack, .centerBack, .rightBack,
+                .defensiveMidfield,
+                .leftMidfield, .centerMidfield, .rightMidfield,
+                .striker, .striker
+            ]
+            
+        case .formation523:
+            return [
+                .goalkeeper,
+                .leftBack, .centerBack, .centerBack, .centerBack, .rightBack,
+                .centerMidfield, .centerMidfield,
+                .leftWing, .striker, .rightWing
+            ]
+            
+        case .formation3142:
+            return [
+                .goalkeeper,
+                .centerBack, .centerBack, .centerBack,
+                .defensiveMidfield,
+                .leftMidfield, .centerMidfield, .centerMidfield, .rightMidfield,
+                .striker, .striker
+            ]
+            
+        case .formation442:
+            return [
+                .goalkeeper,
+                .leftBack, .centerBack, .centerBack, .rightBack,
+                .defensiveMidfield, .leftMidfield, .rightMidfield, .attackingMidfield,
+                .striker, .striker
+            ]
+            
+        case .formation4411:
+            return [
+                .goalkeeper,
+                .leftBack, .centerBack, .centerBack, .rightBack,
+                .leftMidfield, .centerMidfield, .centerMidfield, .rightMidfield,
+                .attackingMidfield,
+                .striker
+            ]
+            
+        case .formation5131:
+            return [
+                .goalkeeper,
+                .leftBack, .centerBack, .centerBack, .centerBack, .rightBack,
+                .defensiveMidfield,
+                .leftMidfield, .centerMidfield, .rightMidfield,
+                .striker
+            ]
+            
         // 7v7 formations (6 field players + 1 goalkeeper = 7 total)
         case .formation7v7_312:
             return [
@@ -154,6 +297,47 @@ enum Formation: String, CaseIterable, Codable {
                 .centerBack, .centerBack,
                 .leftMidfield, .centerMidfield, .rightMidfield,
                 .striker
+            ]
+            
+        // NEW 7v7 formations
+        case .formation7v7_141: // Defensive
+            return [
+                .goalkeeper,
+                .centerBack,
+                .leftMidfield, .centerMidfield, .centerMidfield, .rightMidfield,
+                .striker
+            ]
+            
+        case .formation7v7_132: // Balanced
+            return [
+                .goalkeeper,
+                .centerBack,
+                .leftMidfield, .centerMidfield, .rightMidfield,
+                .striker, .striker
+            ]
+            
+        case .formation7v7_123: // Attacking
+            return [
+                .goalkeeper,
+                .centerBack,
+                .centerMidfield, .centerMidfield,
+                .leftWing, .striker, .rightWing
+            ]
+            
+        case .formation7v7_411: // Ultra Defensive
+            return [
+                .goalkeeper,
+                .leftBack, .centerBack, .centerBack, .rightBack,
+                .centerMidfield,
+                .striker
+            ]
+            
+        case .formation7v7_212: // Balanced
+            return [
+                .goalkeeper,
+                .centerBack, .centerBack,
+                .centerMidfield,
+                .striker, .striker
             ]
             
         // 9v9 formations (8 field players + 1 goalkeeper = 9 total)
@@ -214,6 +398,70 @@ enum Formation: String, CaseIterable, Codable {
                 .centerBack, .centerBack,
                 .leftMidfield, .centerMidfield, .rightMidfield,
                 .leftWing, .striker, .rightWing
+            ]
+            
+        // NEW 9v9 formations
+        case .formation9v9_23221:
+            return [
+                .goalkeeper,
+                .centerBack, .centerBack,
+                .leftMidfield, .rightMidfield, .centerMidfield,
+                .attackingMidfield, .attackingMidfield,
+                .striker
+            ]
+            
+        case .formation9v9_251:
+            return [
+                .goalkeeper,
+                .centerBack, .centerBack,
+                .leftMidfield, .centerMidfield, .centerMidfield, .centerMidfield, .rightMidfield,
+                .striker
+            ]
+            
+        case .formation9v9_3221:
+            return [
+                .goalkeeper,
+                .centerBack, .centerBack, .centerBack,
+                .centerMidfield, .centerMidfield,
+                .leftMidfield, .rightMidfield,
+                .striker
+            ]
+            
+        case .formation9v9_5111:
+            return [
+                .goalkeeper,
+                .leftBack, .centerBack, .centerBack, .centerBack, .rightBack,
+                .centerMidfield,
+                .centerMidfield,
+                .striker
+            ]
+            
+        case .formation9v9_4112:
+            return [
+                .goalkeeper,
+                .leftBack, .centerBack, .centerBack, .rightBack,
+                .centerMidfield,
+                .centerMidfield,
+                .striker, .striker
+            ]
+
+            
+        case .formation9v9_1331:
+            return [
+                .goalkeeper,
+                .centerBack,
+                .leftMidfield, .centerMidfield, .rightMidfield,
+                .leftMidfield, .centerMidfield, .rightMidfield,
+                .striker
+            ]
+            
+        case .formation9v9_1421:
+            return [
+                .goalkeeper,
+                .centerBack,
+                .leftMidfield, .centerMidfield, .centerMidfield, .rightMidfield,
+                .leftMidfield, .rightMidfield,
+                .striker
             ]
             
         // 5v5 formations (5 field players, NO goalkeeper)
@@ -454,6 +702,188 @@ enum Formation: String, CaseIterable, Codable {
                 safePoint(0.88, 0.72)   // ST
             ]
             
+        // NEW 11v11 formations
+        case .formation4141:
+            return [
+                safePoint(0.03, 0.5),   // GK
+                safePoint(0.26, 0.08),  // LB
+                safePoint(0.26, 0.32),  // CB
+                safePoint(0.26, 0.68),  // CB
+                safePoint(0.26, 0.92),  // RB
+                safePoint(0.4, 0.5),    // CDM
+                safePoint(0.55, 0.12),  // LM
+                safePoint(0.55, 0.35),  // CM
+                safePoint(0.55, 0.65),  // CM
+                safePoint(0.55, 0.88),  // RM
+                safePoint(0.88, 0.5)    // ST
+            ]
+            
+        case .formation31312:
+            return [
+                safePoint(0.03, 0.5),   // GK
+                safePoint(0.26, 0.25),  // CB
+                safePoint(0.26, 0.5),   // CB
+                safePoint(0.26, 0.75),  // CB
+                safePoint(0.4, 0.5),    // CDM
+                safePoint(0.55, 0.15),  // LM
+                safePoint(0.55, 0.5),   // CM
+                safePoint(0.55, 0.85),  // RM
+                safePoint(0.7, 0.5),    // CAM
+                safePoint(0.88, 0.28),  // ST
+                safePoint(0.88, 0.72)   // ST
+            ]
+            
+        case .formation3313:
+            return [
+                safePoint(0.03, 0.5),   // GK
+                safePoint(0.26, 0.25),  // CB
+                safePoint(0.26, 0.5),   // CB
+                safePoint(0.26, 0.75),  // CB
+                safePoint(0.5, 0.15),   // LM
+                safePoint(0.5, 0.5),    // CM
+                safePoint(0.5, 0.85),   // RM
+                safePoint(0.7, 0.5),    // CAM
+                safePoint(0.85, 0.12),  // LW
+                safePoint(0.92, 0.5),   // ST
+                safePoint(0.85, 0.88)   // RW
+            ]
+            
+        case .formation4222:
+            return [
+                safePoint(0.03, 0.5),   // GK
+                safePoint(0.26, 0.08),  // LB
+                safePoint(0.26, 0.32),  // CB
+                safePoint(0.26, 0.68),  // CB
+                safePoint(0.26, 0.92),  // RB
+                safePoint(0.48, 0.32),  // CM
+                safePoint(0.48, 0.68),  // CM
+                safePoint(0.7, 0.15),   // LM
+                safePoint(0.7, 0.85),   // RM
+                safePoint(0.88, 0.28),  // ST
+                safePoint(0.88, 0.72)   // ST
+            ]
+            
+        case .formation5221:
+            return [
+                safePoint(0.05, 0.5),   // GK
+                safePoint(0.26, 0.1),   // LB
+                safePoint(0.26, 0.3),   // CB
+                safePoint(0.26, 0.5),   // CB
+                safePoint(0.26, 0.7),   // CB
+                safePoint(0.26, 0.9),   // RB
+                safePoint(0.5, 0.32),   // CM
+                safePoint(0.5, 0.68),   // CM
+                safePoint(0.72, 0.15),  // LM
+                safePoint(0.72, 0.85),  // RM
+                safePoint(0.88, 0.5)    // ST
+            ]
+            
+        case .formation4321:
+            return [
+                safePoint(0.03, 0.5),   // GK
+                safePoint(0.26, 0.08),  // LB
+                safePoint(0.26, 0.32),  // CB
+                safePoint(0.26, 0.68),  // CB
+                safePoint(0.26, 0.92),  // RB
+                safePoint(0.48, 0.15),  // LM
+                safePoint(0.48, 0.5),   // CM
+                safePoint(0.48, 0.85),  // RM
+                safePoint(0.7, 0.25),   // LM
+                safePoint(0.7, 0.75),   // RM
+                safePoint(0.88, 0.5)    // ST
+            ]
+            
+        case .formation3421:
+            return [
+                safePoint(0.03, 0.5),   // GK
+                safePoint(0.26, 0.25),  // CB
+                safePoint(0.26, 0.5),   // CB
+                safePoint(0.26, 0.75),  // CB
+                safePoint(0.48, 0.08),  // LM
+                safePoint(0.48, 0.35),  // CM
+                safePoint(0.48, 0.65),  // CM
+                safePoint(0.48, 0.92),  // RM
+                safePoint(0.7, 0.25),   // LM
+                safePoint(0.7, 0.75),   // RM
+                safePoint(0.88, 0.5)    // ST
+            ]
+            
+        case .formation4132:
+            return [
+                safePoint(0.03, 0.5),   // GK
+                safePoint(0.26, 0.08),  // LB
+                safePoint(0.26, 0.32),  // CB
+                safePoint(0.26, 0.68),  // CB
+                safePoint(0.26, 0.92),  // RB
+                safePoint(0.4, 0.5),    // CDM
+                safePoint(0.55, 0.15),  // LM
+                safePoint(0.55, 0.5),   // CM
+                safePoint(0.55, 0.85),  // RM
+                safePoint(0.88, 0.28),  // ST
+                safePoint(0.88, 0.72)   // ST
+            ]
+            
+        case .formation523:
+            return [
+                safePoint(0.05, 0.5),   // GK
+                safePoint(0.26, 0.1),   // LB
+                safePoint(0.26, 0.3),   // CB
+                safePoint(0.26, 0.5),   // CB
+                safePoint(0.26, 0.7),   // CB
+                safePoint(0.26, 0.9),   // RB
+                safePoint(0.5, 0.32),   // CM
+                safePoint(0.5, 0.68),   // CM
+                safePoint(0.85, 0.12),  // LW
+                safePoint(0.92, 0.5),   // ST
+                safePoint(0.85, 0.88)   // RW
+            ]
+            
+        case .formation3142:
+            return [
+                safePoint(0.03, 0.5),   // GK
+                safePoint(0.26, 0.25),  // CB
+                safePoint(0.26, 0.5),   // CB
+                safePoint(0.26, 0.75),  // CB
+                safePoint(0.4, 0.5),    // CDM
+                safePoint(0.55, 0.12),  // LM
+                safePoint(0.55, 0.32),  // CM
+                safePoint(0.55, 0.68),  // CM
+                safePoint(0.55, 0.88),  // RM
+                safePoint(0.88, 0.28),  // ST
+                safePoint(0.88, 0.72)   // ST
+            ]
+
+            
+        case .formation4411:
+            return [
+                safePoint(0.03, 0.5),   // GK
+                safePoint(0.26, 0.08),  // LB
+                safePoint(0.26, 0.32),  // CB
+                safePoint(0.26, 0.68),  // CB
+                safePoint(0.26, 0.92),  // RB
+                safePoint(0.48, 0.12),  // LM
+                safePoint(0.48, 0.35),  // CM
+                safePoint(0.48, 0.65),  // CM
+                safePoint(0.48, 0.88),  // RM
+                safePoint(0.7, 0.5),    // CAM
+                safePoint(0.88, 0.5)    // ST
+            ]
+            
+        case .formation5131:
+            return [
+                safePoint(0.05, 0.5),   // GK
+                safePoint(0.26, 0.1),   // LB
+                safePoint(0.26, 0.3),   // CB
+                safePoint(0.26, 0.5),   // CB
+                safePoint(0.26, 0.7),   // CB
+                safePoint(0.26, 0.9),   // RB
+                safePoint(0.4, 0.5),    // CDM
+                safePoint(0.58, 0.15),  // LM
+                safePoint(0.58, 0.5),   // CM
+                safePoint(0.58, 0.85),  // RM
+                safePoint(0.88, 0.5)    // ST
+            ]
+            
         // 7v7 formations - Enhanced spacing
         case .formation7v7_312:
             return [
@@ -513,6 +943,63 @@ enum Formation: String, CaseIterable, Codable {
                 safePoint(0.6, 0.88),   // RM (FIXED: was at 0.12, now correctly right side)
                 safePoint(0.88, 0.5)    // ST
             ]
+            
+        // NEW 7v7 formations
+        case .formation7v7_141:
+            return [
+                safePoint(0.08, 0.5),   // GK
+                safePoint(0.32, 0.5),   // CB
+                safePoint(0.6, 0.08),   // LM (spread wider)
+                safePoint(0.6, 0.32),   // CM
+                safePoint(0.6, 0.68),   // CM
+                safePoint(0.6, 0.92),   // RM (spread wider)
+                safePoint(0.88, 0.5)    // ST
+            ]
+            
+        case .formation7v7_132:
+            return [
+                safePoint(0.08, 0.5),   // GK
+                safePoint(0.32, 0.5),   // CB
+                safePoint(0.6, 0.15),   // LM
+                safePoint(0.6, 0.5),    // CM
+                safePoint(0.6, 0.85),   // RM
+                safePoint(0.88, 0.28),  // ST
+                safePoint(0.88, 0.72)   // ST
+            ]
+            
+        case .formation7v7_123:
+            return [
+                safePoint(0.08, 0.5),   // GK
+                safePoint(0.32, 0.5),   // CB
+                safePoint(0.6, 0.32),   // CM
+                safePoint(0.6, 0.68),   // CM
+                safePoint(0.82, 0.12),  // LW
+                safePoint(0.92, 0.5),   // ST
+                safePoint(0.82, 0.88)   // RW
+            ]
+            
+        case .formation7v7_411:
+            return [
+                safePoint(0.08, 0.5),   // GK
+                safePoint(0.32, 0.08),  // LB
+                safePoint(0.32, 0.32),  // CB
+                safePoint(0.32, 0.68),  // CB
+                safePoint(0.32, 0.92),  // RB
+                safePoint(0.6, 0.5),    // CM
+                safePoint(0.88, 0.5)    // ST
+            ]
+            
+            
+        case .formation7v7_212:
+            return [
+                safePoint(0.08, 0.5),   // GK
+                safePoint(0.32, 0.25),  // CB
+                safePoint(0.32, 0.75),  // CB
+                safePoint(0.6, 0.5),    // CM
+                safePoint(0.88, 0.28),  // ST
+                safePoint(0.88, 0.72)   // ST
+            ]
+            
             
         // 9v9 formations - Enhanced spacing
         case .formation9v9_3212:
@@ -623,6 +1110,99 @@ enum Formation: String, CaseIterable, Codable {
                 safePoint(0.84, 0.12),  // FWD
                 safePoint(0.84, 0.5),   // FWD
                 safePoint(0.84, 0.88)   // FWD
+            ]
+            
+        // NEW 9v9 formations
+        case .formation9v9_23221:
+            return [
+                safePoint(0.08, 0.5),   // GK
+                safePoint(0.28, 0.25),  // CB
+                safePoint(0.28, 0.75),  // CB
+                safePoint(0.48, 0.12),  // LM
+                safePoint(0.48, 0.88),  // RM
+                safePoint(0.48, 0.5),   // CM
+                safePoint(0.68, 0.25),  // CAM
+                safePoint(0.68, 0.75),  // CAM
+                safePoint(0.88, 0.5)    // ST
+            ]
+            
+        case .formation9v9_251:
+            return [
+                safePoint(0.08, 0.5),   // GK
+                safePoint(0.28, 0.25),  // CB
+                safePoint(0.28, 0.75),  // CB
+                safePoint(0.55, 0.1),   // LM
+                safePoint(0.55, 0.32),  // CM
+                safePoint(0.55, 0.5),   // CM
+                safePoint(0.55, 0.68),  // CM
+                safePoint(0.55, 0.9),   // RM
+                safePoint(0.88, 0.5)    // ST
+            ]
+
+        case .formation9v9_3221:
+            return [
+                safePoint(0.08, 0.5),   // GK
+                safePoint(0.28, 0.15),  // CB
+                safePoint(0.28, 0.5),   // CB
+                safePoint(0.28, 0.85),  // CB
+                safePoint(0.52, 0.28),  // CM
+                safePoint(0.52, 0.72),  // CM
+                safePoint(0.72, 0.25),  // LM
+                safePoint(0.72, 0.75),  // RM
+                safePoint(0.88, 0.5)    // ST
+            ]
+            
+        
+        case .formation9v9_5111:
+            return [
+                safePoint(0.08, 0.5),   // GK
+                safePoint(0.28, 0.1),  // LB (spread wider)
+                safePoint(0.28, 0.32),  // CB
+                safePoint(0.28, 0.5),   // CB
+                safePoint(0.28, 0.68),  // CB
+                safePoint(0.28, 0.9),  // RB (spread wider)
+                safePoint(0.52, 0.5),   // CM
+                safePoint(0.72, 0.5),   // CM
+                safePoint(0.88, 0.5)    // ST
+            ]
+        
+        case .formation9v9_4112:
+            return [
+                safePoint(0.08, 0.5),   // GK
+                safePoint(0.28, 0.1),  // LB
+                safePoint(0.28, 0.32),  // CB
+                safePoint(0.28, 0.68),  // CB
+                safePoint(0.28, 0.9),  // RB
+                safePoint(0.52, 0.5),   // CM
+                safePoint(0.72, 0.5),   // CM
+                safePoint(0.88, 0.28),  // ST
+                safePoint(0.88, 0.72)   // ST
+            ]
+            
+        case .formation9v9_1331:
+            return [
+                safePoint(0.08, 0.5),   // GK
+                safePoint(0.28, 0.5),   // CB
+                safePoint(0.48, 0.15),  // LM
+                safePoint(0.48, 0.5),   // CM
+                safePoint(0.48, 0.85),  // RM
+                safePoint(0.68, 0.15),  // LM
+                safePoint(0.68, 0.5),   // CM
+                safePoint(0.68, 0.85),  // RM
+                safePoint(0.88, 0.5)    // ST
+            ]
+            
+        case .formation9v9_1421:
+            return [
+                safePoint(0.08, 0.5),   // GK
+                safePoint(0.28, 0.5),   // CB
+                safePoint(0.48, 0.1),  // LM (spread wider)
+                safePoint(0.48, 0.32),  // CM
+                safePoint(0.48, 0.68),  // CM
+                safePoint(0.48, 0.9),  // RM (spread wider)
+                safePoint(0.68, 0.25),  // LM
+                safePoint(0.68, 0.75),  // RM
+                safePoint(0.88, 0.5)    // ST
             ]
             
         // 5v5 formations - Enhanced spacing (no goalkeeper)
@@ -821,11 +1401,13 @@ enum GameFormat: String, CaseIterable, Codable {
         case .fiveVFive:
             return [.formation5v5_1211, .formation5v5_2111, .formation5v5_131, .formation5v5_221, .formation5v5_23, .formation5v5_32]
         case .sevenVSeven:
-            return [.formation7v7_312, .formation7v7_213, .formation7v7_321, .formation7v7_222, .formation7v7_231]
+            return [.formation7v7_312, .formation7v7_213, .formation7v7_321, .formation7v7_222, .formation7v7_231,
+                    .formation7v7_141, .formation7v7_132, .formation7v7_123, .formation7v7_411,
+                     .formation7v7_212]
         case .nineVNine:
-            return [.formation9v9_3212, .formation9v9_3131, .formation9v9_4121, .formation9v9_413, .formation9v9_323, .formation9v9_332, .formation9v9_233]
-        case .elevenVEleven:
-            return [.formation442, .formation433, .formation352, .formation451, .formation343, .formation4231, .formation532, .formation541, .formation41212]
+            return [.formation9v9_3212, .formation9v9_3131, .formation9v9_4121, .formation9v9_413, .formation9v9_323, .formation9v9_332, .formation9v9_233,
+                    .formation9v9_23221, .formation9v9_251, .formation9v9_3221, .formation9v9_5111, .formation9vDevils89
+                    ormation4411, .formation5131]
         }
     }
     
@@ -838,11 +1420,3 @@ enum GameFormat: String, CaseIterable, Codable {
         }
     }
 }
-
-// MARK: - Extension for Team to get default formation
-extension Team {
-    var teamDefaultFormation: Formation {
-        return format.defaultFormation
-    }
-}
-
