@@ -46,7 +46,7 @@ enum Formation: String, CaseIterable, Codable {
     case formation9v9_323 = "3-2-3"
     case formation9v9_332 = "3-3-2"
     case formation9v9_233 = "2-3-3"
-    case formation9v9_23221 = "2-3-2-1"
+    case formation9v9_2321 = "2-3-2-1"
     case formation9v9_251 = "2-5-1"
     case formation9v9_3221 = "3-2-2-1"
     case formation9v9_5111 = "5-1-1-1"
@@ -401,7 +401,7 @@ enum Formation: String, CaseIterable, Codable {
             ]
             
         // NEW 9v9 formations
-        case .formation9v9_23221:
+        case .formation9v9_2321:
             return [
                 .goalkeeper,
                 .centerBack, .centerBack,
@@ -1113,7 +1113,7 @@ enum Formation: String, CaseIterable, Codable {
             ]
             
         // NEW 9v9 formations
-        case .formation9v9_23221:
+        case .formation9v9_2321:
             return [
                 safePoint(0.08, 0.5),   // GK
                 safePoint(0.28, 0.25),  // CB
@@ -1406,7 +1406,7 @@ enum GameFormat: String, CaseIterable, Codable {
                      .formation7v7_212]
         case .nineVNine:
             return [.formation9v9_3212, .formation9v9_3131, .formation9v9_4121, .formation9v9_413, .formation9v9_323, .formation9v9_332, .formation9v9_233,
-                    .formation9v9_23221, .formation9v9_251, .formation9v9_3221, .formation9v9_5111, .formation9v9_4112,
+                    .formation9v9_2321, .formation9v9_251, .formation9v9_3221, .formation9v9_5111, .formation9v9_4112,
                     .formation9v9_1331, .formation9v9_1421]
         case .elevenVEleven:
             return [.formation442, .formation433, .formation352, .formation451, .formation343, .formation4231, .formation532, .formation541, .formation41212,
