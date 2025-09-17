@@ -1406,8 +1406,12 @@ enum GameFormat: String, CaseIterable, Codable {
                      .formation7v7_212]
         case .nineVNine:
             return [.formation9v9_3212, .formation9v9_3131, .formation9v9_4121, .formation9v9_413, .formation9v9_323, .formation9v9_332, .formation9v9_233,
-                    .formation9v9_23221, .formation9v9_251, .formation9v9_3221, .formation9v9_5111, .formation9vDevils89
-                    ormation4411, .formation5131]
+                    .formation9v9_23221, .formation9v9_251, .formation9v9_3221, .formation9v9_5111, .formation9v9_4112,
+                    .formation9v9_1331, .formation9v9_1421]
+        case .elevenVEleven:
+            return [.formation442, .formation433, .formation352, .formation451, .formation343, .formation4231, .formation532, .formation541, .formation41212,
+                    .formation4141, .formation31312, .formation3313, .formation4222, .formation5221, .formation4321, .formation3421, .formation4132,
+                    .formation523, .formation3142, .formation4411, .formation5131]
         }
     }
     
