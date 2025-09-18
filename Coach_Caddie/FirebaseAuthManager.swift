@@ -415,7 +415,6 @@ class FirebaseAuthManager: NSObject, ObservableObject {
         }
     }
     
-    // MARK: - User Profile Management
     func loadUserProfile(for firebaseUser: FirebaseAuth.User) async {
         print("🔥 FirebaseAuthManager: Loading user profile for: \(firebaseUser.uid)")
         await MainActor.run {
@@ -465,6 +464,19 @@ class FirebaseAuthManager: NSObject, ObservableObject {
                     self.isLoading = false
                     print("🔥 FirebaseAuthManager: Profile loaded - isAuthenticated: \(self.isAuthenticated), needsMembershipSelection: \(self.needsMembershipSelection)")
                 }
+                
+                // NEW: Auto-check trial status after loading profile
+                if user.subscriptionLevel == .trial {
+                    print("🔥 FirebaseAuthManager: User has trial subscription, checking expiration status")
+                    do {
+                        try await checkTrialStatus()
+                        print("🔥 FirebaseAuthManager: Trial status check completed")
+                    } catch {
+                        print("⚠️ FirebaseAuthManager: Failed to check trial status: \(error)")
+                        // Don't throw - this is just a background check
+                    }
+                }
+                
             } else {
                 print("🔥 FirebaseAuthManager: User document doesn't exist, creating new user")
                 // Create new user profile without membership type

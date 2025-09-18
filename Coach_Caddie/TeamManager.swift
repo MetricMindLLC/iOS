@@ -320,6 +320,11 @@ var teamsICreated: [Team] {
     }
     
     func updateTeam(_ team: Team, activeGameId: UUID? = nil) {
+        guard canManageExistingTeams() else {
+            setError("Your subscription has expired. Please upgrade to continue managing your teams.")
+            return
+        }
+        
         print("🔥 updateTeam called for team: \(team.name)")
         print("🔥 Called from: \(Thread.callStackSymbols[1])")
         print("🔥 Team ID: \(team.id)")
@@ -1261,6 +1266,11 @@ var teamsICreated: [Team] {
     }
     
     func updatePlayer(in team: Team, player: Player) {
+        guard canManageExistingTeams() else {
+            setError("Your subscription has expired. Please upgrade to continue updating players.")
+            return
+        }
+        
         guard let teamIndex = teams.firstIndex(where: { $0.id == team.id }) else {
             print("⚠️ Team not found for player update")
             return
@@ -1303,6 +1313,11 @@ var teamsICreated: [Team] {
     }
     
     func addPlayer(to team: Team, player: Player) {
+        guard canManageExistingTeams() else {
+            setError("Your subscription has expired. Please upgrade to continue managing players.")
+            return
+        }
+        
         guard let teamIndex = teams.firstIndex(where: { $0.id == team.id }) else {
             print("⚠️ Team not found for player addition")
             return
@@ -1340,6 +1355,11 @@ var teamsICreated: [Team] {
     }
     
     func removePlayer(from team: Team, player: Player) {
+        guard canManageExistingTeams() else {
+            setError("Your subscription has expired. Please upgrade to continue managing players.")
+            return
+        }
+        
         guard let teamIndex = teams.firstIndex(where: { $0.id == team.id }) else {
             print("⚠️ Team not found for player removal")
             return
@@ -1500,6 +1520,11 @@ var teamsICreated: [Team] {
     }
     
     func addGame(to team: Team, game: Game) {
+        guard canManageExistingTeams() else {
+            setError("Your subscription has expired. Please upgrade to continue adding games.")
+            return
+        }
+        
         if let teamIndex = teams.firstIndex(where: { $0.id == team.id }) {
             teams[teamIndex].games.append(game)
             
@@ -1521,6 +1546,11 @@ var teamsICreated: [Team] {
     }
     
     func updateGame(in team: Team, game: Game) {
+        guard canManageExistingTeams() else {
+            setError("Your subscription has expired. Please upgrade to continue updating games.")
+            return
+        }
+        
         print("🎯 TeamManager.updateGame() called")
         print("   Team: \(team.name) (ID: \(team.id))")
         print("   Game: \(game.opponent) (ID: \(game.id))")
@@ -1570,7 +1600,24 @@ var teamsICreated: [Team] {
         }
     }
     
+    func canManageExistingTeams() -> Bool {
+        guard let authManager = authManager,
+              let currentUser = authManager.currentUser else { return false }
+        
+        // Block expired and cancelled users from managing teams
+        if currentUser.subscriptionLevel == .expired || currentUser.subscriptionLevel == .cancelled {
+            return false
+        }
+        
+        return true
+    }
+    
     func removeGame(from team: Team, game: Game) {
+        guard canManageExistingTeams() else {
+            setError("Your subscription has expired. Please upgrade to continue managing games.")
+            return
+        }
+        
         guard let teamIndex = teams.firstIndex(where: { $0.id == team.id }) else {
             print("❌ Team not found for game deletion")
             return
@@ -1677,6 +1724,11 @@ var teamsICreated: [Team] {
     }
     
     func addPractice(to team: Team, practice: Practice) {
+        guard canManageExistingTeams() else {
+            setError("Your subscription has expired. Please upgrade to continue managing practices.")
+            return
+        }
+        
         if let teamIndex = teams.firstIndex(where: { $0.id == team.id }) {
             teams[teamIndex].practices.append(practice)
             updateTeam(teams[teamIndex])
@@ -1684,6 +1736,11 @@ var teamsICreated: [Team] {
     }
     
     func updatePractice(in team: Team, practice: Practice) {
+        guard canManageExistingTeams() else {
+            setError("Your subscription has expired. Please upgrade to continue managing practices.")
+            return
+        }
+        
         if let teamIndex = teams.firstIndex(where: { $0.id == team.id }) {
             if let practiceIndex = teams[teamIndex].practices.firstIndex(where: { $0.id == practice.id }) {
                 teams[teamIndex].practices[practiceIndex] = practice
@@ -2510,7 +2567,6 @@ var teamsICreated: [Team] {
     }
 }
 
-// MARK: - User Team Limits Extension
 extension User {
     var maxTeamsAllowed: Int {
         switch subscriptionLevel {
@@ -2521,6 +2577,16 @@ extension User {
         case .free: return Int.max  // Legacy unlimited
         case .sharedAccess: return 0  // Can't create teams, only join
         case .cancelled, .expired: return 0
+        }
+    }
+    
+    // ADD THIS NEW PROPERTY
+    var canManageTeams: Bool {
+        switch subscriptionLevel {
+        case .expired, .cancelled:
+            return false
+        default:
+            return true
         }
     }
 }
