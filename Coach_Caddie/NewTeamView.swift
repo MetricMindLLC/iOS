@@ -385,6 +385,8 @@ struct NewTeamView: View {
             return 20  // Shorter for youth games
         case .sevenVSeven:
             return 25  // Medium for youth
+        case .eightVEight:
+            return 30  // Medium length for 8v8
         case .nineVNine:
             return 35  // Longer for older youth
         case .elevenVEleven:
@@ -493,6 +495,7 @@ extension TeamFormat {
         switch self {
         case .fiveVFive: return "5v5 (Youth)"
         case .sevenVSeven: return "7v7 (Youth)"
+        case .eightVEight: return "8v8 (Youth)"
         case .nineVNine: return "9v9 (Youth)"
         case .elevenVEleven: return "11v11 (Full Field)"
         }
@@ -516,6 +519,16 @@ extension Formation {
         case .formation7v7_213: return "2-1-3 (Attacking)"
         case .formation7v7_321: return "3-2-1 (Defensive)"
         case .formation7v7_222: return "2-2-2 (Box)"
+            
+            // 8v8 formations
+        case .formation8v8_322: return "3-2-2 (Balanced)"
+        case .formation8v8_313: return "3-1-3 (Attacking)"
+        case .formation8v8_331: return "3-3-1 (Midfield)"
+        case .formation8v8_241: return "2-4-1 (Wide)"
+        case .formation8v8_412: return "4-1-2 (Defensive)"
+        case .formation8v8_223: return "2-2-3 (Ultra Attack)"
+        case .formation8v8_421: return "4-2-1 (Solid)"
+        case .formation8v8_232: return "2-3-2 (Classic)"
             
             // 9v9 formations - UPDATED TO MATCH CURRENT FORMATIONS
         case .formation9v9_3212: return "3-2-1-2 (Balanced)"

@@ -1180,7 +1180,7 @@ struct LineupView: View {
             gameStateManager.addAuditEntry(
                 eventType: .substitution,
                 gameTime: gameStateManager.auditLogTime,
-                details: "AUTO: \(getPlayerName(plannedSub.playerOut)) (\(plannedSub.targetPosition.abbreviation)) â†” \(getPlayerName(plannedSub.playerIn)) (\(plannedSub.reason.rawValue))"
+                details: "AUTO: \(getPlayerName(plannedSub.playerOut)) (\(plannedSub.targetPosition.abbreviation))” \(getPlayerName(plannedSub.playerIn)) (\(plannedSub.reason.rawValue))"
             )
             
             // Mark as executed
@@ -1204,7 +1204,7 @@ struct LineupView: View {
             let impactFeedback = UIImpactFeedbackGenerator(style: .heavy)
             impactFeedback.impactOccurred()
             
-            print("AUTO SUB: \(getPlayerName(plannedSub.playerOut)) â†” \(getPlayerName(plannedSub.playerIn)) at \(currentMinute)'")
+            print("AUTO SUB: \(getPlayerName(plannedSub.playerOut))” \(getPlayerName(plannedSub.playerIn)) at \(currentMinute)'")
         }
     }
     
@@ -1215,13 +1215,13 @@ struct LineupView: View {
         
         // Check if this position change was already executed as part of a pair
         if plannedPosChange.isExecuted {
-            print("â­ï¸ SKIP: Position change already executed for \(getPlayerName(plannedPosChange.playerId))")
+            print("SKIP: Position change already executed for \(getPlayerName(plannedPosChange.playerId))")
             return
         }
         
         // Find the player who should be swapped (the one we're moving)
         guard let currentPlayerIndex = lineupPositions.firstIndex(where: { $0.playerId == plannedPosChange.playerId }) else {
-            print("âŒ ERROR: Could not find player \(getPlayerName(plannedPosChange.playerId)) in current lineup for position swap")
+            print("ERROR: Could not find player \(getPlayerName(plannedPosChange.playerId)) in current lineup for position swap")
             return
         }
         
@@ -1232,12 +1232,12 @@ struct LineupView: View {
         guard let targetPlayerIndex = lineupPositions.firstIndex(where: { position in
             position.position == plannedPosChange.toPosition && position.playerId != plannedPosChange.playerId
         }) else {
-            print("âŒ ERROR: Could not find a player currently playing \(plannedPosChange.toPosition.abbreviation) to swap with")
+            print("ERROR: Could not find a player currently playing \(plannedPosChange.toPosition.abbreviation) to swap with")
             return
         }
         
         guard let targetPlayerId = lineupPositions[targetPlayerIndex].playerId else {
-            print("âŒ ERROR: Target position has no player assigned")
+            print("ERROR: Target position has no player assigned")
             return
         }
         
@@ -1254,7 +1254,7 @@ struct LineupView: View {
         gameStateManager.addAuditEntry(
             eventType: .positionChange,
             gameTime: gameStateManager.auditLogTime,
-            details: "AUTO SWAP: \(getPlayerName(plannedPosChange.playerId)) â†” \(targetPlayerName) (\(actualCurrentPosition.abbreviation) â†” \(plannedPosChange.toPosition.abbreviation))"
+            details: "AUTO SWAP: \(getPlayerName(plannedPosChange.playerId))” \(targetPlayerName) (\(actualCurrentPosition.abbreviation)” \(plannedPosChange.toPosition.abbreviation))"
         )
         
         // Mark BOTH position changes as executed (since this is a paired swap)
@@ -1272,7 +1272,7 @@ struct LineupView: View {
         }) {
             game.plannedPositionChanges[pairedChangeIndex].isExecuted = true
             game.plannedPositionChanges[pairedChangeIndex].actualMinute = currentMinute
-            print("âœ… PAIRED: Also marked paired position change as executed for \(targetPlayerName)")
+            print("PAIRED: Also marked paired position change as executed for \(targetPlayerName)")
         }
         
         // Update game state manager
@@ -1286,7 +1286,7 @@ struct LineupView: View {
         
         teamManager.updateTeam(team, activeGameId: game.id)
         
-        print("ðŸ”„ POSITION SWAP: \(getPlayerName(plannedPosChange.playerId)) â†” \(targetPlayerName) at \(currentMinute)'")
+        print("POSITION SWAP: \(getPlayerName(plannedPosChange.playerId)) ” \(targetPlayerName) at \(currentMinute)'")
     }
     
     private func executeAutomaticPositionChange(_ plannedPosChange: PlannedPositionChange) {
@@ -1303,7 +1303,7 @@ struct LineupView: View {
             gameStateManager.addAuditEntry(
                 eventType: .positionChange,
                 gameTime: gameStateManager.auditLogTime,
-                details: "AUTO: \(getPlayerName(plannedPosChange.playerId)) \(plannedPosChange.fromPosition.abbreviation) â†’ \(plannedPosChange.toPosition.abbreviation)"
+                details: "AUTO: \(getPlayerName(plannedPosChange.playerId)) \(plannedPosChange.fromPosition.abbreviation) ’ \(plannedPosChange.toPosition.abbreviation)"
             )
             
             // Mark as executed
@@ -1856,13 +1856,13 @@ struct PositionSwapView: View {
                             .foregroundColor(.secondary)
                         
                         HStack {
-                            Text("\(playerA.name) â†’ \(posB.abbreviation)")
+                            Text("\(playerA.name) \(posB.abbreviation)")
                                 .font(.caption)
                                 .foregroundColor(.green)
                             
                             Spacer()
                             
-                            Text("\(playerB.name) â†’ \(posA.abbreviation)")
+                            Text("\(playerB.name) \(posA.abbreviation)")
                                 .font(.caption)
                                 .foregroundColor(.green)
                         }
@@ -3332,13 +3332,13 @@ struct AddSubstitutionView: View {
                                 .foregroundColor(.green)
                             
                             ForEach(playersOnFieldAtSelectedTime.prefix(5)) { player in
-                                Text("â€¢ \(player.name) (#\(player.jerseyNumber))")
+                                Text("\(player.name) (#\(player.jerseyNumber))")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                             }
                             
                             if playersOnFieldAtSelectedTime.count > 5 {
-                                Text("â€¢ ... and \(playersOnFieldAtSelectedTime.count - 5) more")
+                                Text("... and \(playersOnFieldAtSelectedTime.count - 5) more")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                             }
@@ -3350,13 +3350,13 @@ struct AddSubstitutionView: View {
                                 .foregroundColor(.blue)
                             
                             ForEach(playersOnBenchAtSelectedTime.prefix(5)) { player in
-                                Text("â€¢ \(player.name) (#\(player.jerseyNumber))")
+                                Text("\(player.name) (#\(player.jerseyNumber))")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                             }
                             
                             if playersOnBenchAtSelectedTime.count > 5 {
-                                Text("â€¢ ... and \(playersOnBenchAtSelectedTime.count - 5) more")
+                                Text("... and \(playersOnBenchAtSelectedTime.count - 5) more")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                             }
@@ -6084,7 +6084,7 @@ struct ModernGameModeView: View {
             gameStateManager.addAuditEntry(
                 eventType: .substitution,
                 gameTime: gameStateManager.auditLogTime,
-                details: "\(playerOut.name) â†” \(playerIn.name) (\(substitutionReason.rawValue))"
+                details: "\(playerOut.name) ” \(playerIn.name) (\(substitutionReason.rawValue))"
             )
             
             presentationMode.wrappedValue.dismiss()

@@ -26,6 +26,16 @@ enum Formation: String, CaseIterable, Codable {
     case formation4411 = "4-4-1-1"
     case formation5131 = "5-1-3-1"
     
+    // 8v8 formations
+    case formation8v8_322 = "3-2-2"
+    case formation8v8_313 = "3-1-3"
+    case formation8v8_331 = "3-3-1"
+    case formation8v8_241 = "2-4-1"
+    case formation8v8_412 = "4-1-2"
+    case formation8v8_223 = "2-2-3"
+    case formation8v8_421 = "4-2-1"
+    case formation8v8_232 = "2-3-2"
+    
     // 7v7 formations
     case formation7v7_312 = "3-1-2"
     case formation7v7_213 = "2-1-3"
@@ -256,6 +266,71 @@ enum Formation: String, CaseIterable, Codable {
                 .leftMidfield, .centerMidfield, .rightMidfield,
                 .striker
             ]
+            
+            // NEW 8v8 formations
+            case .formation8v8_322:
+                return [
+                    .goalkeeper,
+                    .centerBack, .centerBack, .centerBack,
+                    .centerMidfield, .centerMidfield,
+                    .striker, .striker
+                ]
+                
+            case .formation8v8_313:
+                return [
+                    .goalkeeper,
+                    .centerBack, .centerBack, .centerBack,
+                    .centerMidfield,
+                    .leftWing, .striker, .rightWing
+                ]
+                
+            case .formation8v8_331:
+                return [
+                    .goalkeeper,
+                    .centerBack, .centerBack, .centerBack,
+                    .leftMidfield, .centerMidfield, .rightMidfield,
+                    .striker
+                ]
+                
+            case .formation8v8_241:
+                return [
+                    .goalkeeper,
+                    .centerBack, .centerBack,
+                    .leftMidfield, .centerMidfield, .centerMidfield, .rightMidfield,
+                    .striker
+                ]
+                
+            case .formation8v8_412:
+                return [
+                    .goalkeeper,
+                    .leftBack, .centerBack, .centerBack, .rightBack,
+                    .centerMidfield,
+                    .striker, .striker
+                ]
+                
+            case .formation8v8_223:
+                return [
+                    .goalkeeper,
+                    .centerBack, .centerBack,
+                    .centerMidfield, .centerMidfield,
+                    .leftWing, .striker, .rightWing
+                ]
+                
+            case .formation8v8_421:
+                return [
+                    .goalkeeper,
+                    .leftBack, .centerBack, .centerBack, .rightBack,
+                    .centerMidfield, .centerMidfield,
+                    .striker
+                ]
+                
+            case .formation8v8_232:
+                return [
+                    .goalkeeper,
+                    .centerBack, .centerBack,
+                    .leftMidfield, .centerMidfield, .rightMidfield,
+                    .striker, .striker
+                ]
             
         // 7v7 formations (6 field players + 1 goalkeeper = 7 total)
         case .formation7v7_312:
@@ -884,6 +959,103 @@ enum Formation: String, CaseIterable, Codable {
                 safePoint(0.88, 0.5)    // ST
             ]
             
+            // 8v8 formations - Enhanced spacing
+            case .formation8v8_322:
+                return [
+                    safePoint(0.08, 0.5),   // GK
+                    safePoint(0.3, 0.15),   // CB
+                    safePoint(0.3, 0.5),    // CB
+                    safePoint(0.3, 0.85),   // CB
+                    safePoint(0.6, 0.32),   // CM
+                    safePoint(0.6, 0.68),   // CM
+                    safePoint(0.9, 0.28),   // ST
+                    safePoint(0.9, 0.72)    // ST
+                ]
+                
+            case .formation8v8_313:
+                return [
+                    safePoint(0.08, 0.5),   // GK
+                    safePoint(0.3, 0.15),   // CB
+                    safePoint(0.3, 0.5),    // CB
+                    safePoint(0.3, 0.85),   // CB
+                    safePoint(0.6, 0.5),    // CM
+                    safePoint(0.85, 0.12),  // LW
+                    safePoint(0.92, 0.5),   // ST
+                    safePoint(0.85, 0.88)   // RW
+                ]
+                
+            case .formation8v8_331:
+                return [
+                    safePoint(0.08, 0.5),   // GK
+                    safePoint(0.3, 0.15),   // CB
+                    safePoint(0.3, 0.5),    // CB
+                    safePoint(0.3, 0.85),   // CB
+                    safePoint(0.6, 0.12),   // LM
+                    safePoint(0.6, 0.5),    // CM
+                    safePoint(0.6, 0.88),   // RM
+                    safePoint(0.9, 0.5)     // ST
+                ]
+                
+            case .formation8v8_241:
+                return [
+                    safePoint(0.08, 0.5),   // GK
+                    safePoint(0.3, 0.25),   // CB
+                    safePoint(0.3, 0.75),   // CB
+                    safePoint(0.6, 0.1),    // LM
+                    safePoint(0.6, 0.35),   // CM
+                    safePoint(0.6, 0.65),   // CM
+                    safePoint(0.6, 0.9),    // RM
+                    safePoint(0.9, 0.5)     // ST
+                ]
+                
+            case .formation8v8_412:
+                return [
+                    safePoint(0.08, 0.5),   // GK
+                    safePoint(0.3, 0.1),   // LB
+                    safePoint(0.3, 0.32),   // CB
+                    safePoint(0.3, 0.68),   // CB
+                    safePoint(0.3, 0.9),   // RB
+                    safePoint(0.6, 0.5),    // CM
+                    safePoint(0.9, 0.28),   // ST
+                    safePoint(0.9, 0.72)    // ST
+                ]
+                
+            case .formation8v8_223:
+                return [
+                    safePoint(0.08, 0.5),   // GK
+                    safePoint(0.3, 0.25),   // CB
+                    safePoint(0.3, 0.75),   // CB
+                    safePoint(0.55, 0.32),  // CM
+                    safePoint(0.55, 0.68),  // CM
+                    safePoint(0.85, 0.12),  // LW
+                    safePoint(0.92, 0.5),   // ST
+                    safePoint(0.85, 0.88)   // RW
+                ]
+                
+            case .formation8v8_421:
+                return [
+                    safePoint(0.08, 0.5),   // GK
+                    safePoint(0.3, 0.1),   // LB
+                    safePoint(0.3, 0.32),   // CB
+                    safePoint(0.3, 0.68),   // CB
+                    safePoint(0.3, 0.9),   // RB
+                    safePoint(0.6, 0.32),   // CM
+                    safePoint(0.6, 0.68),   // CM
+                    safePoint(0.9, 0.5)     // ST
+                ]
+                
+            case .formation8v8_232:
+                return [
+                    safePoint(0.08, 0.5),   // GK
+                    safePoint(0.3, 0.25),   // CB
+                    safePoint(0.3, 0.75),   // CB
+                    safePoint(0.6, 0.12),   // LM
+                    safePoint(0.6, 0.5),    // CM
+                    safePoint(0.6, 0.88),   // RM
+                    safePoint(0.9, 0.28),   // ST
+                    safePoint(0.9, 0.72)    // ST
+                ]
+            
         // 7v7 formations - Enhanced spacing
         case .formation7v7_312:
             return [
@@ -1377,13 +1549,15 @@ enum Position: String, CaseIterable, Codable {
 enum GameFormat: String, CaseIterable, Codable {
     case fiveVFive = "5v5"
     case sevenVSeven = "7v7"
+    case eightVEight = "8v8"
     case nineVNine = "9v9"
     case elevenVEleven = "11v11"
     
     var playerCount: Int {
         switch self {
         case .fiveVFive: return 5      // 5 field players, NO goalkeeper
-        case .sevenVSeven: return 7    // 6 field players + 1 goalkeeper
+        case .sevenVSeven: return 7
+        case .eightVEight: return 8  // 6 field players + 1 goalkeeper
         case .nineVNine: return 9      // 8 field players + 1 goalkeeper
         case .elevenVEleven: return 11 // 10 field players + 1 goalkeeper
         }
@@ -1392,7 +1566,7 @@ enum GameFormat: String, CaseIterable, Codable {
     var hasGoalkeeper: Bool {
         switch self {
         case .fiveVFive: return false
-        case .sevenVSeven, .nineVNine, .elevenVEleven: return true
+        case .sevenVSeven, .eightVEight, .nineVNine, .elevenVEleven: return true
         }
     }
     
@@ -1404,6 +1578,9 @@ enum GameFormat: String, CaseIterable, Codable {
             return [.formation7v7_312, .formation7v7_213, .formation7v7_321, .formation7v7_222, .formation7v7_231,
                     .formation7v7_141, .formation7v7_132, .formation7v7_123, .formation7v7_411,
                      .formation7v7_212]
+        case .eightVEight:
+            return [.formation8v8_322, .formation8v8_313, .formation8v8_331, .formation8v8_241,
+                    .formation8v8_412, .formation8v8_223, .formation8v8_421, .formation8v8_232]
         case .nineVNine:
             return [.formation9v9_3212, .formation9v9_3131, .formation9v9_4121, .formation9v9_413, .formation9v9_323, .formation9v9_332, .formation9v9_233,
                     .formation9v9_2321, .formation9v9_251, .formation9v9_3221, .formation9v9_5111, .formation9v9_4112,
@@ -1419,6 +1596,7 @@ enum GameFormat: String, CaseIterable, Codable {
         switch self {
         case .fiveVFive: return .formation5v5_1211
         case .sevenVSeven: return .formation7v7_312
+        case .eightVEight: return .formation8v8_322
         case .nineVNine: return .formation9v9_3212
         case .elevenVEleven: return .formation442
         }

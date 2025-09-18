@@ -111,6 +111,7 @@ struct DemoTeamSelectionView: View {
         switch format {
         case .fiveVFive: return 8      // 8 players
         case .sevenVSeven: return 10   // 10 players
+        case .eightVEight: return 11   // 11 players
         case .nineVNine: return 12     // 12 players
         case .elevenVEleven: return 15 // 15 players
         }
@@ -345,6 +346,9 @@ struct DemoTeamSelectionView: View {
         case .sevenVSeven:
             // 10 players with 1 goalkeeper
             return ["GK", "DEF", "DEF", "MID", "MID", "MID", "FWD", "FWD", "DEF", "MID"]
+        case .eightVEight:
+            // 11 players with 1 goalkeeper
+            return ["GK", "DEF", "DEF", "MID", "MID", "MID", "FWD", "FWD", "DEF", "MID", "FWD"]
         case .nineVNine:
             // 12 players with 1 goalkeeper
             return ["GK", "DEF", "DEF", "DEF", "MID", "MID", "MID", "MID", "FWD", "FWD", "DEF", "MID"]
@@ -499,6 +503,7 @@ struct FormatSelectionCard: View {
         switch format {
         case .fiveVFive: return "5.square.fill"
         case .sevenVSeven: return "7.square.fill"
+        case .eightVEight: return "8.square.fill"
         case .nineVNine: return "9.square.fill"
         case .elevenVEleven: return "11.square.fill"
         }
@@ -508,6 +513,7 @@ struct FormatSelectionCard: View {
         switch format {
         case .fiveVFive: return 8
         case .sevenVSeven: return 10
+        case .eightVEight: return 11
         case .nineVNine: return 12
         case .elevenVEleven: return 15
         }
