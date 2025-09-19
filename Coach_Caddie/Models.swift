@@ -1427,7 +1427,7 @@ struct Game: Identifiable, Codable, Equatable {
     var useAutoSubstitutions: Bool = false  // NEW
     var actualStartingLineup: [LineupPosition]? = nil
     var plannedPositionChanges: [PlannedPositionChange] = []
-    var substitutionNotes: String? = nil 
+    var substitutionNotes: String? = nil
     // MARK: - Custom Decoding for Backward Compatibility
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)

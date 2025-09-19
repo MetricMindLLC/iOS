@@ -122,7 +122,7 @@ struct EnhancedQuickStatsView: View {
 //                Text("Period:")
 //                    .font(.subheadline)
 //                    .fontWeight(.medium)
-//                
+//
 //                Picker("Time Range", selection: $selectedTimeRange) {
 //                    ForEach(TimeRange.allCases, id: \.self) { range in
 //                        Text(range.rawValue).tag(range)

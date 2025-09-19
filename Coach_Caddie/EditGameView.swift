@@ -13,6 +13,12 @@ struct EditGameView: View {
     @State private var notes: String
     @State private var showingLocationPicker = false
     @State private var selectedLocation: GameLocation?
+    
+    // Score editing states
+    @State private var hasScore: Bool
+    @State private var goalsFor: Int
+    @State private var goalsAgainst: Int
+    
     @Environment(\.presentationMode) var presentationMode
     
     // Common locations for quick selection
@@ -32,6 +38,11 @@ struct EditGameView: View {
         self._gameDate = State(initialValue: game.wrappedValue.date)
         self._isHome = State(initialValue: game.wrappedValue.isHome)
         self._notes = State(initialValue: game.wrappedValue.notes ?? "")
+        
+        // Initialize score states
+        self._hasScore = State(initialValue: game.wrappedValue.result != nil)
+        self._goalsFor = State(initialValue: game.wrappedValue.result?.goalsFor ?? 0)
+        self._goalsAgainst = State(initialValue: game.wrappedValue.result?.goalsAgainst ?? 0)
         
         // Parse location if it exists
         let gameLocation = game.wrappedValue.location ?? ""
@@ -129,6 +140,134 @@ struct EditGameView: View {
                                     // Clear location for away games
                                     location = ""
                                     address = ""
+                                }
+                            }
+                        }
+                        .padding(.horizontal)
+                        
+                        // Score Section
+                        VStack(spacing: 20) {
+                            VStack(alignment: .leading, spacing: 16) {
+                                Label("Game Result", systemImage: "target")
+                                    .font(.headline)
+                                    .foregroundColor(.primary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                
+                                VStack(spacing: 16) {
+                                    HStack {
+                                        Toggle("Add Final Score", isOn: $hasScore)
+                                            .tint(.green)
+                                        Spacer()
+                                    }
+                                    
+                                    if hasScore {
+                                        VStack(spacing: 20) {
+                                            Text("Final Score")
+                                                .font(.headline)
+                                                .foregroundColor(.primary)
+                                            
+                                            HStack(spacing: 40) {
+                                                // Goals For
+                                                VStack(spacing: 12) {
+                                                    Text("Goals For")
+                                                        .font(.subheadline)
+                                                        .foregroundColor(.secondary)
+                                                    
+                                                    HStack(spacing: 16) {
+                                                        Button(action: {
+                                                            if goalsFor > 0 {
+                                                                goalsFor -= 1
+                                                            }
+                                                        }) {
+                                                            Image(systemName: "minus.circle.fill")
+                                                                .font(.title2)
+                                                                .foregroundColor(goalsFor > 0 ? .red : .gray)
+                                                        }
+                                                        .disabled(goalsFor <= 0)
+                                                        
+                                                        Text("\(goalsFor)")
+                                                            .font(.largeTitle)
+                                                            .fontWeight(.bold)
+                                                            .frame(minWidth: 60)
+                                                            .foregroundColor(.primary)
+                                                        
+                                                        Button(action: {
+                                                            goalsFor += 1
+                                                        }) {
+                                                            Image(systemName: "plus.circle.fill")
+                                                                .font(.title2)
+                                                                .foregroundColor(.green)
+                                                        }
+                                                    }
+                                                }
+                                                
+                                                Text("vs")
+                                                    .font(.title2)
+                                                    .foregroundColor(.secondary)
+                                                
+                                                // Goals Against
+                                                VStack(spacing: 12) {
+                                                    Text("Goals Against")
+                                                        .font(.subheadline)
+                                                        .foregroundColor(.secondary)
+                                                    
+                                                    HStack(spacing: 16) {
+                                                        Button(action: {
+                                                            if goalsAgainst > 0 {
+                                                                goalsAgainst -= 1
+                                                            }
+                                                        }) {
+                                                            Image(systemName: "minus.circle.fill")
+                                                                .font(.title2)
+                                                                .foregroundColor(goalsAgainst > 0 ? .red : .gray)
+                                                        }
+                                                        .disabled(goalsAgainst <= 0)
+                                                        
+                                                        Text("\(goalsAgainst)")
+                                                            .font(.largeTitle)
+                                                            .fontWeight(.bold)
+                                                            .frame(minWidth: 60)
+                                                            .foregroundColor(.primary)
+                                                        
+                                                        Button(action: {
+                                                            goalsAgainst += 1
+                                                        }) {
+                                                            Image(systemName: "plus.circle.fill")
+                                                                .font(.title2)
+                                                                .foregroundColor(.green)
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            
+                                            // Result Summary
+                                            VStack(spacing: 8) {
+                                                Text("Result")
+                                                    .font(.subheadline)
+                                                    .foregroundColor(.secondary)
+                                                
+                                                let resultText = goalsFor > goalsAgainst ? "Win" : goalsFor < goalsAgainst ? "Loss" : "Draw"
+                                                let resultColor: Color = goalsFor > goalsAgainst ? .green : goalsFor < goalsAgainst ? .red : .orange
+                                                
+                                                Text(resultText)
+                                                    .font(.title2)
+                                                    .fontWeight(.bold)
+                                                    .foregroundColor(resultColor)
+                                                    .padding(.horizontal, 20)
+                                                    .padding(.vertical, 8)
+                                                    .background(resultColor.opacity(0.15))
+                                                    .cornerRadius(12)
+                                            }
+                                        }
+                                        .padding(.vertical, 16)
+                                        .padding(.horizontal, 20)
+                                        .background(Color(.systemBackground))
+                                        .cornerRadius(12)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .strokeBorder(Color.blue.opacity(0.2), lineWidth: 1)
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -244,6 +383,29 @@ struct EditGameView: View {
                                             .cornerRadius(8)
                                     }
                                     
+                                    // Score in summary
+                                    if hasScore {
+                                        HStack {
+                                            Image(systemName: "target")
+                                                .foregroundColor(.blue)
+                                                .frame(width: 30)
+                                            
+                                            HStack(spacing: 8) {
+                                                Text("\(goalsFor) - \(goalsAgainst)")
+                                                    .font(.subheadline)
+                                                    .fontWeight(.bold)
+                                                
+                                                let resultText = goalsFor > goalsAgainst ? "Win" : goalsFor < goalsAgainst ? "Loss" : "Draw"
+                                                let resultColor: Color = goalsFor > goalsAgainst ? .green : goalsFor < goalsAgainst ? .red : .orange
+                                                
+                                                Text("(\(resultText))")
+                                                    .font(.caption)
+                                                    .foregroundColor(resultColor)
+                                                    .fontWeight(.medium)
+                                            }
+                                        }
+                                    }
+                                    
                                     if !location.isEmpty {
                                         HStack(alignment: .top) {
                                             Image(systemName: "location.fill")
@@ -330,6 +492,10 @@ struct EditGameView: View {
         print("   New isHome: \(isHome)")
         print("   Original location: '\(game.location ?? "nil")'")
         print("   New location parts: location='\(location)', address='\(address)'")
+        print("   Has score: \(hasScore)")
+        if hasScore {
+            print("   Goals for: \(goalsFor), Goals against: \(goalsAgainst)")
+        }
         
         let gameLocation: String? = {
             if location.isEmpty {
@@ -351,6 +517,21 @@ struct EditGameView: View {
         updatedGame.location = gameLocation
         updatedGame.notes = notes.isEmpty ? nil : notes
         
+        // Handle score
+        if hasScore {
+            if updatedGame.result == nil {
+                updatedGame.result = GameResult(goalsFor: goalsFor, goalsAgainst: goalsAgainst)
+                print("   Created new GameResult: \(goalsFor)-\(goalsAgainst)")
+            } else {
+                updatedGame.result?.goalsFor = goalsFor
+                updatedGame.result?.goalsAgainst = goalsAgainst
+                print("   Updated existing GameResult: \(goalsFor)-\(goalsAgainst)")
+            }
+        } else {
+            updatedGame.result = nil
+            print("   Removed game result (no score)")
+        }
+        
         print("   Updated game object created")
         print("   Calling teamManager.updateGame()")
         
@@ -368,6 +549,11 @@ struct EditGameView: View {
             print("   0.5s after save - checking if game persisted in team...")
             if let foundGame = team.games.first(where: { $0.id == updatedGame.id }) {
                 print("   ✅ Game found in team: opponent='\(foundGame.opponent)', date=\(foundGame.date)")
+                if let result = foundGame.result {
+                    print("   ✅ Game result: \(result.goalsFor)-\(result.goalsAgainst)")
+                } else {
+                    print("   ✅ Game has no result (as expected)")
+                }
             } else {
                 print("   ❌ Game NOT found in team after save!")
             }
