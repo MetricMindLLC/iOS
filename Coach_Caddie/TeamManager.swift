@@ -27,6 +27,7 @@ class TeamManager: ObservableObject {
     @Published var appSettings = AppSettings()
     @Published var isReconnecting = false
     @Published var lastSavedDate: Date?
+    @Published var isInLocalOnlyMode = false
     
     // MARK: - Permission Caching (NEW)
     @Published private var permissionCache: UserPermissionCache?
@@ -332,11 +333,18 @@ var teamsICreated: [Team] {
         print("🔥 Team coachUID: \(team.coachUID ?? "nil")")
         print("🔥 isOnline: \(firebaseManager.isOnline)")
         print("🔥 Active Game ID: \(activeGameId?.uuidString ?? "none")")
+        print("🔥 Local-only mode: \(isInLocalOnlyMode)")
         
-        // Update local array first
+        // Update local array first (always happens)
         if let index = teams.firstIndex(where: { $0.id == team.id }) {
             teams[index] = team
-            debouncedSave() // This is your existing local save method
+            debouncedSave() // Always save locally
+        }
+        
+        // Skip Firebase sync if in local-only mode
+        if isInLocalOnlyMode {
+            print("🔒 LOCAL-ONLY MODE: Skipping Firebase sync during live game")
+            return
         }
         
         // Cancel any existing work item for this team
@@ -355,6 +363,26 @@ var teamsICreated: [Team] {
     
     private var teamListeners: [UUID: ListenerRegistration] = [:]
 
+    func enableLocalOnlyMode() {
+        isInLocalOnlyMode = true
+        print("🔒 Enabled local-only mode for live game")
+    }
+
+    // Add method to disable and sync when game ends
+    func disableLocalOnlyModeAndSync(_ team: Team, game: Game) async -> Bool {
+        isInLocalOnlyMode = false
+        print("🔓 Disabled local-only mode, syncing to Firebase...")
+        
+        do {
+            // Force immediate sync of the completed game
+            await updateTeamImmediatelyForActiveGame(team, activeGameId: game.id)
+            return true
+        } catch {
+            print("❌ Failed to sync completed game: \(error)")
+            return false
+        }
+    }
+    
     // Add this method to temporarily disable listeners
     func pauseRealTimeListeners(for teamId: UUID) {
         if let listener = teamListeners[teamId] {

@@ -63,6 +63,8 @@ struct LineupView: View {
     @State private var isSavingLineup = false
     @State private var hasUnsavedPlanningChanges = false
     @State private var isSavingPlanning = false
+    @State private var isSavingGame = false
+    @State private var showRetryGameSaveAlert = false
     
     private var isReadOnlyUser: Bool {
         return userRole == .viewer || userRole == .parent
@@ -183,6 +185,17 @@ struct LineupView: View {
                     }
                 )
             }
+        }
+        .alert("Save Failed", isPresented: $showRetryGameSaveAlert) {
+            Button("Retry Save") {
+                retryGameSave()
+            }
+            Button("Save Later", role: .cancel) {
+                // Keep the game data locally, exit game mode
+                clearGameStateAndExit()
+            }
+        } message: {
+            Text("Failed to save game data to the cloud. You can retry now or the data will be saved locally and synced later when you're online.")
         }
     }
     
@@ -531,10 +544,15 @@ struct LineupView: View {
     private func startGameMode() {
         guard var game = selectedGame else { return }
         
+        // Enable local-only mode BEFORE starting the game
+        teamManager.enableLocalOnlyMode()
+        
         if game.startingLineup == nil || game.startingLineup?.isEmpty == true {
-            game.startingLineup = lineupPositions  // Preserve original starting lineup
-            print("Saved starting lineup with \(lineupPositions.count) positions")
-        }
+              game.startingLineup = lineupPositions  // Preserve original starting lineup
+              print("✅ Saved starting lineup with \(lineupPositions.count) positions")
+          } else {
+              print("✅ Starting lineup already exists with \(game.startingLineup?.count ?? 0) positions")
+          }
 
         // CRITICAL: Initialize game data structure for subcollections
         game.actualStartingLineup = lineupPositions
@@ -550,6 +568,7 @@ struct LineupView: View {
             }
         }
         
+        // Initialize audit log and substitutions arrays if needed
         if game.auditLog == nil || game.auditLog?.isEmpty == true {
             game.auditLog = []
         }
@@ -564,7 +583,7 @@ struct LineupView: View {
         
         selectedGame = game
         
-        // Use active game context for initial save
+        // Use active game context for initial save (will be local-only due to mode)
         teamManager.updateTeam(team, activeGameId: game.id)
         
         // Start game session
@@ -583,6 +602,7 @@ struct LineupView: View {
         startGameTimer()
         
         print("Initialized time tracking for \(game.playerStats.count) starting players")
+        print("🔒 Started game mode in LOCAL-ONLY mode for game vs \(game.opponent)")
     }
     
     private func exitGameMode() {
@@ -813,29 +833,47 @@ struct LineupView: View {
             print("DEBUG: Could not find updated game in team!")
         }
 
-        // 14. CRITICAL: Prevent Firebase race conditions
-        print("Preventing Firebase race conditions during game completion")
-        print("Requesting TeamManager to cancel pending Firebase updates")
-        
-        // 15. Force immediate save with listener protection
-        print("About to force immediate save with listener protection")
+        // 14. Show saving state UI
+        print("Game completed locally, preparing for Firebase sync...")
+        isSavingGame = true
+
+        // 15. Now attempt to sync to Firebase with local-only mode
         Task {
-            await teamManager.updateTeamImmediatelyForActiveGame(updatedTeam, activeGameId: updatedGame.id)
+            let syncSuccess = await teamManager.disableLocalOnlyModeAndSync(updatedTeam, game: updatedGame)
+            
+            await MainActor.run {
+                self.isSavingGame = false
+                
+                if syncSuccess {
+                    print("✅ Game successfully synced to Firebase")
+                    // Clear game state and exit
+                    self.clearGameStateAndExit()
+                } else {
+                    print("❌ Failed to sync game to Firebase")
+                    self.showRetryGameSaveAlert = true
+                }
+            }
         }
-        print("Immediate save completed")
         
-        // 16. Wait a moment then allow normal operations to resume
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-            print("Resuming normal Firebase operations after game completion")
+        print("END GAME ACTION INITIATED - waiting for Firebase sync")
+    }
+
+    // MARK: - Helper Methods
+    private func enterActiveGameMode() {
+        if let activeGame = gameStateManager.activeGameState,
+           let game = team.games.first(where: { $0.id == activeGame.gameId }) {
+            selectedGame = game
+            selectedFormation = activeGame.formation
+            lineupPositions = activeGame.lineupPositions
+            showingGameMode = true
+            isInGameMode = true
+            startGameTimer()
         }
-        
-        print("Game completed and all data saved successfully")
-        
-        // 17. Clear game state and UI
-        print("Clearing game state and UI")
+    }
+    
+    private func clearGameStateAndExit() {
         gameStateManager.endGameSession()
         gameStateManager.clearPersistedGameState()
-        print("Cleared persisted game state")
         
         // Clear lineup positions
         for index in lineupPositions.indices {
@@ -857,18 +895,28 @@ struct LineupView: View {
         let impactFeedback = UIImpactFeedbackGenerator(style: .heavy)
         impactFeedback.impactOccurred()
         
-        print("END GAME ACTION COMPLETED")
+        print("✅ Cleared game state and exited game mode")
     }
-    // MARK: - Helper Methods
-    private func enterActiveGameMode() {
-        if let activeGame = gameStateManager.activeGameState,
-           let game = team.games.first(where: { $0.id == activeGame.gameId }) {
-            selectedGame = game
-            selectedFormation = activeGame.formation
-            lineupPositions = activeGame.lineupPositions
-            showingGameMode = true
-            isInGameMode = true
-            startGameTimer()
+
+    // 4. COMPLETE retryGameSave() method - Add this new method
+    private func retryGameSave() {
+        guard let currentGame = selectedGame,
+              let updatedTeam = teamManager.teams.first(where: { $0.id == team.id }) else { return }
+        
+        isSavingGame = true
+        
+        Task {
+            let syncSuccess = await teamManager.disableLocalOnlyModeAndSync(updatedTeam, game: currentGame)
+            
+            await MainActor.run {
+                self.isSavingGame = false
+                
+                if syncSuccess {
+                    self.clearGameStateAndExit()
+                } else {
+                    self.showRetryGameSaveAlert = true
+                }
+            }
         }
     }
 
@@ -1076,29 +1124,28 @@ struct LineupView: View {
         gameTimer?.invalidate()
         
         gameTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
-            DispatchQueue.main.async {
-                if gameStateManager.activeGameState?.isRunning == true {
+            // CRITICAL: Don't use DispatchQueue.main.async for time-sensitive operations
+            if gameStateManager.activeGameState?.isRunning == true {
+                DispatchQueue.main.async {
                     editedMinute = gameStateManager.calculatedMinute
                     editedSecond = gameStateManager.calculatedSecond
                     timerTick.toggle()
-                    
-                    // Only persist every 30 seconds instead of every second
-                    if gameStateManager.calculatedSecond == 0 && gameStateManager.calculatedMinute % 1 == 0 {
-                        // Check substitutions every minute
-                        checkAndExecutePlannedSubstitutions()
-                        
-                        // Only persist every 30 seconds
-                        if gameStateManager.calculatedMinute % 30 == 0 ||
-                           (gameStateManager.calculatedMinute == 0 && gameStateManager.calculatedSecond == 0) {
-                            gameStateManager.persistActiveGameState()
-                        }
-                    }
+                }
+                
+                // CRITICAL: Check substitutions on EVERY timer tick, not just at minute boundaries
+                // This ensures substitutions execute even if the minute-boundary check is missed
+                self.checkAndExecutePlannedSubstitutions()
+                
+                // Persist state every 30 seconds
+                if gameStateManager.calculatedSecond % 30 == 0 {
+                    gameStateManager.persistActiveGameState()
                 }
             }
         }
         
         RunLoop.current.add(gameTimer!, forMode: .common)
     }
+    
     private func stopGameTimer() {
         gameTimer?.invalidate()
         gameTimer = nil
@@ -1123,6 +1170,10 @@ struct LineupView: View {
         
         guard game.useAutoSubstitutions else { return }
 
+        // CRITICAL: Add background execution logging
+        let appState = UIApplication.shared.applicationState
+        print("🔄 Checking substitutions at \(currentMinute):\(gameStateManager.calculatedSecond) - App State: \(appState.rawValue)")
+
         // Get all events for this minute
         let dueSubstitutions = game.plannedSubstitutions.filter {
             !$0.isExecuted && $0.plannedMinute <= currentMinute
@@ -1132,22 +1183,169 @@ struct LineupView: View {
             !$0.isExecuted && $0.plannedMinute <= currentMinute
         }
         
-        // Group by minute and execute in order
-        let allMinutes = Set(dueSubstitutions.map { $0.plannedMinute } + duePositionChanges.map { $0.plannedMinute }).sorted()
-        
-        for minute in allMinutes {
-            // CHANGED: Execute substitutions FIRST for this minute
-            let subsThisMinute = dueSubstitutions.filter { $0.plannedMinute == minute }
-            for sub in subsThisMinute.sorted(by: { $0.id.uuidString < $1.id.uuidString }) {
-                executeAutomaticSubstitution(sub)
-            }
-            
-            // THEN execute position changes for this minute (after players are on the field)
-            let posChangesThisMinute = duePositionChanges.filter { $0.plannedMinute == minute }
-            for posChange in posChangesThisMinute.sorted(by: { $0.id.uuidString < $1.id.uuidString }) {
-                executeAutomaticPositionSwap(posChange)
-            }
+        // CRITICAL: Execute immediately if any are due (don't batch by minute)
+        for sub in dueSubstitutions {
+            print("🚨 EXECUTING SUBSTITUTION IN BACKGROUND: \(getPlayerName(sub.playerOut)) -> \(getPlayerName(sub.playerIn)) at \(currentMinute)'")
+            executeAutomaticSubstitutionBackground(sub)
         }
+        
+        for posChange in duePositionChanges {
+            print("🚨 EXECUTING POSITION CHANGE IN BACKGROUND: \(getPlayerName(posChange.playerId)) to \(posChange.toPosition.abbreviation) at \(currentMinute)'")
+            executeAutomaticPositionSwapBackground(posChange)
+        }
+    }
+    
+    private func executeAutomaticSubstitutionBackground(_ plannedSub: PlannedSubstitution) {
+        guard var game = selectedGame else { return }
+        
+        let currentMinute = gameStateManager.calculatedMinute
+        print("🌙 BACKGROUND SUBSTITUTION: \(getPlayerName(plannedSub.playerOut)) -> \(getPlayerName(plannedSub.playerIn))")
+        
+        // CRITICAL: All data operations must complete even in background
+        
+        // 1. Update lineup positions (this is the most critical part)
+        if let positionIndex = lineupPositions.firstIndex(where: { $0.playerId == plannedSub.playerOut }) {
+            lineupPositions[positionIndex].playerId = plannedSub.playerIn
+            print("✅ Updated lineup position in background")
+        }
+        
+        // 2. Track playing time (critical for stats)
+        trackPlayerExit(playerId: plannedSub.playerOut, minute: currentMinute)
+        trackPlayerEntry(playerId: plannedSub.playerIn, minute: currentMinute)
+        
+        // 3. Add substitution to game record
+        let substitution = Substitution(
+            playerIn: plannedSub.playerIn,
+            playerOut: plannedSub.playerOut,
+            minute: currentMinute,
+            reason: plannedSub.reason
+        )
+        game.substitutions.append(substitution)
+        
+        // 4. Add to audit log (background safe)
+        gameStateManager.addAuditEntry(
+            eventType: .substitution,
+            gameTime: gameStateManager.auditLogTime,
+            playerName: getPlayerName(plannedSub.playerOut),
+            playerId: plannedSub.playerOut,
+            details: "AUTO: \(getPlayerName(plannedSub.playerOut)) -> \(getPlayerName(plannedSub.playerIn)) (\(plannedSub.reason.rawValue))"
+        )
+        
+        // 5. Mark as executed IMMEDIATELY
+        if let subIndex = game.plannedSubstitutions.firstIndex(where: { $0.id == plannedSub.id }) {
+            game.plannedSubstitutions[subIndex].isExecuted = true
+            game.plannedSubstitutions[subIndex].actualMinute = currentMinute
+        }
+        
+        // 6. Update all game references
+        selectedGame = game
+        if let gameIndex = team.games.firstIndex(where: { $0.id == game.id }) {
+            team.games[gameIndex] = game
+        }
+        
+        // 7. Update game state manager
+        gameStateManager.activeGameState?.lineupPositions = lineupPositions
+        
+        // 8. Force persistent save (CRITICAL for background)
+        gameStateManager.forcePersistActiveGameState()
+        
+        // 9. Update team manager (local only mode will prevent Firebase sync)
+        teamManager.updateTeam(team, activeGameId: game.id)
+        
+        // 10. Skip haptic feedback in background (would fail anyway)
+        if UIApplication.shared.applicationState == .active {
+            let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+            impactFeedback.impactOccurred()
+        }
+        
+        print("🎉 BACKGROUND SUBSTITUTION COMPLETE!")
+    }
+
+    private func executeAutomaticPositionSwapBackground(_ plannedPosChange: PlannedPositionChange) {
+        guard var game = selectedGame else { return }
+        
+        let currentMinute = gameStateManager.calculatedMinute
+        print("🌙 BACKGROUND POSITION SWAP: \(getPlayerName(plannedPosChange.playerId))")
+        
+        // CRITICAL: Check if already executed FIRST
+        if plannedPosChange.isExecuted {
+            print("SKIP: Position change already executed")
+            return
+        }
+        
+        // CRITICAL: Mark as executed IMMEDIATELY to prevent retry loops
+        if let posIndex = game.plannedPositionChanges.firstIndex(where: { $0.id == plannedPosChange.id }) {
+            game.plannedPositionChanges[posIndex].isExecuted = true
+            game.plannedPositionChanges[posIndex].actualMinute = currentMinute
+            print("✅ Marked position change as executed to prevent retry loop")
+        }
+        
+        // Find current player position
+        guard let currentPlayerIndex = lineupPositions.firstIndex(where: { $0.playerId == plannedPosChange.playerId }) else {
+            print("ERROR: Could not find player in lineup - position change marked as executed")
+            // Update the game state even if we can't execute to persist the executed flag
+            updateGameStateAfterPositionChange(game)
+            return
+        }
+        
+        // Find target position player
+        guard let targetPlayerIndex = lineupPositions.firstIndex(where: { position in
+            position.position == plannedPosChange.toPosition && position.playerId != plannedPosChange.playerId
+        }) else {
+            print("ERROR: Could not find target position player - position change marked as executed")
+            // Update the game state even if we can't execute to persist the executed flag
+            updateGameStateAfterPositionChange(game)
+            return
+        }
+        
+        guard let targetPlayerId = lineupPositions[targetPlayerIndex].playerId else {
+            print("ERROR: Target position empty - position change marked as executed")
+            // Update the game state even if we can't execute to persist the executed flag
+            updateGameStateAfterPositionChange(game)
+            return
+        }
+        
+        // Perform the swap
+        let tempPlayerId = lineupPositions[currentPlayerIndex].playerId
+        lineupPositions[currentPlayerIndex].playerId = lineupPositions[targetPlayerIndex].playerId
+        lineupPositions[targetPlayerIndex].playerId = tempPlayerId
+        
+        // Add audit entry
+        gameStateManager.addAuditEntry(
+            eventType: .positionChange,
+            gameTime: gameStateManager.auditLogTime,
+            playerName: getPlayerName(plannedPosChange.playerId),
+            playerId: plannedPosChange.playerId,
+            details: "POSITION SWAP: \(getPlayerName(plannedPosChange.playerId)) <-> \(getPlayerName(targetPlayerId)) at \(currentMinute)'"
+        )
+        
+        // Find and mark the paired position change as executed too
+        if let pairedChangeIndex = game.plannedPositionChanges.firstIndex(where: { change in
+            change.playerId == targetPlayerId &&
+            change.plannedMinute == plannedPosChange.plannedMinute &&
+            !change.isExecuted
+        }) {
+            game.plannedPositionChanges[pairedChangeIndex].isExecuted = true
+            game.plannedPositionChanges[pairedChangeIndex].actualMinute = currentMinute
+            print("PAIRED: Also marked paired position change as executed for \(getPlayerName(targetPlayerId))")
+        }
+        
+        // Update all references
+        updateGameStateAfterPositionChange(game)
+        
+        print("🎉 BACKGROUND POSITION SWAP COMPLETE!")
+    }
+
+    // Helper method to consolidate game state updates
+    private func updateGameStateAfterPositionChange(_ game: Game) {
+        selectedGame = game
+        if let gameIndex = team.games.firstIndex(where: { $0.id == game.id }) {
+            team.games[gameIndex] = game
+        }
+        
+        gameStateManager.activeGameState?.lineupPositions = lineupPositions
+        gameStateManager.forcePersistActiveGameState()
+        teamManager.updateTeam(team, activeGameId: game.id)
     }
 
     private func executeAutomaticSubstitution(_ plannedSub: PlannedSubstitution) {
@@ -1175,7 +1373,6 @@ struct LineupView: View {
             )
             game.substitutions.append(substitution)
             
-            // Add audit entry
             // Add audit entry
             gameStateManager.addAuditEntry(
                 eventType: .substitution,
@@ -5152,6 +5349,7 @@ struct ModernGameModeView: View {
         }
         .onAppear {
             checkGamePermissions()
+            syncGameStateOnAppear()
         }
         .sheet(isPresented: $showingSubstitution) {
             if !isReadOnlyUser {
@@ -5224,6 +5422,39 @@ struct ModernGameModeView: View {
         }
     }
     
+    // NEW: Sync game state on appear to fix score display issue
+    private func syncGameStateOnAppear() {
+        // Restore game state from GameStateManager when view appears
+        if let activeState = gameStateManager.activeGameState,
+           activeState.gameId == game.id {
+            
+            // Restore the audit log
+            game.auditLog = activeState.auditLog
+            
+            // Recalculate and restore the game result from audit log
+            var goalsFor = 0
+            var goalsAgainst = 0
+            
+            for entry in activeState.auditLog {
+                switch entry.eventType {
+                case .goal:
+                    goalsFor += 1
+                case .goalAgainst:
+                    goalsAgainst += 1
+                default:
+                    break
+                }
+            }
+            
+            // Update the game result
+            if goalsFor > 0 || goalsAgainst > 0 {
+                game.result = GameResult(goalsFor: goalsFor, goalsAgainst: goalsAgainst)
+            }
+            
+            print("🔄 Restored game state on appear - Score: \(goalsFor)-\(goalsAgainst)")
+        }
+    }
+    
     // MARK: - Game Control Methods
     private func pauseGame() {
         gameStateManager.pauseGame()
@@ -5251,34 +5482,49 @@ struct ModernGameModeView: View {
         impactFeedback.impactOccurred()
     }
     
-    // MARK: - Event Recording
     private func recordEvent() {
         guard let player = selectedPlayer else { return }
         
+        print("📝 RECORDING EVENT LOCALLY: \(player.name) - \(selectedEventType.rawValue)")
+        
+        // Create the game event
         let event = GameEvent(
             playerId: player.id,
             eventType: selectedEventType,
             minute: calculatedMinute
         )
         
+        // Add event to game
         game.gameEvents.append(event)
         
-        // Add to audit log
+        // Convert event type to audit event type
         let auditEventType: GameAuditEventType
         switch selectedEventType {
-        case .goal: auditEventType = .goal
-        case .assist: auditEventType = .assist
-        case .goalAgainst: auditEventType = .goalAgainst
-        case .yellowCard: auditEventType = .yellowCard
-        case .redCard: auditEventType = .redCard
-        case .save: auditEventType = .save
-        case .shot: auditEventType = .shot
-        case .shotOnTarget: auditEventType = .shotOnTarget
-        case .freeKick: auditEventType = .freeKick
-        case .cornerKick: auditEventType = .cornerKick
-        case .penaltyKick: auditEventType = .penaltyKick
+        case .goal:
+            auditEventType = .goal
+        case .assist:
+            auditEventType = .assist
+        case .goalAgainst:
+            auditEventType = .goalAgainst
+        case .yellowCard:
+            auditEventType = .yellowCard
+        case .redCard:
+            auditEventType = .redCard
+        case .save:
+            auditEventType = .save
+        case .shot:
+            auditEventType = .shot
+        case .shotOnTarget:
+            auditEventType = .shotOnTarget
+        case .freeKick:
+            auditEventType = .freeKick
+        case .cornerKick:
+            auditEventType = .cornerKick
+        case .penaltyKick:
+            auditEventType = .penaltyKick
         }
         
+        // Add to audit log via GameStateManager
         gameStateManager.addAuditEntry(
             eventType: auditEventType,
             gameTime: gameStateManager.auditLogTime,
@@ -5287,9 +5533,10 @@ struct ModernGameModeView: View {
             details: "\(player.name) - \(selectedEventType.rawValue)"
         )
         
+        // Update game audit log from GameStateManager
         game.auditLog = gameStateManager.activeGameState?.auditLog ?? []
         
-        // Update game result
+        // Update game result for goals
         if selectedEventType == .goal {
             if game.result == nil {
                 game.result = GameResult(goalsFor: 0, goalsAgainst: 0)
@@ -5302,56 +5549,92 @@ struct ModernGameModeView: View {
             game.result?.goalsAgainst += 1
         }
         
-        // Update player stats
+        // CRITICAL: Update player stats immediately
         updatePlayerStats(for: player, event: selectedEventType)
         
+        // Update game in team (LOCAL ONLY - no Firebase sync during live games)
+        if let gameIndex = team.games.firstIndex(where: { $0.id == game.id }) {
+            team.games[gameIndex] = game
+        }
+        
+        // Update TeamManager's teams array locally
+        if let teamIndex = teamManager.teams.firstIndex(where: { $0.id == team.id }) {
+            teamManager.teams[teamIndex] = team
+        }
+        
+        // Save locally only (TeamManager will skip Firebase due to local-only mode)
+        teamManager.updateTeam(team, activeGameId: game.id)
+        
+        // CRITICAL: Also persist the game state with updated result
+        gameStateManager.persistActiveGameState()
+        
+        // Clear selection
         selectedPlayer = nil
         
+        // Haptic feedback
         let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
         impactFeedback.impactOccurred()
+        
+        print("✅ Event recorded locally - \(selectedEventType.rawValue) for \(player.name)")
     }
     
-    // MARK: - Stats Update (unchanged)
     private func updatePlayerStats(for player: Player, event: EventType) {
-        // 1. Update game-specific stats
-        var playerStats = game.playerStats.first(where: { $0.playerId == player.id }) ?? PlayerGameStats(playerId: player.id)
+        print("📊 Updating stats for \(player.name): \(event.rawValue)")
         
-        switch event {
-        case .goal:
-            playerStats.goals += 1
-        case .assist:
-            playerStats.assists += 1
-        case .shot, .shotOnTarget:
-            playerStats.shots += 1
-        case .save:
-            playerStats.saves += 1
-        case .goalAgainst:
-            playerStats.goalsConceded += 1
-        case .yellowCard:
-            playerStats.yellowCards += 1
-        case .redCard:
-            playerStats.redCards += 1
-        default:
-            break
-        }
-        
-        if let index = game.playerStats.firstIndex(where: { $0.playerId == player.id }) {
-            game.playerStats[index] = playerStats
+        // Find or create player stats for this game
+        if let statsIndex = game.playerStats.firstIndex(where: { $0.playerId == player.id }) {
+            // Update existing stats
+            switch event {
+            case .goal:
+                game.playerStats[statsIndex].goals += 1
+            case .assist:
+                game.playerStats[statsIndex].assists += 1
+            case .save:
+                game.playerStats[statsIndex].saves += 1
+            case .goalAgainst:
+                game.playerStats[statsIndex].goalsConceded += 1
+            case .yellowCard:
+                game.playerStats[statsIndex].yellowCards += 1
+            case .redCard:
+                game.playerStats[statsIndex].redCards += 1
+            case .shot, .shotOnTarget:
+                game.playerStats[statsIndex].shots += 1
+            default:
+                break
+            }
+            print("📊 Updated existing stats for \(player.name) - Goals: \(game.playerStats[statsIndex].goals)")
         } else {
-            game.playerStats.append(playerStats)
+            // Create new stats for this player
+            var newStats = PlayerGameStats(playerId: player.id)
+            switch event {
+            case .goal:
+                newStats.goals = 1
+            case .assist:
+                newStats.assists = 1
+            case .save:
+                newStats.saves = 1
+            case .goalAgainst:
+                newStats.goalsConceded = 1
+            case .yellowCard:
+                newStats.yellowCards = 1
+            case .redCard:
+                newStats.redCards = 1
+            case .shot, .shotOnTarget:
+                newStats.shots = 1
+            default:
+                break
+            }
+            game.playerStats.append(newStats)
+            print("📊 Created new stats for \(player.name)")
         }
         
-        // 2. Update player's season stats
+        // Also update season stats for the player
         if let playerIndex = team.players.firstIndex(where: { $0.id == player.id }) {
             switch event {
             case .goal:
                 team.players[playerIndex].seasonStats.goals += 1
             case .assist:
                 team.players[playerIndex].seasonStats.assists += 1
-            case .shot:
-                team.players[playerIndex].seasonStats.shots += 1
-            case .shotOnTarget:
-                team.players[playerIndex].seasonStats.shotOnTarget += 1
             case .save:
                 team.players[playerIndex].seasonStats.saves += 1
             case .goalAgainst:
@@ -5364,35 +5647,8 @@ struct ModernGameModeView: View {
                 break
             }
         }
-        if let gameIndex = team.games.firstIndex(where: { $0.id == game.id }) {
-            team.games[gameIndex] = game
-        }
         
-        // 4. Update TeamManager's teams array immediately
-        if let teamIndex = teamManager.teams.firstIndex(where: { $0.id == team.id }) {
-            teamManager.teams[teamIndex] = team
-        }
-        
-        // 5. UPDATED: Pass active game ID context to prevent saving all games
-        Task {
-            switch event {
-            case .goal, .redCard:
-                // Critical events - save immediately for live view with active game context
-                await teamManager.updateTeamImmediatelyForActiveGame(team, activeGameId: game.id)
-                print("Critical event - immediate sync for live view")
-                
-            case .yellowCard, .save, .assist:
-                // Important events - use live game debounce (1.5 seconds) with active game context
-                teamManager.updateTeam(team, activeGameId: game.id)
-                print("Important event - fast sync for live view")
-                
-            default:
-                // Other events - normal debounced sync with active game context
-                teamManager.updateTeam(team, activeGameId: game.id)
-            }
-        }
-        
-        print("Updated stats for \(player.name): \(event.rawValue)")
+        print("✅ Updated stats for \(player.name): \(event.rawValue)")
     }
     
     // MARK: - Audit Log Management (unchanged)
@@ -5427,14 +5683,26 @@ struct ModernGameModeView: View {
     }
     
     private func recalculateStatsFromAuditLog() {
+        print("🔄 RECALCULATING STATS FROM AUDIT LOG")
+        
         // Reset all player stats for this game
         for index in game.playerStats.indices {
+            let savedMinutes = game.playerStats[index].minutesPlayed // Preserve minutes
+            let savedTimeEntries = game.playerStats[index].timeEntries // Preserve time entries
+            
             game.playerStats[index].goals = 0
             game.playerStats[index].assists = 0
             game.playerStats[index].saves = 0
             game.playerStats[index].goalsConceded = 0
             game.playerStats[index].yellowCards = 0
             game.playerStats[index].redCards = 0
+            game.playerStats[index].shots = 0
+            
+            // Restore preserved data
+            game.playerStats[index].minutesPlayed = savedMinutes
+            game.playerStats[index].timeEntries = savedTimeEntries
+            
+            print("🔄 Reset stats for player \(game.playerStats[index].playerId)")
         }
         
         // Reset game result
@@ -5442,15 +5710,59 @@ struct ModernGameModeView: View {
         
         // Recalculate from audit log
         if let auditLog = gameStateManager.activeGameState?.auditLog {
+            print("🔄 Processing \(auditLog.count) audit log entries")
             for entry in auditLog {
-                guard let playerId = entry.playerId else { continue }
+                guard let playerId = entry.playerId else {
+                    print("⚠️ Skipping entry with no playerId: \(entry.eventType.rawValue)")
+                    continue
+                }
                 
-                // Update game stats locally first
-                var playerStats = game.playerStats.first(where: { $0.playerId == playerId }) ?? PlayerGameStats(playerId: playerId)
+                // Find or create player stats
+                var playerStats: PlayerGameStats
+                if let existingIndex = game.playerStats.firstIndex(where: { $0.playerId == playerId }) {
+                    playerStats = game.playerStats[existingIndex]
+                } else {
+                    playerStats = PlayerGameStats(playerId: playerId)
+                    game.playerStats.append(playerStats)
+                    print("➕ Created new stats for player \(playerId)")
+                }
                 
-                // Apply stats changes...
-                // [Keep your existing stat calculation logic here]
+                // Update stats based on event type
+                switch entry.eventType {
+                case .goal:
+                    playerStats.goals += 1
+                    game.result?.goalsFor += 1
+                    print("⚽ Added goal for player")
+                case .goalAgainst:
+                    playerStats.goalsConceded += 1
+                    game.result?.goalsAgainst += 1
+                    print("🥅 Added goal against for player")
+                case .assist:
+                    playerStats.assists += 1
+                    print("🎯 Added assist for player")
+                case .save:
+                    playerStats.saves += 1
+                    print("🥊 Added save for player")
+                case .yellowCard:
+                    playerStats.yellowCards += 1
+                    print("🟨 Added yellow card for player")
+                case .redCard:
+                    playerStats.redCards += 1
+                    print("🟥 Added red card for player")
+                case .shot:
+                    playerStats.shots += 1
+                    print("🎯 Added shot for player")
+                default:
+                    print("ℹ️ Processed non-stat event: \(entry.eventType.rawValue)")
+                }
+                
+                // Update the stats in the array
+                if let existingIndex = game.playerStats.firstIndex(where: { $0.playerId == playerId }) {
+                    game.playerStats[existingIndex] = playerStats
+                }
             }
+            
+            print("✅ Finished recalculating stats. Final score: \(game.result?.goalsFor ?? 0)-\(game.result?.goalsAgainst ?? 0)")
         }
         
         // Update local team state
@@ -5462,11 +5774,12 @@ struct ModernGameModeView: View {
             teamManager.teams[teamIndex] = team
         }
         
-        // OPTIMIZED: Use immediate save for stat recalculations (important for live view)
+        // Save the recalculated stats
         Task {
             await teamManager.updateTeamImmediatelyForActiveGame(team, activeGameId: game.id)
         }
     }
+}
     // MARK: - Modern Game Header (UPDATED with Reduced Spacing)
     struct ModernGameHeader: View {
         let game: Game
@@ -5827,7 +6140,7 @@ struct ModernGameModeView: View {
                     ZStack {
                         Circle()
                             .fill(position.color)
-                            .frame(width: 40, height: 40)
+                            .frame(width: 45, height: 45)
                         
                         Text(String(player.jerseyNumber))
                             .font(.system(size: 16, weight: .bold))
@@ -6424,34 +6737,35 @@ struct ModernGameModeView: View {
         }
     }
     
-    // MARK: - Enhanced End Game View
-    struct EnhancedEndGameView: View {
-        @Binding var game: Game
-        let auditLog: [GameAuditEntry]
-        let team: Team
-        let onConfirmEnd: () -> Void
-        let onAuditEntryEdit: (GameAuditEntry) -> Void
-        let onAuditEntryDelete: (UUID) -> Void
+struct EnhancedEndGameView: View {
+    @Binding var game: Game
+    let auditLog: [GameAuditEntry]
+    let team: Team
+    let onConfirmEnd: () -> Void
+    let onAuditEntryEdit: (GameAuditEntry) -> Void
+    let onAuditEntryDelete: (UUID) -> Void
+    
+    @Environment(\.presentationMode) var presentationMode
+    @State private var goalsFor: Int
+    @State private var goalsAgainst: Int
+    @State private var editingEntry: GameAuditEntry?
+    @State private var isSaving = false  // NEW: Track saving state
+    
+    init(game: Binding<Game>, auditLog: [GameAuditEntry], team: Team, onConfirmEnd: @escaping () -> Void, onAuditEntryEdit: @escaping (GameAuditEntry) -> Void, onAuditEntryDelete: @escaping (UUID) -> Void) {
+        self._game = game
+        self.auditLog = auditLog
+        self.team = team
+        self.onConfirmEnd = onConfirmEnd
+        self.onAuditEntryEdit = onAuditEntryEdit
+        self.onAuditEntryDelete = onAuditEntryDelete
         
-        @Environment(\.presentationMode) var presentationMode
-        @State private var goalsFor: Int
-        @State private var goalsAgainst: Int
-        @State private var editingEntry: GameAuditEntry?
-        
-        init(game: Binding<Game>, auditLog: [GameAuditEntry], team: Team, onConfirmEnd: @escaping () -> Void, onAuditEntryEdit: @escaping (GameAuditEntry) -> Void, onAuditEntryDelete: @escaping (UUID) -> Void) {
-            self._game = game
-            self.auditLog = auditLog
-            self.team = team
-            self.onConfirmEnd = onConfirmEnd
-            self.onAuditEntryEdit = onAuditEntryEdit
-            self.onAuditEntryDelete = onAuditEntryDelete
-            
-            self._goalsFor = State(initialValue: game.wrappedValue.result?.goalsFor ?? 0)
-            self._goalsAgainst = State(initialValue: game.wrappedValue.result?.goalsAgainst ?? 0)
-        }
-        
-        var body: some View {
-            NavigationView {
+        self._goalsFor = State(initialValue: game.wrappedValue.result?.goalsFor ?? 0)
+        self._goalsAgainst = State(initialValue: game.wrappedValue.result?.goalsAgainst ?? 0)
+    }
+    
+    var body: some View {
+        NavigationView {
+            ZStack {
                 VStack(spacing: 20) {
                     Text("End Game Confirmation")
                         .font(.title2)
@@ -6472,7 +6786,7 @@ struct ModernGameModeView: View {
                                     Button("-") {
                                         if goalsFor > 0 { goalsFor -= 1 }
                                     }
-                                    .disabled(goalsFor <= 0)
+                                    .disabled(goalsFor <= 0 || isSaving)  // Disable when saving
                                     
                                     Text("\(goalsFor)")
                                         .font(.title)
@@ -6482,6 +6796,7 @@ struct ModernGameModeView: View {
                                     Button("+") {
                                         goalsFor += 1
                                     }
+                                    .disabled(isSaving)  // Disable when saving
                                 }
                             }
                             
@@ -6498,7 +6813,7 @@ struct ModernGameModeView: View {
                                     Button("-") {
                                         if goalsAgainst > 0 { goalsAgainst -= 1 }
                                     }
-                                    .disabled(goalsAgainst <= 0)
+                                    .disabled(goalsAgainst <= 0 || isSaving)  // Disable when saving
                                     
                                     Text("\(goalsAgainst)")
                                         .font(.title)
@@ -6508,6 +6823,7 @@ struct ModernGameModeView: View {
                                     Button("+") {
                                         goalsAgainst += 1
                                     }
+                                    .disabled(isSaving)  // Disable when saving
                                 }
                             }
                         }
@@ -6535,6 +6851,7 @@ struct ModernGameModeView: View {
                                             onEdit: { editingEntry = entry },
                                             onDelete: { onAuditEntryDelete(entry.id) }
                                         )
+                                        .disabled(isSaving)  // Disable interaction when saving
                                     }
                                 }
                             }
@@ -6547,29 +6864,71 @@ struct ModernGameModeView: View {
                     
                     Spacer()
                     
-                    // Confirm Button
-                    Button("Confirm & End Game") {
+                    // Confirm Button - UPDATED with loading state
+                    Button(action: {
+                        isSaving = true
                         game.result = GameResult(goalsFor: goalsFor, goalsAgainst: goalsAgainst)
                         onConfirmEnd()
+                    }) {
+                        HStack {
+                            if isSaving {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                    .scaleEffect(0.9)
+                                Text("Ending Game...")
+                            } else {
+                                Text("Confirm & End Game")
+                            }
+                        }
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(isSaving ? Color.gray : Color.green)
+                        .cornerRadius(12)
                     }
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(Color.green)
-                    .cornerRadius(12)
+                    .disabled(isSaving)
                 }
                 .padding()
-                .navigationTitle("End Game")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        Button("Cancel") {
+                .blur(radius: isSaving ? 2 : 0)  // Blur background when saving
+                
+                // NEW: Full-screen saving overlay
+                if isSaving {
+                    Color.black.opacity(0.4)
+                        .ignoresSafeArea()
+                    
+                    VStack(spacing: 20) {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            .scaleEffect(1.5)
+                        
+                        Text("Saving Game Data...")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                        
+                        Text("Syncing to cloud...")
+                            .font(.subheadline)
+                            .foregroundColor(.white.opacity(0.8))
+                    }
+                    .padding(30)
+                    .background(Color.black.opacity(0.8))
+                    .cornerRadius(20)
+                }
+            }
+            .navigationTitle("End Game")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        if !isSaving {  // Only allow cancel if not saving
                             presentationMode.wrappedValue.dismiss()
                         }
                     }
+                    .disabled(isSaving)
                 }
             }
-            .sheet(item: $editingEntry) { entry in
+        }
+        .sheet(item: $editingEntry) { entry in
+            if !isSaving {  // Only show edit sheet if not saving
                 EditAuditEntryView(
                     entry: entry,
                     team: team,
@@ -6578,6 +6937,7 @@ struct ModernGameModeView: View {
             }
         }
     }
+}
     
     // MARK: - Compact Audit Entry Row
     struct CompactAuditEntryRow: View {
@@ -6645,7 +7005,6 @@ struct ModernGameModeView: View {
             )
         }
     }
-}
 
 // MARK: - Complete Game Detail View (UPDATED with Binding)
 struct GameDetailView: View {
