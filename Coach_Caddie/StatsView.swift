@@ -481,9 +481,11 @@ struct EnhancedQuickStatsView: View {
                     for game in team.games {
                         // Count from game events
                         for event in game.gameEvents where event.playerId == playerId {
+                            print("📊 Processing event for \(playerId): \(event.eventType) at minute \(event.minute ?? 0)")
                             switch event.eventType {
                             case .goal:
                                 newStats.goals += 1
+                                print("✅ Goal counted. Total now: \(newStats.goals)")
                             case .assist:
                                 newStats.assists += 1
                             case .shot, .shotOnTarget:

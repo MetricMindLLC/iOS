@@ -8,30 +8,69 @@ struct ContentView: View {
     @State private var showingDemoTeamSelection = false
     @State private var showingQuickActions = false
     @State private var showingStats = false
+    @State private var isDataFullyLoaded = false
     
     var body: some View {
         NavigationView {
-            ScrollView {
-                VStack(spacing: 24) {
-                    headerSection
-                    
-                    // Overview Statistics Section (ADDED - this was missing!)
-                    if !teamManager.teams.isEmpty {
-                        overviewSection
+            ZStack {
+                ScrollView {
+                    VStack(spacing: 24) {
+                        headerSection
+                        
+                        // Overview Statistics Section
+                        if !teamManager.teams.isEmpty && isDataFullyLoaded {
+                            overviewSection
+                        }
+                        
+                        if teamManager.teams.isEmpty && isDataFullyLoaded {
+                            emptyStateSection
+                        } else if !teamManager.teams.isEmpty && isDataFullyLoaded {
+                            teamsListSection
+                        }
                     }
-                    
-                    if teamManager.teams.isEmpty {
-                        emptyStateSection
-                    } else {
-                        teamsListSection
-                    }
+                    .padding(.top)
                 }
-                .padding(.top)
+                .navigationBarHidden(true)
+                .opacity(isDataFullyLoaded ? 1 : 0.3)
+                .disabled(!isDataFullyLoaded)
+                .refreshable {
+                    await loadDataAndWait()
+                }
+                
+                // Loading Overlay
+                if !isDataFullyLoaded {
+                    ZStack {
+                        Color.black.opacity(0.4)
+                            .ignoresSafeArea()
+                        
+                        VStack(spacing: 20) {
+                            ProgressView()
+                                .scaleEffect(1.5)
+                                .progressViewStyle(CircularProgressViewStyle(tint: Color(red: 0.13, green: 0.47, blue: 0.25)))
+                            
+                            VStack(spacing: 8) {
+                                Text("Loading team data...")
+                                    .font(.headline)
+                                    .foregroundColor(.primary)
+                                
+                                Text(loadingStatusText)
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        .padding(40)
+                        .background(
+                            RoundedRectangle(cornerRadius: 20)
+                                .fill(Color(.systemBackground))
+                                .shadow(color: Color.black.opacity(0.3), radius: 15, x: 0, y: 8)
+                        )
+                    }
+                    .transition(.opacity)
+                }
             }
-            .navigationBarHidden(true)
-            .refreshable {
-                teamManager.loadData()
-            }
+        }
+        .task {
+            await loadDataAndWait()
         }
         .sheet(isPresented: $showingNewTeam) {
             NewTeamView(teamManager: teamManager)
@@ -62,6 +101,117 @@ struct ContentView: View {
                 Text(error)
             }
         }
+    }
+    
+    @State private var loadingStatusText = "Please wait..."
+    
+    private func loadDataAndWait() async {
+        await MainActor.run {
+            isDataFullyLoaded = false
+            loadingStatusText = "Loading teams..."
+        }
+        
+        print("🔄 ContentView: Starting data load at \(Date())")
+        
+        // Trigger the load
+        await MainActor.run {
+            teamManager.loadData()
+        }
+        
+        // Wait for initial team load
+        try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+        
+        // Wait for isLoading to become false
+        var iterations = 0
+        while await MainActor.run(body: { teamManager.isLoading }) && iterations < 100 {
+            try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 second
+            iterations += 1
+        }
+        
+        let teamCount = await MainActor.run { teamManager.teams.count }
+        print("🔄 ContentView: Initial load complete at \(Date()), teams: \(teamCount)")
+        
+        // Now monitor for subcollection loading
+        if teamCount > 0 {
+            await MainActor.run {
+                loadingStatusText = "Loading games and players..."
+            }
+            
+            // Monitor game/player counts with a longer, more patient approach
+            var previousSnapshot: [UUID: (games: Int, players: Int)] = [:]
+            var consecutiveStableChecks = 0
+            let requiredStableChecks = 8 // Need 8 checks at 0.5s = 4 seconds of stability
+            let checkInterval: UInt64 = 500_000_000 // 0.5 seconds
+            let maxWaitTime: TimeInterval = 15.0 // Wait up to 15 seconds
+            let startTime = Date()
+            
+            while Date().timeIntervalSince(startTime) < maxWaitTime {
+                try? await Task.sleep(nanoseconds: checkInterval)
+                
+                // Get current snapshot
+                let currentSnapshot = await MainActor.run {
+                    var snapshot: [UUID: (games: Int, players: Int)] = [:]
+                    for team in teamManager.teams {
+                        snapshot[team.id] = (games: team.games.count, players: team.players.count)
+                    }
+                    return snapshot
+                }
+                
+                // Log current state
+                let totalGames = currentSnapshot.values.reduce(0) { $0 + $1.games }
+                let totalPlayers = currentSnapshot.values.reduce(0) { $0 + $1.players }
+                print("📊 Check at \(Date()): Games=\(totalGames), Players=\(totalPlayers), Stable=\(consecutiveStableChecks)/\(requiredStableChecks)")
+                
+                // Compare with previous
+                if currentSnapshot == previousSnapshot {
+                    consecutiveStableChecks += 1
+                    
+                    if consecutiveStableChecks >= requiredStableChecks {
+                        print("✅ ContentView: Data stabilized after \(consecutiveStableChecks) checks")
+                        print("✅ Final: Games=\(totalGames), Players=\(totalPlayers)")
+                        break
+                    }
+                } else {
+                    // Data changed
+                    if !previousSnapshot.isEmpty {
+                        print("🔄 Data changed, resetting stability counter")
+                        for (teamId, current) in currentSnapshot {
+                            if let previous = previousSnapshot[teamId] {
+                                if current.games != previous.games || current.players != previous.players {
+                                    print("   Team \(teamId): Games \(previous.games)->\(current.games), Players \(previous.players)->\(current.players)")
+                                }
+                            }
+                        }
+                    }
+                    consecutiveStableChecks = 0
+                    previousSnapshot = currentSnapshot
+                }
+            }
+            
+            // Log final state
+            let finalSnapshot = await MainActor.run {
+                var snapshot: [UUID: (games: Int, players: Int)] = [:]
+                for team in teamManager.teams {
+                    snapshot[team.id] = (games: team.games.count, players: team.players.count)
+                }
+                return snapshot
+            }
+            let finalGames = finalSnapshot.values.reduce(0) { $0 + $1.games }
+            let finalPlayers = finalSnapshot.values.reduce(0) { $0 + $1.players }
+            print("✅ ContentView: Loading complete at \(Date())")
+            print("✅ Final state: \(teamCount) teams, \(finalGames) games, \(finalPlayers) players")
+        }
+        
+        // One more small delay before showing UI
+        try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+        
+        await MainActor.run {
+            withAnimation {
+                isDataFullyLoaded = true
+            }
+        }
+        
+        print("✅ ContentView: UI ready at \(Date())")
     }
     
     private var headerSection: some View {
@@ -101,15 +251,25 @@ struct ContentView: View {
                         .font(.title)
                         .fontWeight(.bold)
                     
-                    Text("Managing \(teamManager.teams.count) team\(teamManager.teams.count == 1 ? "" : "s")")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
+                    if isDataFullyLoaded {
+                        Text("Managing \(teamManager.teams.count) team\(teamManager.teams.count == 1 ? "" : "s")")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    } else {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .scaleEffect(0.7)
+                            Text("Loading...")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                    }
                 }
                 
                 Spacer()
                 
-                // Quick Actions Button - Updated with limit check
-                if !teamManager.teams.isEmpty {
+                // Quick Actions Button
+                if !teamManager.teams.isEmpty && isDataFullyLoaded {
                     Button(action: {
                         showingQuickActions = true
                     }) {
@@ -126,7 +286,7 @@ struct ContentView: View {
         .padding(.horizontal)
     }
     
-    // MARK: - Overview Section (ADDED - This was missing!)
+    // MARK: - Overview Section
     private var overviewSection: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Overview")
@@ -453,5 +613,20 @@ struct StatBubble: View {
         .padding(.vertical, 6)
         .background(color.opacity(0.1))
         .cornerRadius(8)
+    }
+}
+
+// Helper extension for dictionary comparison
+extension Dictionary where Key == UUID, Value == (games: Int, players: Int) {
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        guard lhs.count == rhs.count else { return false }
+        for (key, value) in lhs {
+            guard let rhsValue = rhs[key],
+                  value.games == rhsValue.games,
+                  value.players == rhsValue.players else {
+                return false
+            }
+        }
+        return true
     }
 }
