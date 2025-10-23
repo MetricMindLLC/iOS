@@ -271,7 +271,6 @@ struct CustomTabBar: View {
     }
 }
 
-// MARK: - Team Overview Tab (UPDATED TO MATCH OLD UI)
 struct TeamOverviewTab: View {
     @Binding var team: Team
     @Binding var showingAddPlayer: Bool
@@ -282,6 +281,11 @@ struct TeamOverviewTab: View {
     
     @State private var userRole: AccessLevel?
     @State private var isLoadingPermissions = true
+    
+    // CRITICAL FIX: Get fresh team data from TeamManager
+    private var currentTeam: Team {
+        teamManager.teams.first(where: { $0.id == team.id }) ?? team
+    }
     
     var body: some View {
         ScrollView {
@@ -294,8 +298,8 @@ struct TeamOverviewTab: View {
                     quickActionsSection
                 }
                 
-                // Team Stats Summary (using old UI style)
-                TeamStatsSummary(team: team)
+                // Team Stats Summary (using fresh data - ONLY CHANGE)
+                TeamStatsSummary(team: currentTeam)
                 
                 // Add bottom padding to prevent tab bar overlap
                 Color.clear
@@ -311,22 +315,22 @@ struct TeamOverviewTab: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
                 VStack(alignment: .leading) {
-                    Text(team.name)
+                    Text(currentTeam.name)
                         .font(.largeTitle)
                         .bold()
-                    Text("\(team.format.rawValue) • \(team.defaultFormation.rawValue)")
+                    Text("\(currentTeam.format.rawValue) • \(currentTeam.defaultFormation.rawValue)")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
                 Spacer()
                 Image(systemName: "shield.fill")
                     .font(.system(size: 50))
-                    .foregroundColor(team.primaryColor)
+                    .foregroundColor(currentTeam.primaryColor)
             }
             
             HStack(spacing: 30) {
                 VStack {
-                    Text("\(team.players.count)")
+                    Text("\(currentTeam.players.count)")
                         .font(.title2)
                         .bold()
                     Text("Players")
@@ -363,12 +367,12 @@ struct TeamOverviewTab: View {
     // Helper computed properties for upcoming events
     private var upcomingGamesCount: Int {
         let now = Date()
-        return team.games.filter { $0.date > now }.count
+        return currentTeam.games.filter { $0.date > now }.count
     }
     
     private var upcomingPracticesCount: Int {
         let now = Date()
-        return team.practices.filter { $0.date > now }.count
+        return currentTeam.practices.filter { $0.date > now }.count
     }
     
     private var quickActionsSection: some View {
@@ -484,7 +488,7 @@ struct TeamOverviewTab: View {
     
     private var viewerQuickActions: some View {
         VStack(spacing: 12) {
-            Text("ðŸ‘ï¸ View Only Access")
+            Text("👁️ View Only Access")
                 .font(.headline)
                 .foregroundColor(.secondary)
             
@@ -539,54 +543,47 @@ struct TeamPlayersTab: View {
     @State private var userRole: AccessLevel?
     @State private var editablePlayerIds: [UUID] = []
     @State private var isLoadingPermissions = true
-    @State private var selectedPlayer: Player?
+    @State private var selectedPlayerId: UUID?
     @State private var showingPlayerDetail = false
+    
+    // CRITICAL: Get fresh team data from TeamManager
+    private var currentTeam: Team? {
+        teamManager.teams.first(where: { $0.id == team.id })
+    }
     
     var body: some View {
         VStack {
-            if team.players.isEmpty {
-                EmptyPlayersView(showingAddPlayer: $showingAddPlayer)
-            } else {
-                Group {
-                    if isLoadingPermissions {
-                        ProgressView("Loading permissions...")
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    } else {
-                        playersList
+            if let freshTeam = currentTeam {
+                if freshTeam.players.isEmpty {
+                    EmptyPlayersView(showingAddPlayer: $showingAddPlayer)
+                } else {
+                    Group {
+                        if isLoadingPermissions {
+                            ProgressView("Loading permissions...")
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        } else {
+                            playersList(team: freshTeam)
+                        }
                     }
                 }
+            } else {
+                Text("Team not found")
+                    .foregroundColor(.secondary)
             }
         }
         .sheet(isPresented: $showingPlayerDetail) {
-            if let selectedPlayer = selectedPlayer {
-                let playerBinding = Binding<Player>(
-                    get: { team.players.first(where: { $0.id == selectedPlayer.id }) ?? selectedPlayer },
-                    set: { newPlayer in
-                        if let index = team.players.firstIndex(where: { $0.id == selectedPlayer.id }) {
-                            team.players[index] = newPlayer
-                        }
-                    }
-                )
-                
-                PlayerDetailView(player: playerBinding, team: $team)
+            if let playerId = selectedPlayerId {
+                PlayerDetailView(playerId: playerId, teamId: team.id)
                     .environmentObject(teamManager)
             }
         }
         .onAppear {
             checkPermissions()
-            // ADDED: Recalculate stats when Players tab appears to ensure current data
-            recalculateStatsForPlayersTab()
         }
     }
     
-    // ADDED: Recalculate stats for this team when Players tab loads
-    private func recalculateStatsForPlayersTab() {
-        guard let teamIndex = teamManager.teams.firstIndex(where: { $0.id == team.id }) else { return }
-        teamManager.recalculateStatsForTeam(teamIndex: teamIndex)
-    }
-    
     @ViewBuilder
-    private var playersList: some View {
+    private func playersList(team: Team) -> some View {
         ScrollView {
             LazyVStack(spacing: 12) {
                 ForEach(team.players.sorted { $0.jerseyNumber < $1.jerseyNumber }, id: \.id) { player in
@@ -627,7 +624,7 @@ struct TeamPlayersTab: View {
                     .padding(.vertical, 4)
                     .onTapGesture {
                         if editablePlayerIds.contains(player.id) {
-                            selectedPlayer = player
+                            selectedPlayerId = player.id
                             showingPlayerDetail = true
                         }
                     }
@@ -879,29 +876,18 @@ struct QuickActionButton: View {
     }
 }
 
-// MARK: - Team Stats Summary (UPDATED TO CALCULATE FROM GAME DATA)
+// MARK: - Team Stats Summary (UPDATED TO COMBINE GAME DATA + MANUAL EDITS)
 struct TeamStatsSummary: View {
     let team: Team
     
-    // Calculate stats from actual game events instead of cached seasonStats
+    // Calculate total goals: sum of all player seasonStats (which includes manual edits)
     var totalGoals: Int {
-        var goals = 0
-        for game in team.games {
-            for event in game.gameEvents where event.eventType == .goal {
-                goals += 1
-            }
-        }
-        return goals
+        return team.players.reduce(0) { $0 + $1.seasonStats.goals }
     }
     
+    // Calculate total assists: sum of all player seasonStats (which includes manual edits)
     var totalAssists: Int {
-        var assists = 0
-        for game in team.games {
-            for event in game.gameEvents where event.eventType == .assist {
-                assists += 1
-            }
-        }
-        return assists
+        return team.players.reduce(0) { $0 + $1.seasonStats.assists }
     }
     
     var gamesWon: Int {
@@ -925,35 +911,14 @@ struct TeamStatsSummary: View {
         }.count
     }
     
-    // Calculate top scorer from actual game events
+    // Calculate top scorer from player seasonStats (which includes manual edits)
     var topScorer: Player? {
-        var goalCounts: [UUID: Int] = [:]
-        
-        for game in team.games {
-            for event in game.gameEvents where event.eventType == .goal {
-                goalCounts[event.playerId, default: 0] += 1
-            }
-        }
-        
-        guard let topScorerId = goalCounts.max(by: { $0.value < $1.value })?.key,
-              goalCounts[topScorerId] ?? 0 > 0 else {
-            return nil
-        }
-        
-        return team.players.first { $0.id == topScorerId }
+        return team.players.max(by: { $0.seasonStats.goals < $1.seasonStats.goals })
     }
     
-    // Get the actual goal count for the top scorer
+    // Get the actual goal count for the top scorer from their seasonStats
     var topScorerGoals: Int {
-        guard let topScorer = topScorer else { return 0 }
-        
-        var goals = 0
-        for game in team.games {
-            for event in game.gameEvents where event.eventType == .goal && event.playerId == topScorer.id {
-                goals += 1
-            }
-        }
-        return goals
+        return topScorer?.seasonStats.goals ?? 0
     }
     
     var body: some View {

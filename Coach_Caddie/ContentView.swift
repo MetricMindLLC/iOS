@@ -69,8 +69,13 @@ struct ContentView: View {
                 }
             }
         }
-        .task {
-            await loadDataAndWait()
+        .onAppear {
+            // Only load data on the first appearance
+            if !isDataFullyLoaded {
+                Task {
+                    await loadDataAndWait()
+                }
+            }
         }
         .sheet(isPresented: $showingNewTeam) {
             NewTeamView(teamManager: teamManager)

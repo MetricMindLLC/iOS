@@ -837,15 +837,35 @@ struct LineupView: View {
         print("Game completed locally, preparing for Firebase sync...")
         isSavingGame = true
 
-        // 15. Now attempt to sync to Firebase with local-only mode
+        // 15. CRITICAL FIX: Save player season stats AND game data to Firebase
         Task {
+            // First, sync the completed game with all its data
             let syncSuccess = await teamManager.disableLocalOnlyModeAndSync(updatedTeam, game: updatedGame)
+            
+            // CRITICAL FIX: Also save each player's updated season stats
+            if syncSuccess {
+                print("✅ Game data synced, now saving updated player season stats...")
+                
+                // Save each player who participated in the game to ensure season stats persist
+                for gamePlayerStats in updatedGame.playerStats {
+                    if let updatedPlayer = updatedTeam.players.first(where: { $0.id == gamePlayerStats.playerId }) {
+                        // Use updatePlayer to ensure season stats are saved to Firebase
+                        await MainActor.run {
+                            self.teamManager.updatePlayer(in: updatedTeam, player: updatedPlayer)
+                        }
+                        print("✅ Saved season stats for player: \(updatedPlayer.name)")
+                    }
+                }
+                
+                // Give a moment for all player updates to complete
+                try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+            }
             
             await MainActor.run {
                 self.isSavingGame = false
                 
                 if syncSuccess {
-                    print("✅ Game successfully synced to Firebase")
+                    print("✅ Game and player season stats successfully synced to Firebase")
                     // Clear game state and exit
                     self.clearGameStateAndExit()
                 } else {
@@ -854,7 +874,7 @@ struct LineupView: View {
                 }
             }
         }
-        
+
         print("END GAME ACTION INITIATED - waiting for Firebase sync")
     }
 
@@ -908,12 +928,32 @@ struct LineupView: View {
         Task {
             let syncSuccess = await teamManager.disableLocalOnlyModeAndSync(updatedTeam, game: currentGame)
             
+            // CRITICAL FIX: Also save player season stats on retry
+            if syncSuccess {
+                print("✅ Game data synced on retry, now saving updated player season stats...")
+                
+                // Save each player who participated in the game
+                for gamePlayerStats in currentGame.playerStats {
+                    if let updatedPlayer = updatedTeam.players.first(where: { $0.id == gamePlayerStats.playerId }) {
+                        await MainActor.run {
+                            self.teamManager.updatePlayer(in: updatedTeam, player: updatedPlayer)
+                        }
+                        print("✅ Saved season stats for player on retry: \(updatedPlayer.name)")
+                    }
+                }
+                
+                // Give a moment for all player updates to complete
+                try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+            }
+            
             await MainActor.run {
                 self.isSavingGame = false
                 
                 if syncSuccess {
+                    print("✅ Retry successful: Game and player season stats synced to Firebase")
                     self.clearGameStateAndExit()
                 } else {
+                    print("❌ Retry failed")
                     self.showRetryGameSaveAlert = true
                 }
             }

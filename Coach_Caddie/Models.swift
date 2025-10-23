@@ -1274,7 +1274,7 @@ enum COPPACategory: String, CaseIterable {
     case parentRights = "Parent Rights"
 }
 
-// MARK: - Player Stats (UPDATED with goalsConceded)
+// MARK: - Player Stats (UPDATED with adjustment-based manual edits)
 struct PlayerStats: Codable, Equatable {
     var gamesPlayed: Int = 0
     var goals: Int = 0
@@ -1282,10 +1282,97 @@ struct PlayerStats: Codable, Equatable {
     var shots: Int = 0
     var shotOnTarget: Int = 0
     var saves: Int = 0
-    var goalsConceded: Int = 0  // NEW: For goalkeepers
+    var goalsConceded: Int = 0
     var yellowCards: Int = 0
     var redCards: Int = 0
     var minutesPlayed: Int = 0
+    
+    // NEW: Store manual adjustments as offsets, not flags
+    var manualAdjustments: [String: Int] = [:]  // e.g., ["goals": 5] means +5 to calculated value
+    
+    // REMOVED: No more manuallyEditedStats Set
+    
+    // MARK: - Custom Decoding for Backward Compatibility
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        // Decode all existing fields
+        gamesPlayed = try container.decodeIfPresent(Int.self, forKey: .gamesPlayed) ?? 0
+        goals = try container.decodeIfPresent(Int.self, forKey: .goals) ?? 0
+        assists = try container.decodeIfPresent(Int.self, forKey: .assists) ?? 0
+        shots = try container.decodeIfPresent(Int.self, forKey: .shots) ?? 0
+        shotOnTarget = try container.decodeIfPresent(Int.self, forKey: .shotOnTarget) ?? 0
+        saves = try container.decodeIfPresent(Int.self, forKey: .saves) ?? 0
+        goalsConceded = try container.decodeIfPresent(Int.self, forKey: .goalsConceded) ?? 0
+        yellowCards = try container.decodeIfPresent(Int.self, forKey: .yellowCards) ?? 0
+        redCards = try container.decodeIfPresent(Int.self, forKey: .redCards) ?? 0
+        minutesPlayed = try container.decodeIfPresent(Int.self, forKey: .minutesPlayed) ?? 0
+        
+        // NEW: Decode manual adjustments with fallback to empty dict for old data
+        manualAdjustments = try container.decodeIfPresent([String: Int].self, forKey: .manualAdjustments) ?? [:]
+        
+        // MIGRATION: If old manuallyEditedStats exists, ignore it (backward compatibility)
+        // The old locked values are already in the stat fields, so we keep them as-is
+    }
+    
+    // MARK: - Default Initializer
+    init() {
+        // All properties use their default values from declarations above
+    }
+    
+    // MARK: - Parameterized Initializer
+    init(gamesPlayed: Int = 0, goals: Int = 0, assists: Int = 0, shots: Int = 0,
+         shotOnTarget: Int = 0, saves: Int = 0, goalsConceded: Int = 0,
+         yellowCards: Int = 0, redCards: Int = 0, minutesPlayed: Int = 0,
+         manualAdjustments: [String: Int] = [:]) {
+        self.gamesPlayed = gamesPlayed
+        self.goals = goals
+        self.assists = assists
+        self.shots = shots
+        self.shotOnTarget = shotOnTarget
+        self.saves = saves
+        self.goalsConceded = goalsConceded
+        self.yellowCards = yellowCards
+        self.redCards = redCards
+        self.minutesPlayed = minutesPlayed
+        self.manualAdjustments = manualAdjustments
+    }
+    
+    // MARK: - CodingKeys
+    private enum CodingKeys: String, CodingKey {
+        case gamesPlayed
+        case goals
+        case assists
+        case shots
+        case shotOnTarget
+        case saves
+        case goalsConceded
+        case yellowCards
+        case redCards
+        case minutesPlayed
+        case manualAdjustments
+    }
+    
+    // NEW: Helper methods to work with adjustments
+    mutating func setManualAdjustment(_ statName: String, adjustment: Int) {
+        manualAdjustments[statName] = adjustment
+    }
+    
+    func getManualAdjustment(_ statName: String) -> Int {
+        return manualAdjustments[statName] ?? 0
+    }
+    
+    mutating func clearManualAdjustment(_ statName: String) {
+        manualAdjustments.removeValue(forKey: statName)
+    }
+    
+    mutating func clearAllManualAdjustments() {
+        manualAdjustments.removeAll()
+    }
+    
+    func hasManualAdjustment(_ statName: String) -> Bool {
+        return manualAdjustments[statName] != nil
+    }
 }
 
 // MARK: - Game Audit Entry (UPDATED to be editable)

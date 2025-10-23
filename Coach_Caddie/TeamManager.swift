@@ -1695,6 +1695,10 @@ var teamsICreated: [Team] {
         // Recalculate each player's season stats from game events
         for playerIndex in updatedTeam.players.indices {
             let playerId = updatedTeam.players[playerIndex].id
+            
+            // CRITICAL FIX: Preserve the manual adjustments before resetting
+            let manualAdjustments = updatedTeam.players[playerIndex].seasonStats.manualAdjustments
+            
             var newStats = PlayerSeasonStats() // Reset to zero
             
             // Count stats from all games
@@ -1743,6 +1747,21 @@ var teamsICreated: [Team] {
                     updatedTeam.games[gameIndex] = updatedGame
                 }
             }
+            
+            // CRITICAL FIX: Apply manual adjustments to the calculated stats
+            newStats.goals += manualAdjustments["goals"] ?? 0
+            newStats.assists += manualAdjustments["assists"] ?? 0
+            newStats.shots += manualAdjustments["shots"] ?? 0
+            newStats.saves += manualAdjustments["saves"] ?? 0
+            newStats.goalsConceded += manualAdjustments["goalsConceded"] ?? 0
+            newStats.yellowCards += manualAdjustments["yellowCards"] ?? 0
+            newStats.redCards += manualAdjustments["redCards"] ?? 0
+            newStats.gamesPlayed += manualAdjustments["gamesPlayed"] ?? 0
+            newStats.minutesPlayed += manualAdjustments["minutesPlayed"] ?? 0
+            newStats.shotOnTarget += manualAdjustments["shotOnTarget"] ?? 0
+            
+            // CRITICAL FIX: Restore the manual adjustments dictionary
+            newStats.manualAdjustments = manualAdjustments
             
             updatedTeam.players[playerIndex].seasonStats = newStats
         }
@@ -2154,7 +2173,7 @@ var teamsICreated: [Team] {
     }
     
     // MARK: - Local Data Management
-    private func saveLocalData() {
+    func saveLocalData() {
         // UPDATED: Only save if user is authenticated
         guard let currentUser = Auth.auth().currentUser, !currentUser.isAnonymous else {
             print("🔒 No authenticated user - not saving local data")

@@ -2,8 +2,8 @@ import SwiftUI
 import FirebaseAuth
 
 struct PlayerDetailView: View {
-    @Binding var player: Player
-    @Binding var team: Team
+    let playerId: UUID  // CHANGED: Just pass the ID
+    let teamId: UUID    // CHANGED: Just pass the ID
     @Environment(\.presentationMode) var presentationMode
     @EnvironmentObject var teamManager: TeamManager
     
@@ -13,108 +13,99 @@ struct PlayerDetailView: View {
     @State private var canEditThisPlayer = false
     @State private var isLoadingPermissions = true
     
+    // CRITICAL: Get fresh player and team data from TeamManager
+    private var team: Team? {
+        teamManager.teams.first(where: { $0.id == teamId })
+    }
+    
+    private var player: Player? {
+        guard let team = team else { return nil }
+        return team.players.first(where: { $0.id == playerId })
+    }
+    
     var body: some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                // Player Photo Section
-                playerPhotoSection
-                
-                // Basic Info Section
-                basicInfoSection
-                
-                // Stats Section
-                statsSection
-                
-                // Contact Info Section (conditional based on role)
-                if canEditThisPlayer || userRole == .coach {
-                    contactInfoSection
-                } else if userRole == .parent {
-                    limitedContactInfoSection
-                }
-                
-                // Medical/Emergency Info Section (conditional based on role)
-                if canEditThisPlayer || userRole == .coach {
-                    medicalInfoSection
-                }
-                
-                // Coach Notes Section (conditional based on role)
-                if userRole == .coach && !(player.notes?.isEmpty ?? true) {
-                    coachNotesSection
-                }
-                
-                // Action Buttons Section - FIXED: Added proper spacing and layout
-                if canEditThisPlayer || userRole == .coach {
-                    VStack(spacing: 16) {
-                        // Edit Button
-                        if canEditThisPlayer {
-                            Button(action: {
-                                showingEditPlayer = true
-                            }) {
-                                HStack {
-                                    Image(systemName: "pencil")
-                                    Text("Edit")
-                                }
-                                .foregroundColor(.white)
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(Color.blue)
-                                .cornerRadius(10)
-                            }
-                            .padding(.horizontal)
-                        }
-                        
-                        // Delete Button (only for coaches)
-                        if userRole == .coach {
-                            Button(action: {
-                                showingDeleteAlert = true
-                            }) {
-                                HStack {
-                                    Image(systemName: "trash")
-                                    Text("Delete Player")
-                                }
-                                .foregroundColor(.white)
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(Color.red)
-                                .cornerRadius(10)
-                            }
-                            .padding(.horizontal)
-                        }
+        if let player = player, let team = team {
+            ScrollView {
+                VStack(spacing: 20) {
+                    // Player Photo Section
+                    playerPhotoSection(player: player, team: team)
+                    
+                    // Basic Info Section
+                    basicInfoSection(player: player)
+                    
+                    // Stats Section
+                    statsSection(player: player)
+                    
+                    // Contact Info Section (conditional based on role)
+                    if canEditThisPlayer || userRole == .coach {
+                        contactInfoSection(player: player)
+                    } else if userRole == .parent {
+                        limitedContactInfoSection(player: player)
                     }
-                    .padding(.top, 20)
+                    
+                    // Medical/Emergency Info Section (conditional based on role)
+                    if canEditThisPlayer || userRole == .coach {
+                        medicalInfoSection(player: player)
+                    }
+                    
+                    // Coach Notes Section (conditional based on role)
+                    if userRole == .coach && !(player.notes?.isEmpty ?? true) {
+                        coachNotesSection(player: player)
+                    }
+                    
+                    // Action Buttons Section
+                    if canEditThisPlayer || userRole == .coach {
+                        actionButtons(player: player, team: team)
+                    }
+                    
+                    // Add bottom padding to ensure content doesn't get cut off
+                    Color.clear
+                        .frame(height: 50)
                 }
-                
-                // Add bottom padding to ensure content doesn't get cut off
-                Color.clear
-                    .frame(height: 50)
+                .padding()
             }
-            .padding()
-        }
-        .navigationBarTitleDisplayMode(.inline)
-        .sheet(isPresented: $showingEditPlayer) {
-            EditPlayerView(player: $player, team: $team)
-        }
-        .alert("Delete Player", isPresented: $showingDeleteAlert) {
-            Button("Cancel", role: .cancel) { }
-            Button("Delete", role: .destructive) {
-                removePlayer()
+            .navigationBarTitleDisplayMode(.inline)
+            .sheet(isPresented: $showingEditPlayer) {
+                if let currentPlayer = self.player, let currentTeam = self.team {
+                    EditPlayerView(
+                        player: Binding(
+                            get: { currentPlayer },
+                            set: { _ in }
+                        ),
+                        team: Binding(
+                            get: { currentTeam },
+                            set: { _ in }
+                        )
+                    )
+                }
             }
-        } message: {
-            Text("Are you sure you want to remove \(player.displayName(for: userRole ?? .viewer, viewerEmail: Auth.auth().currentUser?.email)) from the team? This action cannot be undone.")
-        }
-        .onAppear {
-            checkPermissions()
-        }
-        .overlay {
-            if isLoadingPermissions {
-                ProgressView("Loading...")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color(.systemBackground).opacity(0.8))
+            .alert("Delete Player", isPresented: $showingDeleteAlert) {
+                Button("Cancel", role: .cancel) { }
+                Button("Delete", role: .destructive) {
+                    removePlayer(player: player, team: team)
+                }
+            } message: {
+                Text("Are you sure you want to delete this player? This action cannot be undone.")
             }
+            .onAppear {
+                checkPermissions(player: player, team: team)
+            }
+            .overlay {
+                if isLoadingPermissions {
+                    ProgressView("Loading...")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color(.systemBackground).opacity(0.8))
+                }
+            }
+        } else {
+            Text("Player not found")
+                .foregroundColor(.secondary)
         }
     }
     
-    private var playerPhotoSection: some View {
+    // MARK: - View Components (updated to accept parameters)
+    
+    private func playerPhotoSection(player: Player, team: Team) -> some View {
         VStack(spacing: 12) {
             if let photoData = player.playerPhoto, let uiImage = UIImage(data: photoData) {
                 Image(uiImage: uiImage)
@@ -157,15 +148,13 @@ struct PlayerDetailView: View {
         }
     }
     
-    private var basicInfoSection: some View {
+    private func basicInfoSection(player: Player) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Player Information")
                 .font(.headline)
                 .padding(.horizontal)
             
             VStack(spacing: 12) {
-                // REMOVED: Age and Date of Birth for COPPA compliance
-                
                 if !player.positions.isEmpty {
                     InfoRow(label: "Positions", value: player.positions.joined(separator: ", "))
                 }
@@ -177,7 +166,7 @@ struct PlayerDetailView: View {
         }
     }
     
-    private var statsSection: some View {
+    private func statsSection(player: Player) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Season Stats")
                 .font(.headline)
@@ -193,11 +182,12 @@ struct PlayerDetailView: View {
                 StatRowView(icon: "hands.and.sparkles.fill", title: "Assists", value: "\(player.seasonStats.assists)")
                 Divider().padding(.horizontal)
                 
-                StatRowView(icon: "scope", title: "Shots", value: "\(player.seasonStats.shots)")  // NEW
+                StatRowView(icon: "scope", title: "Shots", value: "\(player.seasonStats.shots)")
                 Divider().padding(.horizontal)
                 
                 StatRowView(icon: "hand.raised.fill", title: "Saves", value: "\(player.seasonStats.saves)")
             }
+            .padding()
             .background(Color(.systemBackground))
             .cornerRadius(15)
             .shadow(radius: 2)
@@ -205,7 +195,7 @@ struct PlayerDetailView: View {
         }
     }
     
-    private var contactInfoSection: some View {
+    private func contactInfoSection(player: Player) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Contact Information")
                 .font(.headline)
@@ -239,7 +229,7 @@ struct PlayerDetailView: View {
         }
     }
     
-    private var limitedContactInfoSection: some View {
+    private func limitedContactInfoSection(player: Player) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Contact Information")
                 .font(.headline)
@@ -271,7 +261,7 @@ struct PlayerDetailView: View {
         }
     }
     
-    private var medicalInfoSection: some View {
+    private func medicalInfoSection(player: Player) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Medical & Emergency")
                 .font(.headline)
@@ -313,7 +303,7 @@ struct PlayerDetailView: View {
         }
     }
     
-    private var coachNotesSection: some View {
+    private func coachNotesSection(player: Player) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Coach Notes")
                 .font(.headline)
@@ -332,7 +322,48 @@ struct PlayerDetailView: View {
         .shadow(radius: 2)
     }
     
-    private func checkPermissions() {
+    private func actionButtons(player: Player, team: Team) -> some View {
+        VStack(spacing: 16) {
+            // Edit Button
+            if canEditThisPlayer {
+                Button(action: {
+                    showingEditPlayer = true
+                }) {
+                    HStack {
+                        Image(systemName: "pencil")
+                        Text("Edit")
+                    }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.blue)
+                    .cornerRadius(10)
+                }
+                .padding(.horizontal)
+            }
+            
+            // Delete Button (only for coaches)
+            if userRole == .coach {
+                Button(action: {
+                    showingDeleteAlert = true
+                }) {
+                    HStack {
+                        Image(systemName: "trash")
+                        Text("Delete Player")
+                    }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.red)
+                    .cornerRadius(10)
+                }
+                .padding(.horizontal)
+            }
+        }
+        .padding(.top, 20)
+    }
+    
+    private func checkPermissions(player: Player, team: Team) {
         Task { @MainActor in
             let role = await teamManager.getCurrentUserRole(for: team)
             let canEdit = await teamManager.canCurrentUserEdit(player: player, in: team)
@@ -343,10 +374,9 @@ struct PlayerDetailView: View {
         }
     }
     
-    func removePlayer() {
+    private func removePlayer(player: Player, team: Team) {
         teamManager.removePlayer(from: team, player: player)
         presentationMode.wrappedValue.dismiss()
-
     }
 }
 
