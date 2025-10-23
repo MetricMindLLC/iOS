@@ -863,35 +863,42 @@ struct EditableStatsStatItem: View {
     @State private var showingEditSheet = false
     
     var body: some View {
-        VStack(spacing: 4) {
-            Text("\(value)")
-                .font(.title2)
-                .bold()
-            
-            HStack(spacing: 4) {
-                Text(label)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                
-                if isEditMode {
-                    Button(action: { showingEditSheet = true }) {
-                        Image(systemName: "pencil.circle.fill")
+        VStack(spacing: 1) {
+            if isEditMode {
+                HStack(spacing: 4) {
+                    Button(action: {
+                        onValueChange?(max(0, value - 1))
+                    }) {
+                        Image(systemName: "minus.circle.fill")
+                            .foregroundColor(value <= 0 ? .gray : .red)
                             .font(.caption)
-                            .foregroundColor(.blue)
                     }
-                    .buttonStyle(BorderlessButtonStyle())
+                    .disabled(value <= 0)
+                    
+                    Text("\(value)")
+                        .font(.caption)
+                        .bold()
+                        .frame(minWidth: 20)
+                    
+                    Button(action: {
+                        onValueChange?(value + 1)
+                    }) {
+                        Image(systemName: "plus.circle.fill")
+                            .foregroundColor(Color(red: 0.13, green: 0.47, blue: 0.25))
+                            .font(.caption)
+                    }
                 }
+            } else {
+                Text("\(value)")
+                    .font(.subheadline)
+                    .bold()
             }
+            
+            Text(label)
+                .font(.caption2)
+                .foregroundColor(.secondary)
         }
-        .sheet(isPresented: $showingEditSheet) {
-            StatEditSheet(
-                currentValue: value,
-                statLabel: label,
-                onSave: { newValue in
-                    onValueChange?(newValue)
-                }
-            )
-        }
+        .frame(minWidth: 35)
     }
 }
 
