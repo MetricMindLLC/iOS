@@ -49,9 +49,9 @@ enum MembershipType: String, Codable, CaseIterable {
 enum SubscriptionLevel: String, Codable, Equatable {
     case free = "free"               // Legacy unlimited accounts
     case trial = "trial"             // 3-day free trial
-    case pro = "pro"                // $4.99/month
-    case premium = "premium"         // $9.99/month
-    case club = "club"              // $79.99/month for clubs
+    case pro = "pro"                // $3.49/month
+    case premium = "premium"         // $6.99/month
+    case club = "club"              // $55.99/month for clubs
     case sharedAccess = "sharedAccess"  // FREE: Access to shared teams only
     case cancelled = "cancelled"     // Cancelled but data retained
     case expired = "expired"         // Hard deleted after 180 days
@@ -73,21 +73,21 @@ enum SubscriptionLevel: String, Codable, Equatable {
         switch self {
         case .free: return "Free Forever"
         case .trial: return "Free for 3 days"
-        case .pro: return "$4.99/month"
-        case .premium: return "$9.99/month"
-        case .club: return "$79.99/month"
+        case .pro: return "$3.49/month"        // CHANGED: from $4.99
+        case .premium: return "$6.99/month"    // CHANGED: from $9.99
+        case .club: return "$55.99/month"      // CHANGED: from $79.99
         case .sharedAccess: return "Free (Shared Access)"
         case .cancelled, .expired: return "Inactive"
         }
     }
-    
+
     var yearlyPrice: String {
         switch self {
         case .free: return "Free Forever"
         case .trial: return "Free for 3 days"
-        case .pro: return "$49.99/year"
-        case .premium: return "$99.99/year"
-        case .club: return "$799.99/year"
+        case .pro: return "$34.99/year"        // CHANGED: from $49.99
+        case .premium: return "$69.99/year"    // CHANGED: from $99.99
+        case .club: return "$559.99/year"      // CHANGED: from $799.99
         case .sharedAccess: return "Free (Shared Access)"
         case .cancelled, .expired: return "Inactive"
         }
@@ -1540,6 +1540,9 @@ struct Game: Identifiable, Codable, Equatable {
         plannedSubstitutions = try container.decodeIfPresent([PlannedSubstitution].self, forKey: .plannedSubstitutions) ?? []
         lineupPhases = try container.decodeIfPresent([LineupPhase].self, forKey: .lineupPhases) ?? []
         useAutoSubstitutions = try container.decodeIfPresent(Bool.self, forKey: .useAutoSubstitutions) ?? false
+        actualStartingLineup = try container.decodeIfPresent([LineupPosition].self, forKey: .actualStartingLineup)  // ADDED
+        plannedPositionChanges = try container.decodeIfPresent([PlannedPositionChange].self, forKey: .plannedPositionChanges) ?? []  // ADDED
+        substitutionNotes = try container.decodeIfPresent(String.self, forKey: .substitutionNotes)  // ADDED
     }
     
     init(id: UUID = UUID(),
@@ -1568,6 +1571,7 @@ struct Game: Identifiable, Codable, Equatable {
         case id, date, opponent, isHome, location, formation, startingLineup, result
         case gameEvents, playerStats, substitutions, notes, auditLog, isCompleted, playerRSVPs
         case plannedSubstitutions, lineupPhases, useAutoSubstitutions
+        case actualStartingLineup, plannedPositionChanges, substitutionNotes  // ADDED
     }
 }
 

@@ -820,17 +820,17 @@ class FirebaseAuthManager: NSObject, ObservableObject {
     func getUpgradeInfo(from currentLevel: SubscriptionLevel, to targetLevel: SubscriptionLevel) -> String? {
         switch (currentLevel, targetLevel) {
         case (.trial, .pro):
-            return "Upgrade to Pro for $4.99/month"
+            return "Upgrade to Pro for $3.49/month"
         case (.trial, .premium):
-            return "Upgrade to Premium for $9.99/month"
+            return "Upgrade to Premium for $6.99/month"
         case (.trial, .club):
-            return "Upgrade to Club for $79.99/month"
+            return "Upgrade to Club for $55.99/month"
         case (.pro, .premium):
-            return "Upgrade to Premium for $5.00/month more"
+            return "Upgrade to Premium for $3.50/month more"
         case (.pro, .club):
-            return "Upgrade to Club for $75.00/month more"
+            return "Upgrade to Club for $52.50/month more"
         case (.premium, .club):
-            return "Upgrade to Club for $70.00/month more"
+            return "Upgrade to Club for $49/month more"
         default:
             return nil
         }

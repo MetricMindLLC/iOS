@@ -506,15 +506,15 @@ extension TeamFormat {
 extension Formation {
     var displayName: String {
         switch self {
-            // 5v5 formations - UPDATED TO MATCH CURRENT FORMATIONS
-        case .formation5v5_1211: return "1-2-1-1 (Diamond)"
-        case .formation5v5_2111: return "2-1-1-1 (Defensive)"
-        case .formation5v5_131: return "1-3-1 (Midfield Heavy)"
-        case .formation5v5_221: return "2-2-1 (Balanced)"
-        case .formation5v5_23: return "2-3 (Attacking)"
-        case .formation5v5_32: return "3-2 (Defensive)"
+            // 5v5 formations (4 field players + 1 GK)
+        case .formation5v5_121: return "1-2-1 (Diamond)"
+        case .formation5v5_211: return "2-1-1 (Defensive)"
+        case .formation5v5_112: return "1-1-2 (Attacking)"
+        case .formation5v5_22: return "2-2 (Box)"
+        case .formation5v5_31: return "3-1 (Ultra Defensive)"
+        case .formation5v5_13: return "1-3 (Ultra Attacking)"
             
-            // 7v7 formations - UPDATED TO MATCH CURRENT FORMATIONS
+            // 7v7 formations - KEEP EXISTING
         case .formation7v7_312: return "3-1-2 (Balanced)"
         case .formation7v7_213: return "2-1-3 (Attacking)"
         case .formation7v7_321: return "3-2-1 (Defensive)"

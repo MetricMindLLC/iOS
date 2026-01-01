@@ -64,13 +64,13 @@ enum Formation: String, CaseIterable, Codable {
     case formation9v9_1331 = "1-3-3-1"
     case formation9v9_1421 = "1-4-2-1"
     
-    // 5v5 formations (NO goalkeeper)
-    case formation5v5_1211 = "1-2-1-1"
-    case formation5v5_2111 = "2-1-1-1"
-    case formation5v5_131 = "1-3-1"
-    case formation5v5_221 = "2-2-1"
-    case formation5v5_23 = "2-3"
-    case formation5v5_32 = "3-2"
+    // 5v5 formations
+    case formation5v5_121 = "1-2-1"
+    case formation5v5_211 = "2-1-1"
+    case formation5v5_112 = "1-1-2"
+    case formation5v5_22 = "2-2"
+    case formation5v5_31 = "3-1"
+    case formation5v5_13 = "1-3"
 
     var positions: [Position] {
         switch self {
@@ -539,45 +539,50 @@ enum Formation: String, CaseIterable, Codable {
                 .striker
             ]
             
-        // 5v5 formations (5 field players, NO goalkeeper)
-        case .formation5v5_1211:
+        // 5v5 formations (4 field players + 1 goalkeeper = 5 total)
+        case .formation5v5_121:
             return [
+                .goalkeeper,
                 .defender,
                 .centerMidfield, .centerMidfield,
-                .forward, .forward
+                .forward
             ]
             
-        case .formation5v5_2111:
+        case .formation5v5_211:
             return [
+                .goalkeeper,
                 .defender, .defender,
+                .centerMidfield,
+                .forward
+            ]
+            
+        case .formation5v5_112:
+            return [
+                .goalkeeper,
+                .defender,
                 .centerMidfield,
                 .forward, .forward
             ]
             
-        case .formation5v5_131:
+        case .formation5v5_22:
             return [
-                .defender,
-                .centerMidfield, .centerMidfield, .centerMidfield,
-                .forward
-            ]
-            
-        case .formation5v5_221:
-            return [
+                .goalkeeper,
                 .defender, .defender,
-                .centerMidfield, .centerMidfield,
-                .forward
-            ]
-            
-        case .formation5v5_23:
-            return [
-                .defender, .defender,
-                .forward, .forward, .forward
-            ]
-            
-        case .formation5v5_32:
-            return [
-                .defender, .defender, .defender,
                 .forward, .forward
+            ]
+            
+        case .formation5v5_31:
+            return [
+                .goalkeeper,
+                .defender, .defender, .defender,
+                .forward
+            ]
+            
+        case .formation5v5_13:
+            return [
+                .goalkeeper,
+                .defender,
+                .forward, .forward, .forward
             ]
         }
     }
@@ -1377,75 +1382,81 @@ enum Formation: String, CaseIterable, Codable {
                 safePoint(0.88, 0.5)    // ST
             ]
             
-        // 5v5 formations - Enhanced spacing (no goalkeeper)
-        case .formation5v5_1211:
-            return [
-                // Defense
-                safePoint(0.15, 0.5),   // DEF
-                // Midfield
-                safePoint(0.45, 0.25),  // MID
-                safePoint(0.45, 0.75),  // MID
-                // Attack
-                safePoint(0.85, 0.25),  // FWD
-                safePoint(0.85, 0.75)   // FWD
-            ]
+        // 5v5 formations (4 field players + 1 goalkeeper)
             
-        case .formation5v5_2111:
+        case .formation5v5_121:
             return [
+                // Goalkeeper
+                safePoint(0.08, 0.5),   // GK
                 // Defense
-                safePoint(0.15, 0.25),  // DEF
-                safePoint(0.15, 0.75),  // DEF
+                safePoint(0.28, 0.5),   // DEF
                 // Midfield
-                safePoint(0.45, 0.5),   // MID
-                // Attack
-                safePoint(0.85, 0.25),  // FWD
-                safePoint(0.85, 0.75)   // FWD
-            ]
-            
-        case .formation5v5_131:
-            return [
-                // Defense
-                safePoint(0.15, 0.5),   // DEF
-                // Midfield - 3 players with good spacing
-                safePoint(0.45, 0.15),  // MID
-                safePoint(0.45, 0.5),   // MID
-                safePoint(0.45, 0.85),  // MID
+                safePoint(0.52, 0.25),  // CM
+                safePoint(0.52, 0.75),  // CM
                 // Attack
                 safePoint(0.85, 0.5)    // FWD
             ]
             
-        case .formation5v5_221:
+        case .formation5v5_211:
             return [
+                // Goalkeeper
+                safePoint(0.08, 0.5),   // GK
                 // Defense
-                safePoint(0.15, 0.25),  // DEF
-                safePoint(0.15, 0.75),  // DEF
+                safePoint(0.28, 0.25),  // DEF
+                safePoint(0.28, 0.75),  // DEF
                 // Midfield
-                safePoint(0.45, 0.25),  // MID
-                safePoint(0.45, 0.75),  // MID
+                safePoint(0.52, 0.5),   // CM
                 // Attack
                 safePoint(0.85, 0.5)    // FWD
             ]
             
-        case .formation5v5_23:
+        case .formation5v5_112:
             return [
+                // Goalkeeper
+                safePoint(0.08, 0.5),   // GK
                 // Defense
-                safePoint(0.15, 0.25),  // DEF
-                safePoint(0.15, 0.75),  // DEF
-                // Attack - 3 forwards with good spacing
-                safePoint(0.7, 0.12),   // FWD
-                safePoint(0.7, 0.5),    // FWD
-                safePoint(0.7, 0.88)    // FWD
+                safePoint(0.28, 0.5),   // DEF
+                // Midfield
+                safePoint(0.52, 0.5),   // CM
+                // Attack
+                safePoint(0.78, 0.25),  // FWD
+                safePoint(0.78, 0.75)   // FWD
             ]
             
-        case .formation5v5_32:
+        case .formation5v5_22:
             return [
-                // Defense - 3 defenders with good spacing
-                safePoint(0.15, 0.12),  // DEF
-                safePoint(0.15, 0.5),   // DEF
-                safePoint(0.15, 0.88),  // DEF
+                // Goalkeeper
+                safePoint(0.08, 0.5),   // GK
+                // Defense
+                safePoint(0.30, 0.25),  // DEF
+                safePoint(0.30, 0.75),  // DEF
                 // Attack
-                safePoint(0.7, 0.32),   // FWD
-                safePoint(0.7, 0.68)    // FWD
+                safePoint(0.70, 0.25),  // FWD
+                safePoint(0.70, 0.75)   // FWD
+            ]
+            
+        case .formation5v5_31:
+            return [
+                // Goalkeeper
+                safePoint(0.08, 0.5),   // GK
+                // Defense - 3 defenders spread across
+                safePoint(0.28, 0.15),  // DEF
+                safePoint(0.28, 0.5),   // DEF
+                safePoint(0.28, 0.85),  // DEF
+                // Attack
+                safePoint(0.78, 0.5)    // FWD
+            ]
+            
+        case .formation5v5_13:
+            return [
+                // Goalkeeper
+                safePoint(0.08, 0.5),   // GK
+                // Defense
+                safePoint(0.28, 0.5),   // DEF
+                // Attack - 3 forwards spread across
+                safePoint(0.70, 0.15),  // FWD
+                safePoint(0.70, 0.5),   // FWD
+                safePoint(0.70, 0.85)   // FWD
             ]
             
         default:
@@ -1555,9 +1566,9 @@ enum GameFormat: String, CaseIterable, Codable {
     
     var playerCount: Int {
         switch self {
-        case .fiveVFive: return 5      // 5 field players, NO goalkeeper
-        case .sevenVSeven: return 7
-        case .eightVEight: return 8  // 6 field players + 1 goalkeeper
+        case .fiveVFive: return 5      // 4 field players + 1 goalkeeper
+        case .sevenVSeven: return 7    // 6 field players + 1 goalkeeper
+        case .eightVEight: return 8    // 7 field players + 1 goalkeeper
         case .nineVNine: return 9      // 8 field players + 1 goalkeeper
         case .elevenVEleven: return 11 // 10 field players + 1 goalkeeper
         }
@@ -1565,15 +1576,14 @@ enum GameFormat: String, CaseIterable, Codable {
     
     var hasGoalkeeper: Bool {
         switch self {
-        case .fiveVFive: return false
-        case .sevenVSeven, .eightVEight, .nineVNine, .elevenVEleven: return true
+        case .fiveVFive, .sevenVSeven, .eightVEight, .nineVNine, .elevenVEleven: return true
         }
     }
     
     var availableFormations: [Formation] {
         switch self {
         case .fiveVFive:
-            return [.formation5v5_1211, .formation5v5_2111, .formation5v5_131, .formation5v5_221, .formation5v5_23, .formation5v5_32]
+            return [.formation5v5_121, .formation5v5_211, .formation5v5_112, .formation5v5_22, .formation5v5_31, .formation5v5_13]
         case .sevenVSeven:
             return [.formation7v7_312, .formation7v7_213, .formation7v7_321, .formation7v7_222, .formation7v7_231,
                     .formation7v7_141, .formation7v7_132, .formation7v7_123, .formation7v7_411,
@@ -1594,7 +1604,7 @@ enum GameFormat: String, CaseIterable, Codable {
     
     var defaultFormation: Formation {
         switch self {
-        case .fiveVFive: return .formation5v5_1211
+        case .fiveVFive: return .formation5v5_121
         case .sevenVSeven: return .formation7v7_312
         case .eightVEight: return .formation8v8_322
         case .nineVNine: return .formation9v9_3212

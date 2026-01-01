@@ -2397,7 +2397,10 @@ struct IndividualSubstitutionPlanner: View {
                         
                         TextEditor(text: Binding(
                             get: { game.substitutionNotes ?? "" },
-                            set: { game.substitutionNotes = $0.isEmpty ? nil : $0 }
+                            set: {
+                                game.substitutionNotes = $0.isEmpty ? nil : $0
+                                onPlanningDataChanged()  // ADDED: Mark as changed so it saves
+                            }
                         ))
                         .frame(minHeight: 100)
                         .padding(8)
