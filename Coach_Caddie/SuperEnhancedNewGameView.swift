@@ -250,6 +250,25 @@ struct SuperEnhancedNewGameView: View {
                                                 .lineLimit(2)
                                         }
                                     }
+                                    if let seasonId = team.seasonIdForNewEvents,
+                                       let season = team.seasons.first(where: { $0.id == seasonId }) {
+                                        HStack {
+                                            Image(systemName: season.type.icon)
+                                                .foregroundColor(season.type.color)
+                                                .frame(width: 30)
+                                            Text(season.displayName)
+                                                .font(.subheadline)
+                                        }
+                                    } else if !team.seasons.isEmpty {
+                                        HStack {
+                                            Image(systemName: "calendar.badge.exclamationmark")
+                                                .foregroundColor(.orange)
+                                                .frame(width: 30)
+                                            Text("No active season")
+                                                .font(.subheadline)
+                                                .foregroundColor(.orange)
+                                        }
+                                    }
                                 }
                                 .padding()
                                 .background(
@@ -307,13 +326,26 @@ struct SuperEnhancedNewGameView: View {
             }
         }()
         
+        // Auto-assign to the effective active season
+        let seasonId = team.seasonIdForNewEvents
+        
         let game = Game(
+            seasonId: seasonId,  // NEW: Auto-assign season
             date: gameDate,
             opponent: opponent.trimmingCharacters(in: .whitespacesAndNewlines),
             isHome: isHome,
             location: gameLocation,
             notes: notes.isEmpty ? nil : notes
         )
+        
+        // Debug log
+        if let seasonId = seasonId,
+           let season = team.seasons.first(where: { $0.id == seasonId }) {
+            print("📅 New game auto-assigned to season: \(season.displayName)")
+        } else {
+            print("⚠️ New game created without season assignment (no active season)")
+        }
+        
         teamManager.addGame(to: team, game: game)
         presentationMode.wrappedValue.dismiss()
     }

@@ -9,6 +9,7 @@ struct ContentView: View {
     @State private var showingQuickActions = false
     @State private var showingStats = false
     @State private var isDataFullyLoaded = false
+    @State private var hasStartedLoading = false  // NEW: Track if load has started
     
     var body: some View {
         NavigationView {
@@ -34,7 +35,7 @@ struct ContentView: View {
                 .opacity(isDataFullyLoaded ? 1 : 0.3)
                 .disabled(!isDataFullyLoaded)
                 .refreshable {
-                    await loadDataAndWait()
+                    await loadDataAndWait(isRefresh: true)
                 }
                 
                 // Loading Overlay
@@ -69,11 +70,13 @@ struct ContentView: View {
                 }
             }
         }
+        .navigationViewStyle(StackNavigationViewStyle())  // NEW: Prevents double-mounting
         .onAppear {
             // Only load data on the first appearance
-            if !isDataFullyLoaded {
+            if !hasStartedLoading {
+                hasStartedLoading = true  // Set immediately to prevent duplicates
                 Task {
-                    await loadDataAndWait()
+                    await loadDataAndWait(isRefresh: false)
                 }
             }
         }
@@ -110,7 +113,12 @@ struct ContentView: View {
     
     @State private var loadingStatusText = "Please wait..."
     
-    private func loadDataAndWait() async {
+    private func loadDataAndWait(isRefresh: Bool = false) async {
+        // Skip if already loading (unless it's a manual refresh)
+        if !isRefresh && isDataFullyLoaded {
+            return
+        }
+        
         await MainActor.run {
             isDataFullyLoaded = false
             loadingStatusText = "Loading teams..."

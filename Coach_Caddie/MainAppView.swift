@@ -37,9 +37,6 @@ struct MainAppView: View {
         .onAppear {
             // Set auth manager reference in team manager
             teamManager.setAuthManager(authManager)
-            
-            // Check authentication status on appear
-            authManager.checkAuthenticationStatus()
         }
     }
     

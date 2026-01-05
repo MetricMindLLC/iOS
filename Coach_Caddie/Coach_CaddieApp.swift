@@ -81,11 +81,6 @@ struct Coach_CaddieApp: App {
                     )
                 }
             }
-            // Handle incoming notifications
-            .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
-                // Refresh data when app becomes active
-                teamManager.loadData()
-            }
             // Handle Google Sign-In URL - Fixed: removed return value
             .onOpenURL { url in
                 _ = GIDSignIn.sharedInstance.handle(url)

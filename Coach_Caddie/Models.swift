@@ -251,6 +251,119 @@ enum SubscriptionLevel: String, Codable, Equatable {
         }
     }
 }
+// MARK: - Season Type
+enum SeasonType: String, Codable, CaseIterable {
+    case fall = "Fall"
+    case winter = "Winter"
+    case spring = "Spring"
+    case summer = "Summer"
+    case tournament = "Tournament"
+    
+    var icon: String {
+        switch self {
+        case .fall: return "leaf.fill"
+        case .winter: return "snowflake"
+        case .spring: return "leaf.arrow.circlepath" 
+        case .summer: return "sun.max.fill"
+        case .tournament: return "trophy.fill"
+        }
+    }
+    
+    var color: Color {
+        switch self {
+        case .fall: return .orange
+        case .winter: return .blue
+        case .spring: return .green
+        case .summer: return .yellow
+        case .tournament: return .purple
+        }
+    }
+}
+
+// MARK: - Season
+struct Season: Identifiable, Codable, Equatable {
+    var id: UUID = UUID()
+    var name: String                        // e.g., "Fall 2024", "Memorial Day Cup"
+    var type: SeasonType
+    var year: String                        // e.g., "2024", "2024-2025"
+    var startDate: Date
+    var endDate: Date
+    var activePlayerIds: [UUID] = []        // Team players active this season
+    var guestPlayers: [GuestPlayer] = []    // Tournament guests
+    var isArchived: Bool = false
+    var dateCreated: Date = Date()
+    
+    // Computed property for display name
+    var displayName: String {
+        if type == .tournament {
+            return name
+        }
+        return "\(type.rawValue) \(year)"
+    }
+    
+    // Check if season is current (can add games to it)
+    var isCurrentOrFuture: Bool {
+        return endDate >= Calendar.current.startOfDay(for: Date())
+    }
+    
+    // Check if season is active (within date range)
+    var isActive: Bool {
+        let today = Calendar.current.startOfDay(for: Date())
+        let start = Calendar.current.startOfDay(for: startDate)
+        let end = Calendar.current.startOfDay(for: endDate)
+        return today >= start && today <= end
+    }
+}
+
+// MARK: - Season Status
+enum SeasonStatus {
+    case inSeason(Season)
+    case betweenSeasons(nextSeason: Season)
+    case noUpcomingSeasons(lastSeason: Season?)
+    case noSeasons
+    
+    var displayText: String {
+        switch self {
+        case .inSeason(let season):
+            return "Current: \(season.displayName)"
+        case .betweenSeasons(let nextSeason):
+            return "Next: \(nextSeason.displayName)"
+        case .noUpcomingSeasons(let lastSeason):
+            if let last = lastSeason {
+                return "Last: \(last.displayName)"
+            }
+            return "No Upcoming Seasons"
+        case .noSeasons:
+            return "No Seasons"
+        }
+    }
+    
+    var icon: String {
+        switch self {
+        case .inSeason:
+            return "calendar.badge.clock"
+        case .betweenSeasons:
+            return "calendar.badge.plus"
+        case .noUpcomingSeasons:
+            return "calendar.badge.minus"
+        case .noSeasons:
+            return "calendar.badge.exclamationmark"
+        }
+    }
+}
+// MARK: - Guest Player (Lightweight for tournaments)
+struct GuestPlayer: Identifiable, Codable, Equatable {
+    var id: UUID = UUID()
+    var name: String
+    var jerseyNumber: Int
+    var preferredPosition: String = "Midfielder"
+    var notes: String?
+    var dateAdded: Date = Date()
+    
+    // Stats for this season only (stored directly since guest is season-specific)
+    var seasonStats: PlayerStats = PlayerStats()
+}
+
 struct User: Identifiable, Codable, Equatable {
     var id: UUID
     var firebaseUID: String
@@ -456,32 +569,35 @@ struct LineupPhase: Identifiable, Codable, Equatable {
 // MARK: - Team Format (Use GameFormat from Formation.swift instead)
 typealias TeamFormat = GameFormat
 
+// MARK: - Team
 struct Team: Identifiable, Codable, Equatable {
     var id: UUID
     var name: String
     var format: TeamFormat
     var defaultFormation: Formation
-    var defaultHalfLength: Int = 45  // NEW: Team-specific half length
-    var players: [Player]           // KEEP for backward compatibility
-    var games: [Game]               // KEEP for backward compatibility
-    var practices: [Practice]       // KEEP for backward compatibility
+    var defaultHalfLength: Int = 45
+    var players: [Player]                   // Full historical roster
+    var games: [Game]                       // KEEP for backward compatibility
+    var practices: [Practice]               // KEEP for backward compatibility
+    var seasons: [Season] = []              // NEW: All seasons for this team
+    var activeSeasonId: UUID?               // NEW: Currently selected season
+    var showArchivedSeasons: Bool = false   // NEW: Toggle to show/hide archived
     var primaryColor: Color
     var logoData: Data?
     var ageGroup: String?
-    var season: String?
+    var season: String?                     // KEEP for backward compatibility (legacy)
     var dateCreated: Date
-    var coachUID: String? // Made optional for backward compatibility
-    var expirationDate: Date? // TTL field for automatic deletion
-    var lastActivityTimestamp: Date = Date() // Track team activity
-    
-    // NEW: Subcollection support (optional)
-    var useSubcollections: Bool = false  // Flag to enable subcollection mode
-    var lastSyncDate: Date = Date()      // Track when subcollections were last synced
+    var coachUID: String?
+    var expirationDate: Date?
+    var lastActivityTimestamp: Date = Date()
+    var useSubcollections: Bool = false
+    var lastSyncDate: Date = Date()
 
     enum CodingKeys: String, CodingKey {
         case id, name, format, defaultFormation, defaultHalfLength, players, games, practices
+        case seasons, activeSeasonId, showArchivedSeasons
         case primaryColorHex, logoData, ageGroup, season, dateCreated, coachUID
-        case expirationDate, lastActivityTimestamp // ADDED: TTL fields
+        case expirationDate, lastActivityTimestamp
         case useSubcollections, lastSyncDate
     }
 
@@ -493,6 +609,9 @@ struct Team: Identifiable, Codable, Equatable {
          players: [Player] = [],
          games: [Game] = [],
          practices: [Practice] = [],
+         seasons: [Season] = [],
+         activeSeasonId: UUID? = nil,
+         showArchivedSeasons: Bool = false,
          primaryColor: Color = .green,
          logoData: Data? = nil,
          ageGroup: String? = nil,
@@ -507,6 +626,9 @@ struct Team: Identifiable, Codable, Equatable {
         self.players = players
         self.games = games
         self.practices = practices
+        self.seasons = seasons
+        self.activeSeasonId = activeSeasonId
+        self.showArchivedSeasons = showArchivedSeasons
         self.primaryColor = primaryColor
         self.logoData = logoData
         self.ageGroup = ageGroup
@@ -514,7 +636,6 @@ struct Team: Identifiable, Codable, Equatable {
         self.dateCreated = dateCreated
         self.coachUID = coachUID
         self.lastActivityTimestamp = Date()
-        // Set initial expiration to 180 days from now (changed from 180)
         self.expirationDate = Calendar.current.date(byAdding: .day, value: 180, to: Date())
     }
 
@@ -530,10 +651,16 @@ struct Team: Identifiable, Codable, Equatable {
         players = try container.decode([Player].self, forKey: .players)
         games = try container.decode([Game].self, forKey: .games)
         practices = try container.decodeIfPresent([Practice].self, forKey: .practices) ?? []
+        
+        // NEW: Decode season fields with backward compatibility
+        seasons = try container.decodeIfPresent([Season].self, forKey: .seasons) ?? []
+        activeSeasonId = try container.decodeIfPresent(UUID.self, forKey: .activeSeasonId)
+        showArchivedSeasons = try container.decodeIfPresent(Bool.self, forKey: .showArchivedSeasons) ?? false
+        
         useSubcollections = try container.decodeIfPresent(Bool.self, forKey: .useSubcollections) ?? false
         lastSyncDate = try container.decodeIfPresent(Date.self, forKey: .lastSyncDate) ?? Date()
         
-        // ADDED: Handle TTL fields with backward compatibility
+        // Handle TTL fields with backward compatibility
         lastActivityTimestamp = try container.decodeIfPresent(Date.self, forKey: .lastActivityTimestamp) ?? Date()
         expirationDate = try container.decodeIfPresent(Date.self, forKey: .expirationDate)
         
@@ -567,6 +694,12 @@ struct Team: Identifiable, Codable, Equatable {
         try container.encode(players, forKey: .players)
         try container.encode(games, forKey: .games)
         try container.encode(practices, forKey: .practices)
+        
+        // NEW: Encode season fields
+        try container.encode(seasons, forKey: .seasons)
+        try container.encodeIfPresent(activeSeasonId, forKey: .activeSeasonId)
+        try container.encode(showArchivedSeasons, forKey: .showArchivedSeasons)
+        
         try container.encode(useSubcollections, forKey: .useSubcollections)
         try container.encode(lastSyncDate, forKey: .lastSyncDate)
         try container.encode(primaryColor.toHex(), forKey: .primaryColorHex)
@@ -575,13 +708,12 @@ struct Team: Identifiable, Codable, Equatable {
         try container.encodeIfPresent(season, forKey: .season)
         try container.encode(dateCreated, forKey: .dateCreated)
         try container.encodeIfPresent(coachUID, forKey: .coachUID)
-        
-        // ADDED: Encode TTL fields
         try container.encode(lastActivityTimestamp, forKey: .lastActivityTimestamp)
         try container.encodeIfPresent(expirationDate, forKey: .expirationDate)
     }
 
-    // KEEP: All your existing computed properties
+    // MARK: - Existing Computed Properties (KEEP ALL)
+    
     var activePlayerCount: Int {
         players.filter { !($0.isInjured ?? false) }.count
     }
@@ -618,16 +750,159 @@ struct Team: Identifiable, Codable, Equatable {
         return (wins, losses, draws)
     }
     
-    // Added for LineupView compatibility
     var activePlayers: [Player] {
         players.filter { !($0.isInjured ?? false) }
     }
     
-    // FIXED: Update activity and expiration date
     mutating func updateActivityForTTL() {
         lastActivityTimestamp = Date()
-        // Set expiration to 180 days from now
         expirationDate = Calendar.current.date(byAdding: .day, value: 180, to: Date())
+    }
+    
+    // MARK: - NEW: Season Helper Properties & Methods
+    
+    /// Get the currently active season
+    var activeSeason: Season? {
+        guard let activeId = activeSeasonId else { return nil }
+        return seasons.first(where: { $0.id == activeId })
+    }
+    
+    /// Get seasons that can have games added (end date is today or future, not archived)
+    var availableSeasonsForGames: [Season] {
+        seasons.filter { $0.isCurrentOrFuture && !$0.isArchived }
+    }
+    
+    /// Get visible seasons (respects archive toggle)
+    var visibleSeasons: [Season] {
+        if showArchivedSeasons {
+            return seasons.sorted { $0.startDate > $1.startDate }
+        }
+        return seasons.filter { !$0.isArchived }.sorted { $0.startDate > $1.startDate }
+    }
+    
+    /// Get games for a specific season
+    func games(for seasonId: UUID) -> [Game] {
+        games.filter { $0.seasonId == seasonId }
+    }
+    
+    /// Get practices for a specific season
+    func practices(for seasonId: UUID) -> [Practice] {
+        practices.filter { $0.seasonId == seasonId }
+    }
+    
+    /// Get active roster for a specific season (team players only, not guests)
+    func activeRoster(for seasonId: UUID) -> [Player] {
+        guard let season = seasons.first(where: { $0.id == seasonId }) else { return [] }
+        return players.filter { season.activePlayerIds.contains($0.id) }
+    }
+    
+    /// Get guest players for a specific season
+    func guestPlayers(for seasonId: UUID) -> [GuestPlayer] {
+        guard let season = seasons.first(where: { $0.id == seasonId }) else { return [] }
+        return season.guestPlayers
+    }
+    
+    /// Check if team has any seasons
+    var hasSeasons: Bool {
+        !seasons.isEmpty
+    }
+    
+    var effectiveActiveSeason: Season? {
+        let today = Calendar.current.startOfDay(for: Date())
+        
+        // First, check for a season we're currently in
+        let currentSeason = seasons.first { season in
+            let start = Calendar.current.startOfDay(for: season.startDate)
+            let end = Calendar.current.startOfDay(for: season.endDate)
+            return today >= start && today <= end && !season.isArchived
+        }
+        
+        if let current = currentSeason {
+            return current
+        }
+        
+        // Next, find the next upcoming season
+        let upcomingSeason = seasons
+            .filter { Calendar.current.startOfDay(for: $0.startDate) > today && !$0.isArchived }
+            .sorted { $0.startDate < $1.startDate }
+            .first
+        
+        if let upcoming = upcomingSeason {
+            return upcoming
+        }
+        
+        // Finally, fall back to most recent past season that's not archived
+        let pastSeason = seasons
+            .filter { Calendar.current.startOfDay(for: $0.endDate) < today && !$0.isArchived }
+            .sorted { $0.endDate > $1.endDate }
+            .first
+        
+        return pastSeason
+    }
+
+    /// Season status for display purposes
+    var seasonStatus: SeasonStatus {
+        let today = Calendar.current.startOfDay(for: Date())
+        
+        // Check if we're currently in a season
+        let currentSeason = seasons.first { season in
+            let start = Calendar.current.startOfDay(for: season.startDate)
+            let end = Calendar.current.startOfDay(for: season.endDate)
+            return today >= start && today <= end && !season.isArchived
+        }
+        
+        if let current = currentSeason {
+            return .inSeason(current)
+        }
+        
+        // Check for upcoming seasons
+        let upcomingSeason = seasons
+            .filter { Calendar.current.startOfDay(for: $0.startDate) > today && !$0.isArchived }
+            .sorted { $0.startDate < $1.startDate }
+            .first
+        
+        if let upcoming = upcomingSeason {
+            return .betweenSeasons(nextSeason: upcoming)
+        }
+        
+        // No current or upcoming - find most recent past season
+        let pastSeason = seasons
+            .filter { Calendar.current.startOfDay(for: $0.endDate) < today && !$0.isArchived }
+            .sorted { $0.endDate > $1.endDate }
+            .first
+        
+        if seasons.isEmpty {
+            return .noSeasons
+        }
+        
+        return .noUpcomingSeasons(lastSeason: pastSeason)
+    }
+
+    /// Get the season ID to use for new games/practices
+    var seasonIdForNewEvents: UUID? {
+        // First check if there's a manually set active season
+        if let activeId = activeSeasonId,
+           let activeSeason = seasons.first(where: { $0.id == activeId }),
+           !activeSeason.isArchived {
+            return activeId
+        }
+        
+        // Otherwise use the effective active season
+        return effectiveActiveSeason?.id
+    }
+    
+    /// Get record for a specific season
+    func record(for seasonId: UUID) -> (wins: Int, losses: Int, draws: Int) {
+        let seasonGames = games(for: seasonId)
+        let gamesWithResults = seasonGames.compactMap { $0.result }
+        let wins = gamesWithResults.filter { $0.goalsFor > $0.goalsAgainst }.count
+        let losses = gamesWithResults.filter { $0.goalsFor < $0.goalsAgainst }.count
+        let draws = gamesWithResults.filter { $0.goalsFor == $0.goalsAgainst }.count
+        return (wins, losses, draws)
+    }
+    
+    static func == (lhs: Team, rhs: Team) -> Bool {
+        lhs.id == rhs.id
     }
 }
 
@@ -884,7 +1159,7 @@ struct ParentInfo: Codable, Equatable {
         case allowPublicSharing
     }
 }
-// MARK: - Player (UPDATED for COPPA Compliance - REMOVED dateOfBirth)
+// MARK: - Player (UPDATED with per-season stats tracking)
 struct Player: Identifiable, Codable, Equatable, Hashable {
     var id: UUID = UUID()
     var name: String
@@ -893,32 +1168,76 @@ struct Player: Identifiable, Codable, Equatable, Hashable {
     var preferredPosition: String
     var phoneNumber: String?
     var email: String?
-    // REMOVED: var dateOfBirth: Date? - COPPA compliance
     var notes: String?
     var playerPhoto: Data?
     var isInjured: Bool?
-    var seasonStats: PlayerStats = PlayerStats()
+    var seasonStats: PlayerStats = PlayerStats()              // KEEP: Legacy/current season stats
+    var statsBySeason: [UUID: PlayerStats] = [:]              // NEW: Stats keyed by seasonId
     var parentInfo: ParentInfo = ParentInfo()
     var emergencyContact: String?
     var emergencyPhone: String?
     var medicalNotes: String?
-    
-    // NEW: Privacy settings for COPPA compliance
     var privacySettings: PlayerPrivacySettings = PlayerPrivacySettings()
-    
-    // REMOVED: age computed property - no longer needed without DOB
     
     var preferredPositionEnum: Position {
         Position(rawValue: preferredPosition) ?? .midfielder
     }
     
-    // NEW: Display name based on viewer access level
+    // MARK: - NEW: Season Stats Helper Methods
+    
+    /// Get all-time stats across all seasons (combines statsBySeason + legacy seasonStats)
+    var allTimeStats: PlayerStats {
+        var allStats = Array(statsBySeason.values)
+        // Include legacy seasonStats if it has data and we don't have season-specific stats
+        if statsBySeason.isEmpty && !seasonStats.isEmpty {
+            allStats.append(seasonStats)
+        }
+        return PlayerStats.combined(allStats)
+    }
+    
+    /// Get stats for a specific season
+    func stats(for seasonId: UUID) -> PlayerStats {
+        return statsBySeason[seasonId] ?? PlayerStats()
+    }
+    
+    /// Set stats for a specific season
+    mutating func setStats(_ stats: PlayerStats, for seasonId: UUID) {
+        statsBySeason[seasonId] = stats
+    }
+    
+    /// Add to stats for a specific season (useful for incrementing during games)
+    mutating func addToStats(for seasonId: UUID, goals: Int = 0, assists: Int = 0,
+                             shots: Int = 0, saves: Int = 0, yellowCards: Int = 0,
+                             redCards: Int = 0, minutesPlayed: Int = 0, gamesPlayed: Int = 0) {
+        var currentStats = statsBySeason[seasonId] ?? PlayerStats()
+        currentStats.goals += goals
+        currentStats.assists += assists
+        currentStats.shots += shots
+        currentStats.saves += saves
+        currentStats.yellowCards += yellowCards
+        currentStats.redCards += redCards
+        currentStats.minutesPlayed += minutesPlayed
+        currentStats.gamesPlayed += gamesPlayed
+        statsBySeason[seasonId] = currentStats
+    }
+    
+    /// Get list of season IDs this player has stats for
+    var seasonsWithStats: [UUID] {
+        return Array(statsBySeason.keys)
+    }
+    
+    /// Check if player has any stats recorded
+    var hasAnyStats: Bool {
+        return !statsBySeason.isEmpty || !seasonStats.isEmpty
+    }
+    
+    // MARK: - Display Name Methods
+    
     func displayName(for accessLevel: AccessLevel, viewerEmail: String? = nil) -> String {
         switch accessLevel {
         case .coach:
-            return name // Coaches see full name
+            return name
         case .parent:
-            // Parents see full name only for their own children
             if let email = viewerEmail,
                (parentInfo.parentEmail.lowercased() == email.lowercased() ||
                 parentInfo.secondParentEmail.lowercased() == email.lowercased()) {
@@ -927,7 +1246,7 @@ struct Player: Identifiable, Codable, Equatable, Hashable {
                 return nameWithLastInitial()
             }
         case .viewer:
-            return nameWithLastInitial() // Viewers see first name + last initial
+            return nameWithLastInitial()
         }
     }
     
@@ -947,13 +1266,12 @@ struct Player: Identifiable, Codable, Equatable, Hashable {
         hasher.combine(id)
     }
     
-    // MARK: - Coding Keys
+    // MARK: - Coding Keys (UPDATED with statsBySeason)
     enum CodingKeys: String, CodingKey {
         case id, name, jerseyNumber, positions, preferredPosition
         case phoneNumber, email, notes, playerPhoto, isInjured
-        case seasonStats, parentInfo, emergencyContact, emergencyPhone
+        case seasonStats, statsBySeason, parentInfo, emergencyContact, emergencyPhone
         case medicalNotes, privacySettings
-        // Note: dateOfBirth removed for COPPA compliance
     }
     
     // MARK: - Custom Decoder for backward compatibility
@@ -971,17 +1289,15 @@ struct Player: Identifiable, Codable, Equatable, Hashable {
         playerPhoto = try container.decodeIfPresent(Data.self, forKey: .playerPhoto)
         isInjured = try container.decodeIfPresent(Bool.self, forKey: .isInjured)
         seasonStats = try container.decodeIfPresent(PlayerStats.self, forKey: .seasonStats) ?? PlayerStats()
+        statsBySeason = try container.decodeIfPresent([UUID: PlayerStats].self, forKey: .statsBySeason) ?? [:]  // NEW
         parentInfo = try container.decodeIfPresent(ParentInfo.self, forKey: .parentInfo) ?? ParentInfo()
         emergencyContact = try container.decodeIfPresent(String.self, forKey: .emergencyContact)
         emergencyPhone = try container.decodeIfPresent(String.self, forKey: .emergencyPhone)
         medicalNotes = try container.decodeIfPresent(String.self, forKey: .medicalNotes)
         privacySettings = try container.decodeIfPresent(PlayerPrivacySettings.self, forKey: .privacySettings) ?? PlayerPrivacySettings()
-        
-        // Handle legacy dateOfBirth field if present (ignore it for COPPA compliance)
-        // This ensures backward compatibility while removing DOB
     }
     
-    // MARK: - Encoder
+    // MARK: - Encoder (UPDATED with statsBySeason)
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         
@@ -996,16 +1312,15 @@ struct Player: Identifiable, Codable, Equatable, Hashable {
         try container.encodeIfPresent(playerPhoto, forKey: .playerPhoto)
         try container.encodeIfPresent(isInjured, forKey: .isInjured)
         try container.encode(seasonStats, forKey: .seasonStats)
+        try container.encode(statsBySeason, forKey: .statsBySeason)  // NEW
         try container.encode(parentInfo, forKey: .parentInfo)
         try container.encodeIfPresent(emergencyContact, forKey: .emergencyContact)
         try container.encodeIfPresent(emergencyPhone, forKey: .emergencyPhone)
         try container.encodeIfPresent(medicalNotes, forKey: .medicalNotes)
         try container.encode(privacySettings, forKey: .privacySettings)
-        
-        // Note: dateOfBirth intentionally not encoded for COPPA compliance
     }
     
-    // MARK: - Standard initializer
+    // MARK: - Standard initializer (UPDATED with statsBySeason)
     init(id: UUID = UUID(),
          name: String,
          jerseyNumber: Int,
@@ -1017,6 +1332,7 @@ struct Player: Identifiable, Codable, Equatable, Hashable {
          playerPhoto: Data? = nil,
          isInjured: Bool? = nil,
          seasonStats: PlayerStats = PlayerStats(),
+         statsBySeason: [UUID: PlayerStats] = [:],              // NEW
          parentInfo: ParentInfo = ParentInfo(),
          emergencyContact: String? = nil,
          emergencyPhone: String? = nil,
@@ -1033,6 +1349,7 @@ struct Player: Identifiable, Codable, Equatable, Hashable {
         self.playerPhoto = playerPhoto
         self.isInjured = isInjured
         self.seasonStats = seasonStats
+        self.statsBySeason = statsBySeason                      // NEW
         self.parentInfo = parentInfo
         self.emergencyContact = emergencyContact
         self.emergencyPhone = emergencyPhone
@@ -1040,7 +1357,7 @@ struct Player: Identifiable, Codable, Equatable, Hashable {
         self.privacySettings = privacySettings
     }
     
-    // MARK: - Equatable implementation
+    // MARK: - Equatable implementation (UPDATED with statsBySeason)
     static func == (lhs: Player, rhs: Player) -> Bool {
         return lhs.id == rhs.id &&
                lhs.name == rhs.name &&
@@ -1053,6 +1370,7 @@ struct Player: Identifiable, Codable, Equatable, Hashable {
                lhs.playerPhoto == rhs.playerPhoto &&
                lhs.isInjured == rhs.isInjured &&
                lhs.seasonStats == rhs.seasonStats &&
+               lhs.statsBySeason == rhs.statsBySeason &&        // NEW
                lhs.parentInfo == rhs.parentInfo &&
                lhs.emergencyContact == rhs.emergencyContact &&
                lhs.emergencyPhone == rhs.emergencyPhone &&
@@ -1274,7 +1592,7 @@ enum COPPACategory: String, CaseIterable {
     case parentRights = "Parent Rights"
 }
 
-// MARK: - Player Stats (UPDATED with adjustment-based manual edits)
+// MARK: - Player Stats (UPDATED with season aggregation support)
 struct PlayerStats: Codable, Equatable {
     var gamesPlayed: Int = 0
     var goals: Int = 0
@@ -1287,16 +1605,13 @@ struct PlayerStats: Codable, Equatable {
     var redCards: Int = 0
     var minutesPlayed: Int = 0
     
-    // NEW: Store manual adjustments as offsets, not flags
+    // Store manual adjustments as offsets, not flags
     var manualAdjustments: [String: Int] = [:]  // e.g., ["goals": 5] means +5 to calculated value
-    
-    // REMOVED: No more manuallyEditedStats Set
     
     // MARK: - Custom Decoding for Backward Compatibility
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         
-        // Decode all existing fields
         gamesPlayed = try container.decodeIfPresent(Int.self, forKey: .gamesPlayed) ?? 0
         goals = try container.decodeIfPresent(Int.self, forKey: .goals) ?? 0
         assists = try container.decodeIfPresent(Int.self, forKey: .assists) ?? 0
@@ -1307,12 +1622,7 @@ struct PlayerStats: Codable, Equatable {
         yellowCards = try container.decodeIfPresent(Int.self, forKey: .yellowCards) ?? 0
         redCards = try container.decodeIfPresent(Int.self, forKey: .redCards) ?? 0
         minutesPlayed = try container.decodeIfPresent(Int.self, forKey: .minutesPlayed) ?? 0
-        
-        // NEW: Decode manual adjustments with fallback to empty dict for old data
         manualAdjustments = try container.decodeIfPresent([String: Int].self, forKey: .manualAdjustments) ?? [:]
-        
-        // MIGRATION: If old manuallyEditedStats exists, ignore it (backward compatibility)
-        // The old locked values are already in the stat fields, so we keep them as-is
     }
     
     // MARK: - Default Initializer
@@ -1353,7 +1663,8 @@ struct PlayerStats: Codable, Equatable {
         case manualAdjustments
     }
     
-    // NEW: Helper methods to work with adjustments
+    // MARK: - Manual Adjustment Methods
+    
     mutating func setManualAdjustment(_ statName: String, adjustment: Int) {
         manualAdjustments[statName] = adjustment
     }
@@ -1372,6 +1683,94 @@ struct PlayerStats: Codable, Equatable {
     
     func hasManualAdjustment(_ statName: String) -> Bool {
         return manualAdjustments[statName] != nil
+    }
+    
+    // MARK: - NEW: Season Aggregation Methods
+    
+    /// Combine stats from multiple PlayerStats objects (e.g., across seasons)
+    static func combined(_ stats: [PlayerStats]) -> PlayerStats {
+        var combined = PlayerStats()
+        
+        for stat in stats {
+            combined.gamesPlayed += stat.gamesPlayed
+            combined.goals += stat.goals
+            combined.assists += stat.assists
+            combined.shots += stat.shots
+            combined.shotOnTarget += stat.shotOnTarget
+            combined.saves += stat.saves
+            combined.goalsConceded += stat.goalsConceded
+            combined.yellowCards += stat.yellowCards
+            combined.redCards += stat.redCards
+            combined.minutesPlayed += stat.minutesPlayed
+            
+            // Merge manual adjustments (sum adjustments for same stat names)
+            for (key, value) in stat.manualAdjustments {
+                combined.manualAdjustments[key, default: 0] += value
+            }
+        }
+        
+        return combined
+    }
+    
+    /// Add another PlayerStats to this one (mutating version)
+    mutating func add(_ other: PlayerStats) {
+        gamesPlayed += other.gamesPlayed
+        goals += other.goals
+        assists += other.assists
+        shots += other.shots
+        shotOnTarget += other.shotOnTarget
+        saves += other.saves
+        goalsConceded += other.goalsConceded
+        yellowCards += other.yellowCards
+        redCards += other.redCards
+        minutesPlayed += other.minutesPlayed
+        
+        for (key, value) in other.manualAdjustments {
+            manualAdjustments[key, default: 0] += value
+        }
+    }
+    
+    /// Create a new PlayerStats by adding two together (non-mutating)
+    static func + (lhs: PlayerStats, rhs: PlayerStats) -> PlayerStats {
+        var result = lhs
+        result.add(rhs)
+        return result
+    }
+    
+    // MARK: - Computed Properties for Display
+    
+    /// Goals per game average
+    var goalsPerGame: Double {
+        guard gamesPlayed > 0 else { return 0 }
+        return Double(goals) / Double(gamesPlayed)
+    }
+    
+    /// Assists per game average
+    var assistsPerGame: Double {
+        guard gamesPlayed > 0 else { return 0 }
+        return Double(assists) / Double(gamesPlayed)
+    }
+    
+    /// Shot accuracy percentage
+    var shotAccuracy: Double {
+        guard shots > 0 else { return 0 }
+        return Double(shotOnTarget) / Double(shots) * 100
+    }
+    
+    /// Average minutes per game
+    var averageMinutesPerGame: Double {
+        guard gamesPlayed > 0 else { return 0 }
+        return Double(minutesPlayed) / Double(gamesPlayed)
+    }
+    
+    /// Goal contributions (goals + assists)
+    var goalContributions: Int {
+        return goals + assists
+    }
+    
+    /// Check if stats are empty (no games played)
+    var isEmpty: Bool {
+        return gamesPlayed == 0 && goals == 0 && assists == 0 && saves == 0
     }
 }
 
@@ -1492,9 +1891,10 @@ struct PlannedPositionChange: Identifiable, Codable, Equatable {
 
 
 
-// MARK: - Game (FIXED for backward compatibility)
+// MARK: - Game (UPDATED with seasonId for season support)
 struct Game: Identifiable, Codable, Equatable {
     var id: UUID = UUID()
+    var seasonId: UUID?                     // NEW: Which season this game belongs to
     var date: Date
     var opponent: String
     var isHome: Bool = true
@@ -1507,20 +1907,21 @@ struct Game: Identifiable, Codable, Equatable {
     var substitutions: [Substitution] = []
     var notes: String?
     var auditLog: [GameAuditEntry]?
-    var isCompleted: Bool = false  // Track if game is finalized
+    var isCompleted: Bool = false
     var playerRSVPs: [UUID: RSVPStatus] = [:]
-    var plannedSubstitutions: [PlannedSubstitution] = []  // NEW
-    var lineupPhases: [LineupPhase] = []  // NEW
-    var useAutoSubstitutions: Bool = false  // NEW
+    var plannedSubstitutions: [PlannedSubstitution] = []
+    var lineupPhases: [LineupPhase] = []
+    var useAutoSubstitutions: Bool = false
     var actualStartingLineup: [LineupPosition]? = nil
     var plannedPositionChanges: [PlannedPositionChange] = []
     var substitutionNotes: String? = nil
+    
     // MARK: - Custom Decoding for Backward Compatibility
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         
-        // Decode existing properties normally
         id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        seasonId = try container.decodeIfPresent(UUID.self, forKey: .seasonId)  // NEW: Backward compatible
         date = try container.decode(Date.self, forKey: .date)
         opponent = try container.decode(String.self, forKey: .opponent)
         isHome = try container.decodeIfPresent(Bool.self, forKey: .isHome) ?? true
@@ -1535,17 +1936,17 @@ struct Game: Identifiable, Codable, Equatable {
         auditLog = try container.decodeIfPresent([GameAuditEntry].self, forKey: .auditLog)
         isCompleted = try container.decodeIfPresent(Bool.self, forKey: .isCompleted) ?? false
         playerRSVPs = try container.decodeIfPresent([UUID: RSVPStatus].self, forKey: .playerRSVPs) ?? [:]
-        
-        // NEW: Decode new properties with defaults for backward compatibility
         plannedSubstitutions = try container.decodeIfPresent([PlannedSubstitution].self, forKey: .plannedSubstitutions) ?? []
         lineupPhases = try container.decodeIfPresent([LineupPhase].self, forKey: .lineupPhases) ?? []
         useAutoSubstitutions = try container.decodeIfPresent(Bool.self, forKey: .useAutoSubstitutions) ?? false
-        actualStartingLineup = try container.decodeIfPresent([LineupPosition].self, forKey: .actualStartingLineup)  // ADDED
-        plannedPositionChanges = try container.decodeIfPresent([PlannedPositionChange].self, forKey: .plannedPositionChanges) ?? []  // ADDED
-        substitutionNotes = try container.decodeIfPresent(String.self, forKey: .substitutionNotes)  // ADDED
+        actualStartingLineup = try container.decodeIfPresent([LineupPosition].self, forKey: .actualStartingLineup)
+        plannedPositionChanges = try container.decodeIfPresent([PlannedPositionChange].self, forKey: .plannedPositionChanges) ?? []
+        substitutionNotes = try container.decodeIfPresent(String.self, forKey: .substitutionNotes)
     }
     
+    // MARK: - Standard Initializer (UPDATED with seasonId)
     init(id: UUID = UUID(),
+         seasonId: UUID? = nil,             // NEW
          date: Date,
          opponent: String,
          isHome: Bool = true,
@@ -1555,6 +1956,7 @@ struct Game: Identifiable, Codable, Equatable {
          result: GameResult? = nil,
          notes: String? = nil) {
         self.id = id
+        self.seasonId = seasonId            // NEW
         self.date = date
         self.opponent = opponent
         self.isHome = isHome
@@ -1566,16 +1968,16 @@ struct Game: Identifiable, Codable, Equatable {
         // All other properties will use their default values
     }
     
-    // MARK: - Coding Keys
+    // MARK: - Coding Keys (UPDATED with seasonId)
     enum CodingKeys: String, CodingKey {
-        case id, date, opponent, isHome, location, formation, startingLineup, result
+        case id, seasonId, date, opponent, isHome, location, formation, startingLineup, result
         case gameEvents, playerStats, substitutions, notes, auditLog, isCompleted, playerRSVPs
         case plannedSubstitutions, lineupPhases, useAutoSubstitutions
-        case actualStartingLineup, plannedPositionChanges, substitutionNotes  // ADDED
+        case actualStartingLineup, plannedPositionChanges, substitutionNotes
     }
 }
 
-// MARK: - Game Extension (FIXED - handles different substitution types properly)
+// MARK: - Game Extension (KEEP EXISTING - no changes needed)
 extension Game {
     /// Calculate presumed minutes played for a specific player
     func calculatePresumedMinutesPlayed(for playerId: UUID, with team: Team) -> Int {
@@ -1595,7 +1997,7 @@ extension Game {
                 var totalMinutes = 0
                 for entry in playerStats.timeEntries {
                     let entryStart = entry.enteredAt
-                    let entryEnd = entry.exitedAt ?? totalGameTime // If still playing, assume full game
+                    let entryEnd = entry.exitedAt ?? totalGameTime
                     totalMinutes += max(0, entryEnd - entryStart)
                 }
                 
@@ -1621,13 +2023,11 @@ extension Game {
         
         // Apply executed substitutions first
         for substitution in self.substitutions {
-            // Player being substituted out - reduce their minutes
             if substitution.playerOut == playerId {
                 let minutesToSubtract = totalGameTime - substitution.minute
                 minutesPlayed = max(0, minutesPlayed - minutesToSubtract)
             }
             
-            // Player being substituted in - add their minutes
             if substitution.playerIn == playerId {
                 let minutesToAdd = totalGameTime - substitution.minute
                 minutesPlayed += minutesToAdd
@@ -1636,13 +2036,11 @@ extension Game {
         
         // Apply planned substitutions that haven't been executed yet
         for plannedSub in self.plannedSubstitutions.filter({ !$0.isExecuted }) {
-            // Player being substituted out - reduce their minutes
             if plannedSub.playerOut == playerId {
                 let minutesToSubtract = totalGameTime - plannedSub.plannedMinute
                 minutesPlayed = max(0, minutesPlayed - minutesToSubtract)
             }
             
-            // Player being substituted in - add their minutes
             if plannedSub.playerIn == playerId {
                 let minutesToAdd = totalGameTime - plannedSub.plannedMinute
                 minutesPlayed += minutesToAdd
@@ -1658,11 +2056,8 @@ extension Game {
             playerStats[index].minutesPlayed = calculatePresumedMinutesPlayed(for: playerStats[index].playerId, with: team)
         }
         
-        // Also create stats entries for players who don't have them but should
-        // (players in starting lineup or involved in substitutions)
         var playersInvolved: Set<UUID> = Set()
         
-        // Add starting lineup players
         if let lineup = actualStartingLineup ?? startingLineup {
             for position in lineup {
                 if let playerId = position.playerId {
@@ -1671,19 +2066,16 @@ extension Game {
             }
         }
         
-        // Add players involved in executed substitutions
         for sub in substitutions {
             playersInvolved.insert(sub.playerIn)
             playersInvolved.insert(sub.playerOut)
         }
         
-        // Add players involved in planned substitutions
         for plannedSub in plannedSubstitutions {
             playersInvolved.insert(plannedSub.playerIn)
             playersInvolved.insert(plannedSub.playerOut)
         }
         
-        // Create missing player stats entries
         for playerId in playersInvolved {
             if !playerStats.contains(where: { $0.playerId == playerId }) {
                 var newStats = PlayerGameStats(playerId: playerId)
@@ -1794,16 +2186,17 @@ enum SubstitutionReason: String, Codable, CaseIterable, Equatable {
     case performance = "Performance"
 }
 
-// MARK: - Practice
+// MARK: - Practice (UPDATED with seasonId)
 struct Practice: Identifiable, Codable, Equatable {
     var id: UUID = UUID()
+    var seasonId: UUID?                     // NEW: Which season this practice belongs to
     var date: Date
-    var duration: Int // in minutes
+    var duration: Int
     var location: String?
     var notes: String?
-    var attendees: [UUID] = [] // Player IDs who attended
+    var attendees: [UUID] = []
     var drills: [Drill] = []
-    var attendance: [UUID: Bool] = [:] // Player ID to attendance status
+    var attendance: [UUID: Bool] = [:]
     var weather: String?
     var playerRSVPs: [UUID: RSVPStatus] = [:]
 }

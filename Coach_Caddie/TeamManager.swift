@@ -41,7 +41,7 @@ class TeamManager: ObservableObject {
     private let backupFileName = "teams_backup.json"
     private let pendingChangesFileName = "pending_changes.json"
     private let settingsFileName = "app_settings.json"
-    
+    private var isCurrentlyLoadingData = false
     private var saveWorkItem: DispatchWorkItem?
     private let saveDebounceTime: TimeInterval = 0.5
     private var cancellables = Set<AnyCancellable>()
@@ -577,6 +577,20 @@ var teamsICreated: [Team] {
             addToPendingChanges("team_\(team.id.uuidString)", action: "update", teamId: team.id.uuidString)
         }
     }
+    
+    func updateTeamLocalOnly(_ team: Team) {
+        print("💾 updateTeamLocalOnly called for team: \(team.name)")
+        
+        // Update local array
+        if let index = teams.firstIndex(where: { $0.id == team.id }) {
+            teams[index] = team
+        }
+        
+        // Save to local storage only (no Firebase)
+        saveLocalData()
+        
+        print("💾 Local-only update complete - Firebase NOT triggered")
+    }
 
     // MARK: - Game State Sync (separate from team updates for better performance)
     func syncGameStateForLiveView(_ gameState: ActiveGameState) {
@@ -1084,11 +1098,19 @@ var teamsICreated: [Team] {
     }
     
     func loadData() {
+        // Prevent duplicate/overlapping loads
+        guard !isCurrentlyLoadingData else {
+            print("⚠️ Load already in progress, skipping duplicate load request")
+            return
+        }
+        
         // UPDATED: Only load local data if user is authenticated
         guard let currentUser = Auth.auth().currentUser, !currentUser.isAnonymous else {
             print("🔒 No authenticated user - not loading local data")
             return
         }
+        
+        isCurrentlyLoadingData = true
         
         loadLocalData()
         
@@ -1097,6 +1119,9 @@ var teamsICreated: [Team] {
         
         Task {
             await loadTeamsFromFirebase()
+            await MainActor.run {
+                self.isCurrentlyLoadingData = false
+            }
         }
     }
 

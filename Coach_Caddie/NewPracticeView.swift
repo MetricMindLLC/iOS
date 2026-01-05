@@ -13,6 +13,7 @@ struct ImprovedNewPracticeView: View {
     @State private var searchText = ""
     @State private var selectedCategory = "All"
     @State private var showingDrillDetail = false
+    @State private var selectedSeasonId: UUID?
     @State private var selectedDrill: Drill?
     @State private var showingCustomDrill = false
     @State private var location = ""
@@ -66,6 +67,16 @@ struct ImprovedNewPracticeView: View {
         ["All"] + DrillLibrary.shared.allCategories
     }
     
+    // NEW: Available seasons for practice assignment
+    private var availableSeasons: [Season] {
+        team.availableSeasonsForGames
+    }
+
+    // NEW: Check if we have seasons available
+    private var hasAvailableSeasons: Bool {
+        !availableSeasons.isEmpty
+    }
+    
     var formattedTime: String {
         let hourDisplay = selectedHour == 0 ? 12 : selectedHour
         let minuteString = String(format: "%02d", selectedMinute)
@@ -82,20 +93,14 @@ struct ImprovedNewPracticeView: View {
     
     var body: some View {
         NavigationView {
-            VStack(spacing: 0) {
-                // Compact Header
-                compactPracticeHeader
-                
-                // Selected Drills Timeline (only if drills selected)
-                if !selectedDrills.isEmpty {
-                    selectedDrillsTimeline
+            Group {
+                if !hasAvailableSeasons {
+                    // NEW: No seasons available - show prompt
+                    noSeasonsView
+                } else {
+                    // Existing practice creation content
+                    practiceCreationContent
                 }
-                
-                // Search and Filter
-                searchAndFilterSection
-                
-                // Available Drills (Main Focus)
-                availableDrillsSection
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("Plan Practice")
@@ -108,11 +113,13 @@ struct ImprovedNewPracticeView: View {
                 }
                 
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Create") {
-                        createPractice()
+                    if hasAvailableSeasons {
+                        Button("Create") {
+                            createPractice()
+                        }
+                        .fontWeight(.semibold)
+                        .disabled(selectedDrills.isEmpty || selectedSeasonId == nil)  // UPDATED
                     }
-                    .fontWeight(.semibold)
-                    .disabled(selectedDrills.isEmpty)
                 }
             }
             .sheet(isPresented: $showingDrillDetail) {
@@ -134,14 +141,118 @@ struct ImprovedNewPracticeView: View {
                         }
                     }
             }
+            .onAppear {
+                // NEW: Auto-select active season or first available
+                if selectedSeasonId == nil {
+                    selectedSeasonId = team.activeSeasonId ?? availableSeasons.first?.id
+                }
+            }
+        }
+    }
+    
+
+    // NEW: View shown when no seasons are available
+    private var noSeasonsView: some View {
+        VStack(spacing: 24) {
+            Spacer()
+            
+            Image(systemName: "calendar.badge.exclamationmark")
+                .font(.system(size: 70))
+                .foregroundColor(.orange)
+            
+            Text("No Active Season")
+                .font(.title2)
+                .fontWeight(.bold)
+            
+            Text("You need to create a season before scheduling practices. Seasons help you organize your practices and track attendance separately.")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+            
+            Button(action: {
+                presentationMode.wrappedValue.dismiss()
+                NotificationCenter.default.post(name: NSNotification.Name("OpenSeasonCreation"), object: team.id)
+            }) {
+                Label("Create a Season", systemImage: "plus.circle.fill")
+                    .font(.headline)
+                    .foregroundColor(.white)
+                    .padding()
+                    .frame(maxWidth: .infinity)
+                    .background(Color.green)
+                    .cornerRadius(12)
+            }
+            .padding(.horizontal, 32)
+            
+            Spacer()
+        }
+    }
+
+    // Wrap existing content in this computed property
+    private var practiceCreationContent: some View {
+        VStack(spacing: 0) {
+            // Compact Header with Season Selection
+            compactPracticeHeaderWithSeason  // UPDATED
+            
+            // Selected Drills Timeline (only if drills selected)
+            if !selectedDrills.isEmpty {
+                selectedDrillsTimeline
+            }
+            
+            // Search and Filter
+            searchAndFilterSection
+            
+            // Available Drills (Main Focus)
+            availableDrillsSection
         }
     }
     
     // MARK: - Compact Practice Header
     @ViewBuilder
-    private var compactPracticeHeader: some View {
+    private var compactPracticeHeaderWithSeason: some View {
         VStack(spacing: 12) {
-            // Date and Time Row
+            // NEW: Season Selection
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Season")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                
+                Menu {
+                    ForEach(availableSeasons) { season in
+                        Button(action: { selectedSeasonId = season.id }) {
+                            HStack {
+                                Label(season.displayName, systemImage: season.type.icon)
+                                if selectedSeasonId == season.id {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    HStack {
+                        if let seasonId = selectedSeasonId,
+                           let season = availableSeasons.first(where: { $0.id == seasonId }) {
+                            Image(systemName: season.type.icon)
+                                .foregroundColor(season.type.color)
+                            Text(season.displayName)
+                                .foregroundColor(.primary)
+                        } else {
+                            Text("Select Season")
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.down")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(10)
+                    .background(Color(.systemGray6))
+                    .cornerRadius(8)
+                }
+            }
+            .padding(.horizontal)
+            
+            // Date and Time Row (existing)
             HStack(spacing: 16) {
                 // Date Picker
                 VStack(alignment: .leading, spacing: 4) {
@@ -153,13 +264,12 @@ struct ImprovedNewPracticeView: View {
                         .labelsHidden()
                 }
                 
-                // Time Pickers
+                // Time Pickers (existing code...)
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Time")
                         .font(.caption)
                         .foregroundColor(.secondary)
                     HStack(spacing: 8) {
-                        // Hour
                         Picker("Hour", selection: $selectedHour) {
                             ForEach(hours, id: \.self) { hour in
                                 Text("\(hour)").tag(hour)
@@ -171,7 +281,6 @@ struct ImprovedNewPracticeView: View {
                         Text(":")
                             .fontWeight(.medium)
                         
-                        // Minute
                         Picker("Minute", selection: $selectedMinute) {
                             ForEach(minutes, id: \.self) { minute in
                                 Text(String(format: "%02d", minute)).tag(minute)
@@ -180,7 +289,6 @@ struct ImprovedNewPracticeView: View {
                         .pickerStyle(MenuPickerStyle())
                         .frame(width: 70)
                         
-                        // AM/PM
                         Picker("Period", selection: $selectedPeriod) {
                             ForEach(Array(periods.enumerated()), id: \.offset) { index, period in
                                 Text(period).tag(index)
@@ -248,7 +356,8 @@ struct ImprovedNewPracticeView: View {
             }
             .padding(.horizontal)
         }
-        .padding(.vertical)
+        .padding(.top, 8)
+        .padding(.bottom, 12)
         .background(Color(.systemBackground))
     }
     
@@ -416,7 +525,10 @@ struct ImprovedNewPracticeView: View {
     }
     
     private func createPractice() {
+        guard let seasonId = selectedSeasonId else { return }  // NEW: Require season
+        
         let practice = Practice(
+            seasonId: nil, // Changed from selectedSeasonId
             date: finalPracticeDateTime,
             duration: duration,
             location: location.isEmpty ? nil : location,
@@ -430,7 +542,6 @@ struct ImprovedNewPracticeView: View {
         if let teamIndex = teamManager.teams.firstIndex(where: { $0.id == team.id }) {
             teamManager.teams[teamIndex].practices.append(practice)
             
-            // Save to Firebase directly - no updateTeam call
             Task {
                 do {
                     try await teamManager.firebaseManager.savePractice(practice, to: team)

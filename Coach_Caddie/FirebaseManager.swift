@@ -90,6 +90,13 @@ class FirebaseManager: NSObject, ObservableObject {
         }
     }
     
+    /// Update a single field on the team document without saving the whole team
+    func updateTeamField(teamId: UUID, field: String, value: String) async throws {
+        let teamRef = db.collection("teams").document(teamId.uuidString)
+        try await teamRef.updateData([field: value])
+        print("✅ Updated team field '\(field)'")
+    }
+    
     func saveTeam(_ team: Team, onlyNewGames: Bool = false) async throws {
         guard let user = Auth.auth().currentUser else {
             throw FirebaseError.notAuthenticated
@@ -241,6 +248,9 @@ class FirebaseManager: NSObject, ObservableObject {
             team.games = try await loadGamesWithSubcollections(for: team)
             team.practices = try await loadPracticesFromSubcollection(for: team)
         }
+        
+        // NEW: Always load seasons from subcollection
+        team.seasons = try await loadSeasonsFromSubcollection(for: team)
         
         return team
     }
@@ -432,6 +442,9 @@ class FirebaseManager: NSObject, ObservableObject {
                         team.practices = try await loadPracticesFromSubcollection(for: team)
                     }
                     
+                    // NEW: Always load seasons from subcollection
+                    team.seasons = try await loadSeasonsFromSubcollection(for: team)
+                    
                     teams.append(team)
                 }
             } catch {
@@ -487,6 +500,13 @@ class FirebaseManager: NSObject, ObservableObject {
             for doc in practicesSnapshot.documents {
                 try await doc.reference.delete()
             }
+            
+            // NEW: Delete all seasons
+            let seasonsSnapshot = try await teamRef.collection("seasons").getDocuments()
+            for doc in seasonsSnapshot.documents {
+                try await doc.reference.delete()
+            }
+            print("🗑️ Deleted \(seasonsSnapshot.documents.count) seasons")
         }
         
         // Delete team document
@@ -545,7 +565,6 @@ class FirebaseManager: NSObject, ObservableObject {
             if let error = error {
                 print("Firebase listener error: \(error)")
                 
-                // Try to reconnect after a delay
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
                     self?.startListening(to: team, completion: completion)
                 }
@@ -557,19 +576,20 @@ class FirebaseManager: NSObject, ObservableObject {
             do {
                 var updatedTeam = try Firestore.Decoder().decode(Team.self, from: data)
                 
-                // If using subcollections, load them
-                if updatedTeam.useSubcollections {
-                    Task {
+                Task {
+                    // If using subcollections, load them
+                    if updatedTeam.useSubcollections {
                         updatedTeam.players = try await self?.loadPlayersFromSubcollection(for: updatedTeam) ?? []
                         updatedTeam.games = try await self?.loadGamesWithSubcollections(for: updatedTeam) ?? []
                         updatedTeam.practices = try await self?.loadPracticesFromSubcollection(for: updatedTeam) ?? []
-                        
-                        await MainActor.run {
-                            completion(updatedTeam)
-                        }
                     }
-                } else {
-                    completion(updatedTeam)
+                    
+                    // NEW: Always load seasons
+                    updatedTeam.seasons = try await self?.loadSeasonsFromSubcollection(for: updatedTeam) ?? []
+                    
+                    await MainActor.run {
+                        completion(updatedTeam)
+                    }
                 }
             } catch {
                 print("Error decoding team: \(error)")
@@ -951,6 +971,280 @@ class FirebaseManager: NSObject, ObservableObject {
         
         try await saveTeam(updatedTeam)
     }
+
+    /// Save a season to Firebase subcollection
+    func saveSeason(_ season: Season, in team: Team) async throws {
+        guard let user = Auth.auth().currentUser else {
+            throw FirebaseError.notAuthenticated
+        }
+        
+        let seasonRef = db.collection("teams").document(team.id.uuidString)
+            .collection("seasons").document(season.id.uuidString)
+        
+        let seasonData = try Firestore.Encoder().encode(season)
+        try await seasonRef.setData(seasonData)
+        
+        print("✅ Saved season '\(season.displayName)' to Firebase")
+    }
+
+    /// Load all seasons from Firebase subcollection
+    func loadSeasonsFromSubcollection(for team: Team) async throws -> [Season] {
+        let seasonsRef = db.collection("teams").document(team.id.uuidString).collection("seasons")
+        let snapshot = try await seasonsRef.getDocuments()
+        
+        var seasons: [Season] = []
+        for document in snapshot.documents {
+            let season = try Firestore.Decoder().decode(Season.self, from: document.data())
+            seasons.append(season)
+        }
+        
+        // Sort by start date, most recent first
+        seasons.sort { $0.startDate > $1.startDate }
+        
+        print("📅 Loaded \(seasons.count) seasons for team: \(team.name)")
+        return seasons
+    }
+
+    /// Delete a season from Firebase
+    func deleteSeason(_ season: Season, from team: Team) async throws {
+        guard let user = Auth.auth().currentUser else {
+            throw FirebaseError.notAuthenticated
+        }
+        
+        let seasonRef = db.collection("teams").document(team.id.uuidString)
+            .collection("seasons").document(season.id.uuidString)
+        
+        // Delete any guest players stored in a subcollection (if we add that later)
+        // For now, guest players are embedded in the season document
+        
+        try await seasonRef.delete()
+        print("🗑️ Deleted season '\(season.displayName)' from Firebase")
+        
+        // Clear cache
+        clearSubcollectionCache(for: team.id)
+    }
+
+    /// Update a specific season
+    func updateSeason(_ season: Season, in team: Team) async throws {
+        try await saveSeason(season, in: team)
+    }
+
+    /// Add guest player to a season
+    func addGuestPlayer(_ guestPlayer: GuestPlayer, to season: Season, in team: Team) async throws {
+        var updatedSeason = season
+        updatedSeason.guestPlayers.append(guestPlayer)
+        try await saveSeason(updatedSeason, in: team)
+        print("✅ Added guest player '\(guestPlayer.name)' to season '\(season.displayName)'")
+    }
+
+    /// Remove guest player from a season
+    func removeGuestPlayer(_ guestPlayer: GuestPlayer, from season: Season, in team: Team) async throws {
+        var updatedSeason = season
+        updatedSeason.guestPlayers.removeAll { $0.id == guestPlayer.id }
+        try await saveSeason(updatedSeason, in: team)
+        print("🗑️ Removed guest player '\(guestPlayer.name)' from season '\(season.displayName)'")
+    }
+
+    /// Promote guest player to team roster
+    func promoteGuestToRoster(_ guestPlayer: GuestPlayer, in season: Season, team: Team) async throws -> Player {
+        // Create a new Player from GuestPlayer
+        let newPlayer = Player(
+            name: guestPlayer.name,
+            jerseyNumber: guestPlayer.jerseyNumber,
+            positions: [guestPlayer.preferredPosition],
+            preferredPosition: guestPlayer.preferredPosition,
+            notes: guestPlayer.notes,
+            seasonStats: PlayerStats(),
+            statsBySeason: [season.id: guestPlayer.seasonStats]  // Transfer their stats
+        )
+        
+        // Save new player to team roster
+        try await savePlayerToSubcollection(newPlayer, in: team)
+        
+        // Remove from guest players
+        try await removeGuestPlayer(guestPlayer, from: season, in: team)
+        
+        // Add player to season's active roster
+        var updatedSeason = season
+        updatedSeason.activePlayerIds.append(newPlayer.id)
+        try await saveSeason(updatedSeason, in: team)
+        
+        print("⬆️ Promoted guest '\(guestPlayer.name)' to team roster")
+        return newPlayer
+    }
+
+    /// Update active player roster for a season
+    func updateSeasonRoster(seasonId: UUID, activePlayerIds: [UUID], in team: Team) async throws {
+        let seasonRef = db.collection("teams").document(team.id.uuidString)
+            .collection("seasons").document(seasonId.uuidString)
+        
+        try await seasonRef.updateData([
+            "activePlayerIds": activePlayerIds.map { $0.uuidString }
+        ])
+        
+        print("✅ Updated active roster for season")
+    }
+
+    /// Migrate existing games and practices to a season (creates new or uses existing)
+    func migrateExistingDataToSeason(for team: Team, year: String? = nil) async throws -> Season {
+        guard let user = Auth.auth().currentUser else {
+            throw FirebaseError.notAuthenticated
+        }
+        
+        print("🔄 Starting migration for team: \(team.name)")
+        
+        // Determine date range from existing games/practices
+        let allDates = team.games.map { $0.date } + team.practices.map { $0.date }
+        let earliestDate = allDates.min() ?? Date()
+        let latestDate = allDates.max() ?? Date()
+        
+        // Determine year from the game dates (use the most common year from games)
+        let gameYears = team.games.map { Calendar.current.component(.year, from: $0.date) }
+        let yearCounts = Dictionary(grouping: gameYears, by: { $0 }).mapValues { $0.count }
+        let mostCommonYear = yearCounts.max(by: { $0.value < $1.value })?.key ?? Calendar.current.component(.year, from: Date())
+        let finalYear = year ?? String(mostCommonYear)
+        
+        // Determine season type from game dates (not current date)
+        let gameMonths = team.games.map { Calendar.current.component(.month, from: $0.date) }
+        let avgMonth = gameMonths.isEmpty ? Calendar.current.component(.month, from: Date()) : gameMonths.reduce(0, +) / gameMonths.count
+        
+        let seasonType: SeasonType
+        switch avgMonth {
+        case 3...5: seasonType = .spring
+        case 6...8: seasonType = .summer
+        case 9...11: seasonType = .fall
+        default: seasonType = .winter
+        }
+        
+        // CHECK: Does a matching season already exist?
+        let existingSeasons = try await loadSeasonsFromSubcollection(for: team)
+        let matchingSeason = existingSeasons.first { season in
+            season.type == seasonType && season.year == finalYear
+        }
+        
+        let targetSeason: Season
+        
+        if let existing = matchingSeason {
+            print("✅ Found existing season: \(existing.displayName) - will use this")
+            targetSeason = existing
+        } else {
+            // Create new season
+            let seasonEndDate: Date
+            switch seasonType {
+            case .fall:
+                var components = Calendar.current.dateComponents([.year], from: latestDate)
+                components.year = mostCommonYear
+                components.month = 11
+                components.day = 30
+                seasonEndDate = Calendar.current.date(from: components) ?? latestDate
+            case .spring:
+                var components = Calendar.current.dateComponents([.year], from: latestDate)
+                components.year = mostCommonYear
+                components.month = 5
+                components.day = 31
+                seasonEndDate = Calendar.current.date(from: components) ?? latestDate
+            case .summer:
+                var components = Calendar.current.dateComponents([.year], from: latestDate)
+                components.year = mostCommonYear
+                components.month = 8
+                components.day = 31
+                seasonEndDate = Calendar.current.date(from: components) ?? latestDate
+            case .winter:
+                var components = Calendar.current.dateComponents([.year], from: latestDate)
+                let startMonth = Calendar.current.component(.month, from: earliestDate)
+                if startMonth >= 10 {
+                    components.year = mostCommonYear + 1
+                } else {
+                    components.year = mostCommonYear
+                }
+                components.month = 2
+                components.day = 28
+                seasonEndDate = Calendar.current.date(from: components) ?? latestDate
+            case .tournament:
+                seasonEndDate = Calendar.current.date(byAdding: .day, value: 7, to: latestDate) ?? latestDate
+            }
+            
+            let newSeason = Season(
+                name: "\(seasonType.rawValue) \(finalYear)",
+                type: seasonType,
+                year: finalYear,
+                startDate: earliestDate,
+                endDate: seasonEndDate,
+                activePlayerIds: team.players.map { $0.id },
+                guestPlayers: [],
+                isArchived: false
+            )
+            
+            try await saveSeason(newSeason, in: team)
+            print("✅ Created new migration season: \(newSeason.displayName)")
+            print("📅 Date range: \(earliestDate) to \(seasonEndDate)")
+            targetSeason = newSeason
+        }
+        
+        // Get valid season IDs to detect orphaned references
+        let validSeasonIds = Set(existingSeasons.map { $0.id }).union([targetSeason.id])
+        
+        // Update all existing games with the season ID (including orphaned ones)
+        if team.useSubcollections {
+            var gamesUpdated = 0
+            for game in team.games {
+                let needsUpdate = game.seasonId == nil || !validSeasonIds.contains(game.seasonId!)
+                if needsUpdate {
+                    let gameRef = db.collection("teams").document(team.id.uuidString)
+                        .collection("games").document(game.id.uuidString)
+                    
+                    try await gameRef.updateData([
+                        "seasonId": targetSeason.id.uuidString
+                    ])
+                    gamesUpdated += 1
+                }
+            }
+            print("✅ Updated \(gamesUpdated) games with season ID")
+            
+            // Update all existing practices with the season ID (including orphaned ones)
+            var practicesUpdated = 0
+        } else {
+            // For non-subcollection teams, update the embedded arrays
+            var updatedTeam = team
+            for index in updatedTeam.games.indices {
+                let needsUpdate = updatedTeam.games[index].seasonId == nil ||
+                                  !validSeasonIds.contains(updatedTeam.games[index].seasonId!)
+                if needsUpdate {
+                    updatedTeam.games[index].seasonId = targetSeason.id
+                }
+            }
+            for index in updatedTeam.practices.indices {
+                let needsUpdate = updatedTeam.practices[index].seasonId == nil ||
+                                  !validSeasonIds.contains(updatedTeam.practices[index].seasonId!)
+                if needsUpdate {
+                    updatedTeam.practices[index].seasonId = targetSeason.id
+                }
+            }
+            
+            let teamData = try Firestore.Encoder().encode(updatedTeam)
+            try await db.collection("teams").document(team.id.uuidString).setData(teamData)
+            print("✅ Updated embedded games and practices with season ID")
+        }
+        
+        // Update team's active season
+        let teamRef = db.collection("teams").document(team.id.uuidString)
+        try await teamRef.updateData([
+            "activeSeasonId": targetSeason.id.uuidString
+        ])
+        
+        // Clear cache
+        clearSubcollectionCache(for: team.id)
+        
+        print("🎉 Migration complete! Using season: \(targetSeason.displayName)")
+        return targetSeason
+    }
+
+    /// Check if team needs migration (has games/practices without seasonId)
+    func teamNeedsMigration(_ team: Team) -> Bool {
+        let hasUnassignedGames = team.games.contains { $0.seasonId == nil }
+        let hasUnassignedPractices = team.practices.contains { $0.seasonId == nil }
+        return (hasUnassignedGames || hasUnassignedPractices) && !team.games.isEmpty
+    }
     
     // MARK: - Load Data from Subcollections
     func loadPlayersFromSubcollection(for team: Team) async throws -> [Player] {
@@ -1083,7 +1377,8 @@ class FirebaseManager: NSObject, ObservableObject {
     func clearSubcollectionCache(for teamId: UUID) {
         let keysToRemove = ["games-\(teamId.uuidString)",
                             "players-\(teamId.uuidString)",
-                            "practices-\(teamId.uuidString)"]
+                            "practices-\(teamId.uuidString)",
+                            "seasons-\(teamId.uuidString)"]  // NEW
         
         for key in keysToRemove {
             subcollectionCache.removeValue(forKey: key)
@@ -1549,6 +1844,7 @@ class FirebaseManager: NSObject, ObservableObject {
         let letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
         return String((0..<6).map { _ in letters.randomElement()! })
     }
+    
 }
 
 // MARK: - Messaging Delegate

@@ -15,6 +15,8 @@ struct TeamDetailView: View {
     @State private var userRole: AccessLevel?
     @State private var showingCOPPASettings = false
     @State private var isTeamOwner = false
+    @State private var showingSeasonList = false      // NEW
+    @State private var showingNewSeason = false
     @Environment(\.presentationMode) var presentationMode
     
     private var shouldHideTabBar: Bool {
@@ -201,6 +203,22 @@ struct TeamDetailView: View {
             StatsVisibilityConfigView(team: team)
                 .environmentObject(teamManager)
         }
+        .sheet(isPresented: $showingSeasonList) {
+            NavigationView {
+                SeasonListView(team: $team)
+                    .environmentObject(teamManager)
+            }
+        }
+        .sheet(isPresented: $showingNewSeason) {
+            NewSeasonView(team: $team)
+                .environmentObject(teamManager)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("OpenSeasonCreation"))) { notification in
+            // Handle request to open season creation from game/practice views
+            if let teamId = notification.object as? UUID, teamId == team.id {
+                showingNewSeason = true
+            }
+        }
         .alert("Delete Team", isPresented: $showingDeleteAlert) {
             Button("Cancel", role: .cancel) { }
             Button("Delete", role: .destructive) {
@@ -281,6 +299,8 @@ struct TeamOverviewTab: View {
     
     @State private var userRole: AccessLevel?
     @State private var isLoadingPermissions = true
+    @State private var showingSeasonList = false      // NEW
+    @State private var showingNewSeason = false
     
     // CRITICAL FIX: Get fresh team data from TeamManager
     private var currentTeam: Team {
@@ -328,14 +348,18 @@ struct TeamOverviewTab: View {
                     .foregroundColor(currentTeam.primaryColor)
             }
             
+            // Season Banner - Uses smart status logic
+            seasonBannerView
+            
             HStack(spacing: 30) {
                 VStack {
-                    Text("\(currentTeam.players.count)")
+                    Text("\(activePlayerCount)")
                         .font(.title2)
                         .bold()
-                    Text("Players")
+                    Text(activePlayerLabel)
                         .font(.caption)
                         .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
                 }
                 
                 VStack {
@@ -362,6 +386,170 @@ struct TeamOverviewTab: View {
         .cornerRadius(15)
         .shadow(radius: 2)
         .padding(.horizontal)
+        .sheet(isPresented: $showingSeasonList) {
+            NavigationView {
+                SeasonListView(team: $team)
+                    .environmentObject(teamManager)
+            }
+        }
+        .sheet(isPresented: $showingNewSeason) {
+            NewSeasonView(team: $team)
+                .environmentObject(teamManager)
+        }
+    }
+
+    // Active player count for current/active season
+    private var activePlayerCount: Int {
+        if let activeSeason = currentTeam.effectiveActiveSeason {
+            return activeSeason.activePlayerIds.count
+        }
+        // Fallback to total players if no active season
+        return currentTeam.players.count
+    }
+
+    // Label changes based on whether we have an active season
+    private var activePlayerLabel: String {
+        if currentTeam.effectiveActiveSeason != nil {
+            return "Active Players"
+        }
+        return "Players"
+    }
+
+    // NEW: Smart Season Banner View
+    @ViewBuilder
+    private var seasonBannerView: some View {
+        switch currentTeam.seasonStatus {
+        case .inSeason(let season):
+            // Currently in a season
+            Button(action: { showingSeasonList = true }) {
+                HStack {
+                    Image(systemName: season.type.icon)
+                        .foregroundColor(season.type.color)
+                    
+                    Text(season.displayName)
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    
+                    Spacer()
+                    
+                    Text("Current Season")
+                        .font(.caption)
+                        .foregroundColor(.green)
+                        .fontWeight(.medium)
+                    
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .padding(10)
+                .background(Color.green.opacity(0.1))
+                .cornerRadius(8)
+            }
+            .buttonStyle(PlainButtonStyle())
+            
+        case .betweenSeasons(let nextSeason):
+            // Between seasons, show next upcoming
+            Button(action: { showingSeasonList = true }) {
+                HStack {
+                    Image(systemName: nextSeason.type.icon)
+                        .foregroundColor(nextSeason.type.color)
+                    
+                    Text(nextSeason.displayName)
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    
+                    Spacer()
+                    
+                    Text("Next Season")
+                        .font(.caption)
+                        .foregroundColor(.blue)
+                        .fontWeight(.medium)
+                    
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .padding(10)
+                .background(Color.blue.opacity(0.1))
+                .cornerRadius(8)
+            }
+            .buttonStyle(PlainButtonStyle())
+            
+        case .noUpcomingSeasons(let lastSeason):
+            // No upcoming seasons
+            if let last = lastSeason {
+                Button(action: { showingSeasonList = true }) {
+                    HStack {
+                        Image(systemName: last.type.icon)
+                            .foregroundColor(last.type.color)
+                        
+                        Text(last.displayName)
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                        
+                        Spacer()
+                        
+                        Text("Past Season")
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                            .fontWeight(.medium)
+                        
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(10)
+                    .background(Color.orange.opacity(0.1))
+                    .cornerRadius(8)
+                }
+                .buttonStyle(PlainButtonStyle())
+            } else {
+                // Has seasons but none upcoming and none past (shouldn't happen, but handle it)
+                Button(action: { showingNewSeason = true }) {
+                    HStack {
+                        Image(systemName: "calendar.badge.plus")
+                            .foregroundColor(.orange)
+                        
+                        Text("Create a new season")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                        
+                        Spacer()
+                        
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(10)
+                    .background(Color.orange.opacity(0.1))
+                    .cornerRadius(8)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+            
+        case .noSeasons:
+            // No seasons at all - prompt to create
+            Button(action: { showingNewSeason = true }) {
+                HStack {
+                    Image(systemName: "calendar.badge.plus")
+                        .foregroundColor(.orange)
+                    
+                    Text("Create your first season")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    
+                    Spacer()
+                    
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .padding(10)
+                .background(Color.orange.opacity(0.1))
+                .cornerRadius(8)
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
     }
     
     // Helper computed properties for upcoming events
@@ -453,6 +641,16 @@ struct TeamOverviewTab: View {
                 backgroundColor: Color(red: 0.15, green: 0.6, blue: 0.15)
             ) {
                 selectedTab = 4
+            }
+            
+            QuickActionButton(
+                icon: "calendar",
+                title: "Seasons",
+                color: .purple,
+                textColor: .white,
+                backgroundColor: .purple
+            ) {
+                showingSeasonList = true
             }
         }
         .padding(.horizontal)
@@ -704,13 +902,18 @@ struct TeamGamesTab: View {
     @State private var showingGameDetail = false
     @StateObject private var gameStateManager = GameStateManager.shared
     
+    // CRITICAL FIX: Get fresh team data from TeamManager
+    private var currentTeam: Team {
+        teamManager.teams.first(where: { $0.id == team.id }) ?? team
+    }
+    
     var body: some View {
         VStack {
-            if team.games.isEmpty {
+            if currentTeam.games.isEmpty {
                 TeamEmptyGamesView(showingNewGame: $showingNewGame)
             } else {
                 List {
-                    ForEach(team.games.sorted(by: { $0.date < $1.date })) { game in
+                    ForEach(currentTeam.games.sorted(by: { $0.date < $1.date })) { game in
                         Button(action: {
                             selectedGame = game
                             showingGameDetail = true
@@ -725,7 +928,7 @@ struct TeamGamesTab: View {
                     }
                     
                     // Add bottom padding to prevent tab bar overlap
-                    if !team.games.isEmpty {
+                    if !currentTeam.games.isEmpty {
                         Color.clear
                             .frame(height: 120)
                             .listRowBackground(Color.clear)
@@ -739,7 +942,7 @@ struct TeamGamesTab: View {
         .sheet(isPresented: $showingGameDetail) {
             if let selectedGame = selectedGame {
                 let gameBinding = Binding<Game>(
-                    get: { team.games.first(where: { $0.id == selectedGame.id }) ?? selectedGame },
+                    get: { currentTeam.games.first(where: { $0.id == selectedGame.id }) ?? selectedGame },
                     set: { newGame in
                         if let index = team.games.firstIndex(where: { $0.id == selectedGame.id }) {
                             team.games[index] = newGame
@@ -748,7 +951,7 @@ struct TeamGamesTab: View {
                 )
                 GameDetailView(
                     game: gameBinding,
-                    team: team,
+                    team: currentTeam,
                     onViewActiveGame: {
                         showingGameDetail = false
                         onSwitchToLineup()

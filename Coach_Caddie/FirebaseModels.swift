@@ -73,6 +73,7 @@ enum FirebaseError: LocalizedError {
     case expiredInviteCode
     case teamNotFound
     case accessDenied
+    case seasonRequired      // NEW
     
     var errorDescription: String? {
         switch self {
@@ -86,6 +87,8 @@ enum FirebaseError: LocalizedError {
             return "Team not found"
         case .accessDenied:
             return "Access denied"
+        case .seasonRequired:       // NEW
+            return "Please create a season before adding games or practices"
         }
     }
     // MARK: - Team Member Model
