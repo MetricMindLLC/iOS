@@ -69,6 +69,8 @@
     <string>Coach Caddie needs access to your camera to take player photos.</string>
     <key>NSPhotoLibraryUsageDescription</key>
     <string>Coach Caddie needs access to your photo library to select player photos.</string>
+    <key>NSPhotoLibraryAddUsageDescription</key>
+    <string>Coach Caddie needs permission to save tactics board images to your photo library.</string>
     
     <!-- File Access Permissions -->
     <key>LSSupportsOpeningDocumentsInPlace</key>

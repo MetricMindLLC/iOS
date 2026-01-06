@@ -20,7 +20,7 @@ struct TeamDetailView: View {
     @Environment(\.presentationMode) var presentationMode
     
     private var shouldHideTabBar: Bool {
-        return isInGameMode || selectedTab == 4 // Hide for game mode or lineup tab
+        return isInGameMode || selectedTab == 4 || selectedTab == 5 // Hide for game mode, lineup tab, or tactics tab
     }
     
     private var isCurrentUserTeamOwner: Bool {
@@ -145,6 +145,13 @@ struct TeamDetailView: View {
                             )
                     }
                     .navigationViewStyle(StackNavigationViewStyle())
+                case 5:
+                    NavigationView {
+                        TacticsWhiteboardView(team: $team, onDismiss: {
+                            selectedTab = 0
+                        })
+                    }
+                    .navigationViewStyle(StackNavigationViewStyle())
                 default:
                     NavigationView {
                         TeamOverviewTab(
@@ -253,7 +260,8 @@ struct CustomTabBar: View {
         (icon: "person.3.fill", title: "Players"),
         (icon: "sportscourt.fill", title: "Games"),
         (icon: "figure.run", title: "Practice"),
-        (icon: "rectangle.3.group.fill", title: "Lineup")
+        (icon: "rectangle.3.group.fill", title: "Lineup"),
+        (icon: "pencil.and.outline", title: "Tactics")
     ]
     
     var body: some View {
@@ -262,30 +270,30 @@ struct CustomTabBar: View {
                 Button(action: {
                     selectedTab = index
                 }) {
-                    VStack(spacing: 4) {
+                    VStack(spacing: 3) {
                         Image(systemName: tabs[index].icon)
-                            .font(.system(size: 16, weight: .medium))
+                            .font(.system(size: 14, weight: .medium))
                         Text(tabs[index].title)
-                            .font(.caption2)
+                            .font(.system(size: 9))
                     }
                     .foregroundColor(selectedTab == index ? Color(red: 0.05, green: 0.15, blue: 0.35) : .gray)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 8)
                     .background(
-                        RoundedRectangle(cornerRadius: 20)
+                        RoundedRectangle(cornerRadius: 16)
                             .fill(selectedTab == index ? Color(red: 0.05, green: 0.15, blue: 0.35).opacity(0.1) : Color.clear)
                     )
                 }
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
         .background(
             RoundedRectangle(cornerRadius: 25)
                 .fill(.ultraThinMaterial)
                 .shadow(color: .black.opacity(0.1), radius: 10, x: 0, y: 5)
         )
-        .padding(.horizontal, 20)
+        .padding(.horizontal, 16)
     }
 }
 
