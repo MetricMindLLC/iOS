@@ -1608,6 +1608,10 @@ struct PlayerStats: Codable, Equatable {
     // Store manual adjustments as offsets, not flags
     var manualAdjustments: [String: Int] = [:]  // e.g., ["goals": 5] means +5 to calculated value
     
+    // NEW: Store season-specific manual adjustments
+    // Key is Season UUID, value is dictionary of stat adjustments for that season
+    var seasonManualAdjustments: [UUID: [String: Int]] = [:]
+    
     // MARK: - Custom Decoding for Backward Compatibility
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -1623,6 +1627,43 @@ struct PlayerStats: Codable, Equatable {
         redCards = try container.decodeIfPresent(Int.self, forKey: .redCards) ?? 0
         minutesPlayed = try container.decodeIfPresent(Int.self, forKey: .minutesPlayed) ?? 0
         manualAdjustments = try container.decodeIfPresent([String: Int].self, forKey: .manualAdjustments) ?? [:]
+        
+        // NEW: Decode season manual adjustments with UUID key conversion (backward compatible - defaults to empty)
+        if let seasonAdjustmentsStringKeys = try container.decodeIfPresent([String: [String: Int]].self, forKey: .seasonManualAdjustments) {
+            var converted: [UUID: [String: Int]] = [:]
+            for (key, value) in seasonAdjustmentsStringKeys {
+                if let uuid = UUID(uuidString: key) {
+                    converted[uuid] = value
+                }
+            }
+            seasonManualAdjustments = converted
+        } else {
+            seasonManualAdjustments = [:]
+        }
+    }
+    
+    // MARK: - Custom Encoding
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        
+        try container.encode(gamesPlayed, forKey: .gamesPlayed)
+        try container.encode(goals, forKey: .goals)
+        try container.encode(assists, forKey: .assists)
+        try container.encode(shots, forKey: .shots)
+        try container.encode(shotOnTarget, forKey: .shotOnTarget)
+        try container.encode(saves, forKey: .saves)
+        try container.encode(goalsConceded, forKey: .goalsConceded)
+        try container.encode(yellowCards, forKey: .yellowCards)
+        try container.encode(redCards, forKey: .redCards)
+        try container.encode(minutesPlayed, forKey: .minutesPlayed)
+        try container.encode(manualAdjustments, forKey: .manualAdjustments)
+        
+        // NEW: Encode season manual adjustments with String keys (JSON requires string keys)
+        var stringKeyedSeasonAdjustments: [String: [String: Int]] = [:]
+        for (uuid, adjustments) in seasonManualAdjustments {
+            stringKeyedSeasonAdjustments[uuid.uuidString] = adjustments
+        }
+        try container.encode(stringKeyedSeasonAdjustments, forKey: .seasonManualAdjustments)
     }
     
     // MARK: - Default Initializer
@@ -1634,7 +1675,8 @@ struct PlayerStats: Codable, Equatable {
     init(gamesPlayed: Int = 0, goals: Int = 0, assists: Int = 0, shots: Int = 0,
          shotOnTarget: Int = 0, saves: Int = 0, goalsConceded: Int = 0,
          yellowCards: Int = 0, redCards: Int = 0, minutesPlayed: Int = 0,
-         manualAdjustments: [String: Int] = [:]) {
+         manualAdjustments: [String: Int] = [:],
+         seasonManualAdjustments: [UUID: [String: Int]] = [:]) {
         self.gamesPlayed = gamesPlayed
         self.goals = goals
         self.assists = assists
@@ -1646,6 +1688,7 @@ struct PlayerStats: Codable, Equatable {
         self.redCards = redCards
         self.minutesPlayed = minutesPlayed
         self.manualAdjustments = manualAdjustments
+        self.seasonManualAdjustments = seasonManualAdjustments
     }
     
     // MARK: - CodingKeys
@@ -1661,9 +1704,10 @@ struct PlayerStats: Codable, Equatable {
         case redCards
         case minutesPlayed
         case manualAdjustments
+        case seasonManualAdjustments
     }
     
-    // MARK: - Manual Adjustment Methods
+    // MARK: - Manual Adjustment Methods (Overall)
     
     mutating func setManualAdjustment(_ statName: String, adjustment: Int) {
         manualAdjustments[statName] = adjustment
@@ -1685,7 +1729,45 @@ struct PlayerStats: Codable, Equatable {
         return manualAdjustments[statName] != nil
     }
     
-    // MARK: - NEW: Season Aggregation Methods
+    // MARK: - NEW: Season-Specific Manual Adjustment Methods
+    
+    mutating func setSeasonManualAdjustment(_ statName: String, adjustment: Int, forSeason seasonId: UUID) {
+        if seasonManualAdjustments[seasonId] == nil {
+            seasonManualAdjustments[seasonId] = [:]
+        }
+        seasonManualAdjustments[seasonId]?[statName] = adjustment
+    }
+    
+    func getSeasonManualAdjustment(_ statName: String, forSeason seasonId: UUID) -> Int {
+        return seasonManualAdjustments[seasonId]?[statName] ?? 0
+    }
+    
+    mutating func clearSeasonManualAdjustment(_ statName: String, forSeason seasonId: UUID) {
+        seasonManualAdjustments[seasonId]?.removeValue(forKey: statName)
+        // Clean up empty dictionaries
+        if seasonManualAdjustments[seasonId]?.isEmpty == true {
+            seasonManualAdjustments.removeValue(forKey: seasonId)
+        }
+    }
+    
+    mutating func clearAllSeasonManualAdjustments(forSeason seasonId: UUID) {
+        seasonManualAdjustments.removeValue(forKey: seasonId)
+    }
+    
+    func hasSeasonManualAdjustment(_ statName: String, forSeason seasonId: UUID) -> Bool {
+        return seasonManualAdjustments[seasonId]?[statName] != nil
+    }
+    
+    /// Get total season manual adjustments for a stat across ALL seasons
+    func getTotalSeasonAdjustments(_ statName: String) -> Int {
+        var total = 0
+        for (_, adjustments) in seasonManualAdjustments {
+            total += adjustments[statName] ?? 0
+        }
+        return total
+    }
+    
+    // MARK: - Season Aggregation Methods
     
     /// Combine stats from multiple PlayerStats objects (e.g., across seasons)
     static func combined(_ stats: [PlayerStats]) -> PlayerStats {
@@ -1707,6 +1789,16 @@ struct PlayerStats: Codable, Equatable {
             for (key, value) in stat.manualAdjustments {
                 combined.manualAdjustments[key, default: 0] += value
             }
+            
+            // Merge season manual adjustments
+            for (seasonId, adjustments) in stat.seasonManualAdjustments {
+                if combined.seasonManualAdjustments[seasonId] == nil {
+                    combined.seasonManualAdjustments[seasonId] = [:]
+                }
+                for (key, value) in adjustments {
+                    combined.seasonManualAdjustments[seasonId]?[key, default: 0] += value
+                }
+            }
         }
         
         return combined
@@ -1727,6 +1819,15 @@ struct PlayerStats: Codable, Equatable {
         
         for (key, value) in other.manualAdjustments {
             manualAdjustments[key, default: 0] += value
+        }
+        
+        for (seasonId, adjustments) in other.seasonManualAdjustments {
+            if seasonManualAdjustments[seasonId] == nil {
+                seasonManualAdjustments[seasonId] = [:]
+            }
+            for (key, value) in adjustments {
+                seasonManualAdjustments[seasonId]?[key, default: 0] += value
+            }
         }
     }
     

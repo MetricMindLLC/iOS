@@ -123,17 +123,14 @@ struct EnhancedQuickStatsView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    // NEW: Only show edit button when viewing all-time stats
-                    if isViewingAllTime {
-                        Button(action: {
-                            isEditMode.toggle()
-                        }) {
-                            if isEditMode {
-                                Label("Done", systemImage: "checkmark.circle.fill")
-                                    .foregroundColor(.green)
-                            } else {
-                                Label("Edit Stats", systemImage: "pencil.circle")
-                            }
+                    Button(action: {
+                        isEditMode.toggle()
+                    }) {
+                        if isEditMode {
+                            Label("Done", systemImage: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                        } else {
+                            Label("Edit Stats", systemImage: "pencil.circle")
                         }
                     }
                 }
@@ -314,15 +311,15 @@ struct EnhancedQuickStatsView: View {
         }
     }
     
-    // MARK: - Players Section (UPDATED for season filtering)
+    // MARK: - Players Section
     private var playersSection: some View {
         return VStack(spacing: 16) {
             ForEach(filteredTeams, id: \.id) { team in
                 PlayerStatsTeamSection(
                     team: team,
                     timeRange: selectedTimeRange,
-                    isEditMode: isEditMode && isViewingAllTime,  // UPDATED: Only allow edit in all-time view
-                    selectedSeasonId: selectedSeasonId  // NEW: Pass season filter
+                    isEditMode: isEditMode,  // Allow editing in both views now
+                    selectedSeasonId: selectedSeasonId
                 )
             }
         }
@@ -575,6 +572,9 @@ struct EnhancedQuickStatsView: View {
                     // Store the manual adjustments (preserve them)
                     let manualAdjustments = updatedTeam.players[playerIndex].seasonStats.manualAdjustments
                     
+                    // NEW: Also preserve season-specific manual adjustments
+                    let seasonManualAdjustments = updatedTeam.players[playerIndex].seasonStats.seasonManualAdjustments
+                    
                     var calculatedStats = PlayerStats() // Start fresh
                     
                     // Count stats from all games (ALWAYS count, no locks)
@@ -612,7 +612,7 @@ struct EnhancedQuickStatsView: View {
                         }
                     }
 
-                    // Apply manual adjustments to calculated values
+                    // Apply overall manual adjustments to calculated values
                     calculatedStats.goals += manualAdjustments["goals"] ?? 0
                     calculatedStats.assists += manualAdjustments["assists"] ?? 0
                     calculatedStats.shots += manualAdjustments["shots"] ?? 0
@@ -624,8 +624,25 @@ struct EnhancedQuickStatsView: View {
                     calculatedStats.minutesPlayed += manualAdjustments["minutesPlayed"] ?? 0
                     calculatedStats.shotOnTarget += manualAdjustments["shotOnTarget"] ?? 0
                     
+                    // NEW: Apply ALL season manual adjustments to the totals
+                    for (_, adjustments) in seasonManualAdjustments {
+                        calculatedStats.goals += adjustments["goals"] ?? 0
+                        calculatedStats.assists += adjustments["assists"] ?? 0
+                        calculatedStats.shots += adjustments["shots"] ?? 0
+                        calculatedStats.saves += adjustments["saves"] ?? 0
+                        calculatedStats.goalsConceded += adjustments["goalsConceded"] ?? 0
+                        calculatedStats.yellowCards += adjustments["yellowCards"] ?? 0
+                        calculatedStats.redCards += adjustments["redCards"] ?? 0
+                        calculatedStats.gamesPlayed += adjustments["gamesPlayed"] ?? 0
+                        calculatedStats.minutesPlayed += adjustments["minutesPlayed"] ?? 0
+                        calculatedStats.shotOnTarget += adjustments["shotOnTarget"] ?? 0
+                    }
+                    
                     // Restore the manual adjustments dictionary
                     calculatedStats.manualAdjustments = manualAdjustments
+                    
+                    // NEW: Restore the season manual adjustments dictionary
+                    calculatedStats.seasonManualAdjustments = seasonManualAdjustments
 
                     // Update the player's stats
                     updatedTeam.players[playerIndex].seasonStats = calculatedStats
@@ -1006,20 +1023,25 @@ struct PlayerStatsTeamSection: View {
     let team: Team
     let timeRange: EnhancedQuickStatsView.TimeRange
     let isEditMode: Bool
-    let selectedSeasonId: UUID?  // NEW: Season filter
+    let selectedSeasonId: UUID?
     @EnvironmentObject var teamManager: TeamManager
+    
+    // Get the current team from teamManager to ensure we have fresh data
+    private var currentTeam: Team {
+        teamManager.teams.first(where: { $0.id == team.id }) ?? team
+    }
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text(team.name)
+                Text(currentTeam.name)
                     .font(.headline)
                 
                 Spacer()
                 
-                // NEW: Show season indicator
+                // Show season indicator
                 if let seasonId = selectedSeasonId,
-                   let season = team.seasons.first(where: { $0.id == seasonId }) {
+                   let season = currentTeam.seasons.first(where: { $0.id == seasonId }) {
                     HStack(spacing: 4) {
                         Image(systemName: season.type.icon)
                             .font(.caption)
@@ -1035,7 +1057,7 @@ struct PlayerStatsTeamSection: View {
             }
             .padding(.horizontal)
             
-            if team.players.isEmpty {
+            if currentTeam.players.isEmpty {
                 Text("No players in this team")
                     .foregroundColor(.secondary)
                     .padding()
@@ -1045,19 +1067,20 @@ struct PlayerStatsTeamSection: View {
                     .padding(.horizontal)
             } else {
                 LazyVStack(spacing: 8) {
-                    ForEach(team.players.sorted { $0.jerseyNumber < $1.jerseyNumber }, id: \.id) { player in
-                        // NEW: Calculate season-specific stats if filtering
-                        let displayStats = calculateDisplayStats(for: player)
+                    ForEach(currentTeam.players.sorted { $0.jerseyNumber < $1.jerseyNumber }, id: \.id) { player in
+                        // Get fresh player data from currentTeam
+                        let freshPlayer = currentTeam.players.first(where: { $0.id == player.id }) ?? player
+                        let displayStats = calculateDisplayStats(for: freshPlayer)
                         
                         PlayerStatsCard(
-                            player: player,
-                            displayStats: displayStats,  // NEW parameter
-                            isEditMode: isEditMode,
-                            isSeasonFiltered: selectedSeasonId != nil,  // NEW parameter
+                            player: freshPlayer,
+                            displayStats: displayStats,
+                            isEditMode: isEditMode,  // Always pass edit mode - editing is allowed for both views now
+                            isSeasonFiltered: false,  // No longer used to disable editing
                             onStatChange: { statType, newValue in
-                                updatePlayerStat(player: player, statType: statType, newValue: newValue, team: team)
+                                updatePlayerStat(player: freshPlayer, statType: statType, newValue: newValue, team: currentTeam)
                             },
-                            team: team
+                            team: currentTeam
                         )
                         .padding(.horizontal)
                         .background(Color(.systemBackground))
@@ -1069,19 +1092,24 @@ struct PlayerStatsTeamSection: View {
         }
     }
     
-    // NEW: Calculate stats for display (either all-time or season-specific)
+    // Calculate stats for display (either all-time or season-specific)
     private func calculateDisplayStats(for player: Player) -> PlayerStats {
-        // If no season filter, return existing seasonStats (includes manual adjustments)
+        // If no season filter, return overall stats
+        // Overall = all game events + all season manual adjustments + overall manual adjustments
         guard let seasonId = selectedSeasonId else {
-            return player.seasonStats
+            return calculateOverallStats(for: player)
         }
         
-        // Calculate stats from games in this season only
+        // Season-specific view: game events for that season + season manual adjustments
+        return calculateSeasonStats(for: player, seasonId: seasonId)
+    }
+    
+    // Calculate overall (all-time) stats
+    private func calculateOverallStats(for player: Player) -> PlayerStats {
         var stats = PlayerStats()
-        let seasonGames = team.games.filter { $0.seasonId == seasonId }
         
-        for game in seasonGames {
-            // Count from game events
+        // Count from ALL game events
+        for game in currentTeam.games {
             for event in game.gameEvents where event.playerId == player.id {
                 switch event.eventType {
                 case .goal:
@@ -1112,13 +1140,83 @@ struct PlayerStatsTeamSection: View {
             }
         }
         
+        // Add ALL season manual adjustments (sum across all seasons)
+        stats.goals += player.seasonStats.getTotalSeasonAdjustments("goals")
+        stats.assists += player.seasonStats.getTotalSeasonAdjustments("assists")
+        stats.shots += player.seasonStats.getTotalSeasonAdjustments("shots")
+        stats.saves += player.seasonStats.getTotalSeasonAdjustments("saves")
+        stats.goalsConceded += player.seasonStats.getTotalSeasonAdjustments("goalsConceded")
+        stats.yellowCards += player.seasonStats.getTotalSeasonAdjustments("yellowCards")
+        stats.redCards += player.seasonStats.getTotalSeasonAdjustments("redCards")
+        stats.gamesPlayed += player.seasonStats.getTotalSeasonAdjustments("gamesPlayed")
+        stats.minutesPlayed += player.seasonStats.getTotalSeasonAdjustments("minutesPlayed")
+        
+        // Add overall manual adjustments
+        stats.goals += player.seasonStats.getManualAdjustment("goals")
+        stats.assists += player.seasonStats.getManualAdjustment("assists")
+        stats.shots += player.seasonStats.getManualAdjustment("shots")
+        stats.saves += player.seasonStats.getManualAdjustment("saves")
+        stats.goalsConceded += player.seasonStats.getManualAdjustment("goalsConceded")
+        stats.yellowCards += player.seasonStats.getManualAdjustment("yellowCards")
+        stats.redCards += player.seasonStats.getManualAdjustment("redCards")
+        stats.gamesPlayed += player.seasonStats.getManualAdjustment("gamesPlayed")
+        stats.minutesPlayed += player.seasonStats.getManualAdjustment("minutesPlayed")
+        
+        return stats
+    }
+    
+    // Calculate season-specific stats
+    private func calculateSeasonStats(for player: Player, seasonId: UUID) -> PlayerStats {
+        var stats = PlayerStats()
+        let seasonGames = currentTeam.games.filter { $0.seasonId == seasonId }
+        
+        // Count from game events in this season only
+        for game in seasonGames {
+            for event in game.gameEvents where event.playerId == player.id {
+                switch event.eventType {
+                case .goal:
+                    stats.goals += 1
+                case .assist:
+                    stats.assists += 1
+                case .shot, .shotOnTarget:
+                    stats.shots += 1
+                case .save:
+                    stats.saves += 1
+                case .goalAgainst:
+                    stats.goalsConceded += 1
+                case .yellowCard:
+                    stats.yellowCards += 1
+                case .redCard:
+                    stats.redCards += 1
+                default:
+                    break
+                }
+            }
+            
+            // Count games played and minutes
+            if let playerGameStats = game.playerStats.first(where: { $0.playerId == player.id }) {
+                if game.isCompleted {
+                    stats.gamesPlayed += 1
+                }
+                stats.minutesPlayed += playerGameStats.minutesPlayed
+            }
+        }
+        
+        // Add season-specific manual adjustments
+        stats.goals += player.seasonStats.getSeasonManualAdjustment("goals", forSeason: seasonId)
+        stats.assists += player.seasonStats.getSeasonManualAdjustment("assists", forSeason: seasonId)
+        stats.shots += player.seasonStats.getSeasonManualAdjustment("shots", forSeason: seasonId)
+        stats.saves += player.seasonStats.getSeasonManualAdjustment("saves", forSeason: seasonId)
+        stats.goalsConceded += player.seasonStats.getSeasonManualAdjustment("goalsConceded", forSeason: seasonId)
+        stats.yellowCards += player.seasonStats.getSeasonManualAdjustment("yellowCards", forSeason: seasonId)
+        stats.redCards += player.seasonStats.getSeasonManualAdjustment("redCards", forSeason: seasonId)
+        stats.gamesPlayed += player.seasonStats.getSeasonManualAdjustment("gamesPlayed", forSeason: seasonId)
+        stats.minutesPlayed += player.seasonStats.getSeasonManualAdjustment("minutesPlayed", forSeason: seasonId)
+        
         return stats
     }
     
     private func updatePlayerStat(player: Player, statType: String, newValue: Int, team: Team) {
-        // Only allow updates when not filtering by season
-        guard selectedSeasonId == nil else { return }
-        
         // Find the team and player indices
         guard let teamIndex = teamManager.teams.firstIndex(where: { $0.id == team.id }),
               let playerIndex = teamManager.teams[teamIndex].players.firstIndex(where: { $0.id == player.id }) else {
@@ -1129,54 +1227,76 @@ struct PlayerStatsTeamSection: View {
         // Create a mutable copy of the player
         var updatedPlayer = teamManager.teams[teamIndex].players[playerIndex]
         
-        // Calculate current value from game events
-        let gameEventValue = calculateGameEventValue(for: player, statType: statType, team: team)
-        
-        // Calculate the adjustment needed
-        let adjustment = newValue - gameEventValue
-        
-        // Store the adjustment
-        updatedPlayer.seasonStats.setManualAdjustment(statType, adjustment: adjustment)
-        
-        // CRITICAL FIX: Immediately update the actual stat value to reflect the new total
-        switch statType {
-        case "goals":
-            updatedPlayer.seasonStats.goals = newValue
-        case "assists":
-            updatedPlayer.seasonStats.assists = newValue
-        case "shots":
-            updatedPlayer.seasonStats.shots = newValue
-        case "saves":
-            updatedPlayer.seasonStats.saves = newValue
-        case "goalsConceded":
-            updatedPlayer.seasonStats.goalsConceded = newValue
-        case "yellowCards":
-            updatedPlayer.seasonStats.yellowCards = newValue
-        case "redCards":
-            updatedPlayer.seasonStats.redCards = newValue
-        case "gamesPlayed":
-            updatedPlayer.seasonStats.gamesPlayed = newValue
-        case "minutesPlayed":
-            updatedPlayer.seasonStats.minutesPlayed = newValue
-        case "shotOnTarget":
-            updatedPlayer.seasonStats.shotOnTarget = newValue
-        default:
-            break
+        if let seasonId = selectedSeasonId {
+            // SEASON-SPECIFIC UPDATE
+            let gameEventValue = calculateGameEventValueForSeason(for: player, statType: statType, team: team, seasonId: seasonId)
+            let adjustment = newValue - gameEventValue
+            
+            updatedPlayer.seasonStats.setSeasonManualAdjustment(statType, adjustment: adjustment, forSeason: seasonId)
+            
+            print("✅ Set SEASON adjustment for \(statType) for \(player.name) in season: gameEvents=\(gameEventValue) + adjustment=\(adjustment) = \(newValue)")
+        } else {
+            // OVERALL UPDATE
+            // Calculate what the value would be from game events + all season adjustments
+            let gameEventValue = calculateGameEventValueOverall(for: player, statType: statType, team: team)
+            let seasonAdjustments = updatedPlayer.seasonStats.getTotalSeasonAdjustments(statType)
+            let baseValue = gameEventValue + seasonAdjustments
+            
+            // The overall adjustment is what's needed to get from baseValue to newValue
+            let adjustment = newValue - baseValue
+            
+            updatedPlayer.seasonStats.setManualAdjustment(statType, adjustment: adjustment)
+            
+            print("✅ Set OVERALL adjustment for \(statType) for \(player.name): base=\(baseValue) + adjustment=\(adjustment) = \(newValue)")
         }
         
-        print("✅ Set adjustment for \(statType) for \(player.name): gameEvents=\(gameEventValue) + adjustment=\(adjustment) = \(newValue)")
-        
-        // Use the TeamManager's updatePlayer method which handles saves efficiently
+        // Use the TeamManager's updatePlayer method
         teamManager.updatePlayer(in: team, player: updatedPlayer)
-        
-        // Force UI refresh
-        DispatchQueue.main.async {
-            self.teamManager.objectWillChange.send()
-        }
     }
     
-    // Helper to calculate stat value from game events only
-    private func calculateGameEventValue(for player: Player, statType: String, team: Team) -> Int {
+    // Helper to calculate stat value from game events for a specific season
+    private func calculateGameEventValueForSeason(for player: Player, statType: String, team: Team, seasonId: UUID) -> Int {
+        var count = 0
+        let seasonGames = team.games.filter { $0.seasonId == seasonId }
+        
+        for game in seasonGames {
+            for event in game.gameEvents where event.playerId == player.id {
+                switch (statType, event.eventType) {
+                case ("goals", .goal):
+                    count += 1
+                case ("assists", .assist):
+                    count += 1
+                case ("shots", .shot), ("shots", .shotOnTarget):
+                    count += 1
+                case ("saves", .save):
+                    count += 1
+                case ("goalsConceded", .goalAgainst):
+                    count += 1
+                case ("yellowCards", .yellowCard):
+                    count += 1
+                case ("redCards", .redCard):
+                    count += 1
+                default:
+                    break
+                }
+            }
+            
+            if statType == "gamesPlayed" {
+                if game.isCompleted && game.playerStats.contains(where: { $0.playerId == player.id }) {
+                    count += 1
+                }
+            } else if statType == "minutesPlayed" {
+                if let playerGameStats = game.playerStats.first(where: { $0.playerId == player.id }) {
+                    count += playerGameStats.minutesPlayed
+                }
+            }
+        }
+        
+        return count
+    }
+    
+    // Helper to calculate stat value from ALL game events (for overall view)
+    private func calculateGameEventValueOverall(for player: Player, statType: String, team: Team) -> Int {
         var count = 0
         
         for game in team.games {
@@ -1201,7 +1321,6 @@ struct PlayerStatsTeamSection: View {
                 }
             }
             
-            // Handle gamesPlayed and minutesPlayed
             if statType == "gamesPlayed" {
                 if game.isCompleted && game.playerStats.contains(where: { $0.playerId == player.id }) {
                     count += 1
@@ -1216,7 +1335,6 @@ struct PlayerStatsTeamSection: View {
         return count
     }
 }
-
 struct StatsStatItem: View {
     let value: Int
     let label: String
