@@ -3337,38 +3337,40 @@ struct VideoPlayerChip: View {
     let hasBall: Bool
     
     var body: some View {
-        VStack(spacing: 2) {
+        VStack(spacing: 3) {
             ZStack {
                 Circle()
                     .fill(color)
-                    .frame(width: 36, height: 36)
+                    .frame(width: 48, height: 48)
+                    .shadow(color: .black.opacity(0.3), radius: 3, x: 0, y: 2)
                 
                 Text("\(jerseyNumber)")
-                    .font(.system(size: 14, weight: .bold))
+                    .font(.system(size: 20, weight: .bold))
                     .foregroundColor(.white)
                 
                 if hasBall {
                     Circle()
                         .fill(Color.white)
-                        .frame(width: 16, height: 16)
+                        .frame(width: 20, height: 20)
                         .overlay(
                             Image(systemName: "soccerball")
-                                .font(.system(size: 10))
+                                .font(.system(size: 14))
                                 .foregroundColor(.black)
                         )
-                        .offset(x: 16, y: 16)
+                        .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
+                        .offset(x: 20, y: 20)
                 }
             }
             
             // Player name
             Text(name.components(separatedBy: " ").first ?? "")
-                .font(.system(size: 7, weight: .medium))
+                .font(.system(size: 10, weight: .semibold))
                 .foregroundColor(.white)
                 .lineLimit(1)
-                .padding(.horizontal, 3)
-                .padding(.vertical, 1)
-                .background(Color.black.opacity(0.6))
-                .cornerRadius(3)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color.black.opacity(0.7))
+                .cornerRadius(4)
         }
         .position(position)
     }
@@ -3383,14 +3385,15 @@ struct VideoOpponentChip: View {
         ZStack {
             Circle()
                 .fill(color.opacity(0.9))
-                .frame(width: 32, height: 32)
+                .frame(width: 44, height: 44)
+                .shadow(color: .black.opacity(0.3), radius: 3, x: 0, y: 2)
             
             Circle()
-                .stroke(Color.white.opacity(0.5), lineWidth: 1.5)
-                .frame(width: 32, height: 32)
+                .stroke(Color.white.opacity(0.5), lineWidth: 2)
+                .frame(width: 44, height: 44)
             
             Text("\(number)")
-                .font(.system(size: 12, weight: .bold))
+                .font(.system(size: 18, weight: .bold))
                 .foregroundColor(.white)
         }
         .position(position)
@@ -3404,11 +3407,11 @@ struct VideoBallChip: View {
         ZStack {
             Circle()
                 .fill(Color.white)
-                .frame(width: 20, height: 20)
-                .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
+                .frame(width: 26, height: 26)
+                .shadow(color: .black.opacity(0.4), radius: 3, x: 0, y: 2)
             
             Image(systemName: "soccerball")
-                .font(.system(size: 14))
+                .font(.system(size: 18))
                 .foregroundColor(.black)
         }
         .position(position)

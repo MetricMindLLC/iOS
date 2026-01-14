@@ -1813,11 +1813,52 @@ var teamsICreated: [Team] {
             return
         }
         
+        print("🎯 TeamManager.updatePractice() called")
+        print("   Team: \(team.name) (ID: \(team.id))")
+        print("   Practice ID: \(practice.id)")
+        
         if let teamIndex = teams.firstIndex(where: { $0.id == team.id }) {
+            print("   ✅ Found team at index \(teamIndex)")
+            
             if let practiceIndex = teams[teamIndex].practices.firstIndex(where: { $0.id == practice.id }) {
+                print("   ✅ Found practice at index \(practiceIndex)")
+                print("   📝 Updating local practice data...")
+                
                 teams[teamIndex].practices[practiceIndex] = practice
-                updateTeam(teams[teamIndex])
+                teams[teamIndex].updateActivityTimestamp()
+                
+                print("   💾 Saving locally...")
+                debouncedSave()
+                
+                // Handle Firebase save efficiently based on subcollection support
+                if teams[teamIndex].useSubcollections && isOnline {
+                    // For subcollection teams, save only the updated practice
+                    Task {
+                        do {
+                            guard await ensureAuthentication() else { return }
+                            print("   🎯 Saving ONLY this practice to subcollection")
+                            try await firebaseManager.savePracticeToSubcollection(practice, in: teams[teamIndex])
+                            print("   ✅ Updated single practice in subcollection")
+                        } catch {
+                            await MainActor.run {
+                                self.setError("Failed to update practice: \(error.localizedDescription)")
+                                // Add to pending changes as fallback
+                                self.addToPendingChanges("update_practice_\(practice.id.uuidString)", action: "update_practice", teamId: team.id.uuidString)
+                            }
+                        }
+                    }
+                } else {
+                    // For non-subcollection teams or offline, use full team update
+                    print("   📦 Using full team save (non-subcollection team or offline)")
+                    updateTeam(teams[teamIndex])
+                }
+                
+                print("   ✅ updatePractice() completed")
+            } else {
+                print("   ❌ Practice not found in team.practices array!")
             }
+        } else {
+            print("   ❌ Team not found in teams array!")
         }
     }
     

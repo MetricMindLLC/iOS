@@ -806,14 +806,443 @@ struct DrillListRow: View {
     }
 }
 
-// Add EditPracticeView as a placeholder if you don't have it
 struct EditPracticeView: View {
     @Binding var practice: Practice
     @Binding var team: Team
     @EnvironmentObject var teamManager: TeamManager
+    @Environment(\.presentationMode) var presentationMode
+    
+    // MARK: - State
+    @State private var practiceDate: Date
+    @State private var selectedHour: Int
+    @State private var selectedMinute: Int
+    @State private var selectedPeriod: Int
+    @State private var duration: Int
+    @State private var location: String
+    @State private var notes: String
+    @State private var weather: String
+    @State private var selectedDrills: [DrillWithCustomTime]
+    @State private var showingLocationPicker = false
+    @State private var selectedMapItem: MKMapItem?
+    @State private var showingDrillPicker = false
+    @State private var searchText = ""
+    @State private var selectedCategory = "All"
+    
+    let weatherOptions = ["Clear", "Cloudy", "Rainy", "Windy", "Hot", "Cold", "Indoor"]
+    let durationOptions = [30, 45, 60, 75, 90, 105, 120]
+    let hours = Array(1...12)
+    let minutes = [0, 15, 30, 45]
+    let periods = ["AM", "PM"]
+    
+    init(practice: Binding<Practice>, team: Binding<Team>) {
+        self._practice = practice
+        self._team = team
+        
+        // Initialize state from practice
+        let calendar = Calendar.current
+        let hour = calendar.component(.hour, from: practice.wrappedValue.date)
+        let minute = calendar.component(.minute, from: practice.wrappedValue.date)
+        
+        self._practiceDate = State(initialValue: practice.wrappedValue.date)
+        self._selectedHour = State(initialValue: hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour))
+        self._selectedMinute = State(initialValue: (minute / 15) * 15) // Round to nearest 15
+        self._selectedPeriod = State(initialValue: hour >= 12 ? 1 : 0)
+        self._duration = State(initialValue: practice.wrappedValue.duration)
+        self._location = State(initialValue: practice.wrappedValue.location ?? "")
+        self._notes = State(initialValue: practice.wrappedValue.notes ?? "")
+        self._weather = State(initialValue: practice.wrappedValue.weather ?? "Clear")
+        self._selectedDrills = State(initialValue: practice.wrappedValue.drills.map {
+            DrillWithCustomTime(drill: $0, customDuration: $0.duration)
+        })
+    }
+    
+    var totalDrillDuration: Int {
+        selectedDrills.reduce(0) { $0 + $1.customDuration }
+    }
+    
+    var finalPracticeDateTime: Date {
+        var components = Calendar.current.dateComponents([.year, .month, .day], from: practiceDate)
+        let hour24 = selectedPeriod == 0 ? (selectedHour == 12 ? 0 : selectedHour) : (selectedHour == 12 ? 12 : selectedHour + 12)
+        components.hour = hour24
+        components.minute = selectedMinute
+        return Calendar.current.date(from: components) ?? practiceDate
+    }
+    
+    var filteredDrills: [Drill] {
+        let allDrills = DrillLibrary.shared.getAllDrills()
+        let categoryFiltered = selectedCategory == "All" ?
+            allDrills :
+            allDrills.filter { $0.category == selectedCategory }
+        
+        if searchText.isEmpty {
+            return categoryFiltered
+        } else {
+            return categoryFiltered.filter {
+                $0.name.localizedCaseInsensitiveContains(searchText) ||
+                $0.description.localizedCaseInsensitiveContains(searchText)
+            }
+        }
+    }
+    
+    var categories: [String] {
+        ["All"] + DrillLibrary.shared.allCategories
+    }
     
     var body: some View {
-        Text("Edit Practice View")
+        NavigationView {
+            Form {
+                // MARK: - Date & Time Section
+                Section("Date & Time") {
+                    DatePicker("Date", selection: $practiceDate, displayedComponents: .date)
+                    
+                    HStack {
+                        Text("Time")
+                        Spacer()
+                        HStack(spacing: 4) {
+                            Picker("", selection: $selectedHour) {
+                                ForEach(hours, id: \.self) { hour in
+                                    Text("\(hour)").tag(hour)
+                                }
+                            }
+                            .pickerStyle(MenuPickerStyle())
+                            .labelsHidden()
+                            .frame(width: 50)
+                            
+                            Text(":")
+                            
+                            Picker("", selection: $selectedMinute) {
+                                ForEach(minutes, id: \.self) { minute in
+                                    Text(String(format: "%02d", minute)).tag(minute)
+                                }
+                            }
+                            .pickerStyle(MenuPickerStyle())
+                            .labelsHidden()
+                            .frame(width: 55)
+                            
+                            Picker("", selection: $selectedPeriod) {
+                                ForEach(Array(periods.enumerated()), id: \.offset) { index, period in
+                                    Text(period).tag(index)
+                                }
+                            }
+                            .pickerStyle(MenuPickerStyle())
+                            .labelsHidden()
+                            .frame(width: 55)
+                        }
+                    }
+                    
+                    Picker("Duration", selection: $duration) {
+                        ForEach(durationOptions, id: \.self) { minutes in
+                            Text("\(minutes) minutes").tag(minutes)
+                        }
+                    }
+                }
+                
+                // MARK: - Location & Weather Section
+                Section("Location & Weather") {
+                    HStack {
+                        Text("Location")
+                        Spacer()
+                        Button(action: { showingLocationPicker = true }) {
+                            Text(location.isEmpty ? "Add Location" : location)
+                                .foregroundColor(location.isEmpty ? .blue : .primary)
+                                .lineLimit(1)
+                        }
+                    }
+                    
+                    Picker("Weather", selection: $weather) {
+                        ForEach(weatherOptions, id: \.self) { option in
+                            HStack {
+                                Image(systemName: weatherIcon(for: option))
+                                Text(option)
+                            }
+                            .tag(option)
+                        }
+                    }
+                }
+                
+                // MARK: - Drills Section
+                Section {
+                    HStack {
+                        Text("Practice Plan")
+                            .font(.headline)
+                        Spacer()
+                        Text("\(totalDrillDuration) / \(duration) min")
+                            .font(.subheadline)
+                            .foregroundColor(totalDrillDuration <= duration ? .green : .orange)
+                    }
+                    
+                    if selectedDrills.isEmpty {
+                        Text("No drills added")
+                            .foregroundColor(.secondary)
+                    } else {
+                        ForEach(Array(selectedDrills.enumerated()), id: \.element.id) { index, drillWithTime in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(drillWithTime.drill.name)
+                                        .font(.subheadline)
+                                        .fontWeight(.medium)
+                                    Text("\(drillWithTime.customDuration) min • \(drillWithTime.drill.category)")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                                
+                                Spacer()
+                                
+                                // Duration stepper
+                                HStack(spacing: 8) {
+                                    Button(action: {
+                                        if selectedDrills[index].customDuration > 5 {
+                                            selectedDrills[index].customDuration -= 5
+                                        }
+                                    }) {
+                                        Image(systemName: "minus.circle")
+                                            .foregroundColor(.blue)
+                                    }
+                                    .buttonStyle(BorderlessButtonStyle())
+                                    
+                                    Text("\(drillWithTime.customDuration)")
+                                        .frame(width: 30)
+                                        .font(.subheadline)
+                                    
+                                    Button(action: {
+                                        selectedDrills[index].customDuration += 5
+                                    }) {
+                                        Image(systemName: "plus.circle")
+                                            .foregroundColor(.blue)
+                                    }
+                                    .buttonStyle(BorderlessButtonStyle())
+                                }
+                            }
+                        }
+                        .onDelete { indexSet in
+                            selectedDrills.remove(atOffsets: indexSet)
+                        }
+                        .onMove { from, to in
+                            selectedDrills.move(fromOffsets: from, toOffset: to)
+                        }
+                    }
+                    
+                    Button(action: { showingDrillPicker = true }) {
+                        HStack {
+                            Image(systemName: "plus.circle.fill")
+                            Text("Add Drills")
+                        }
+                    }
+                } header: {
+                    Text("Drills")
+                }
+                
+                // MARK: - Notes Section
+                Section("Notes") {
+                    TextEditor(text: $notes)
+                        .frame(minHeight: 80)
+                }
+            }
+            .navigationTitle("Edit Practice")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                }
+                
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Save") {
+                        savePractice()
+                    }
+                    .fontWeight(.semibold)
+                }
+                
+                ToolbarItem(placement: .keyboard) {
+                    HStack {
+                        Spacer()
+                        Button("Done") {
+                            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                        }
+                    }
+                }
+            }
+            .sheet(isPresented: $showingLocationPicker) {
+                LocationPickerView(selectedMapItem: $selectedMapItem)
+                    .onDisappear {
+                        if let mapItem = selectedMapItem {
+                            location = mapItem.name ?? ""
+                        }
+                    }
+            }
+            .sheet(isPresented: $showingDrillPicker) {
+                EditPracticeDrillPicker(
+                    selectedDrills: $selectedDrills,
+                    searchText: $searchText,
+                    selectedCategory: $selectedCategory
+                )
+            }
+        }
+    }
+    
+    private func savePractice() {
+        // FIXED: Create a local copy first (just like EditGameView does)
+        var updatedPractice = practice
+        
+        // Update the local copy (not the binding)
+        updatedPractice.date = finalPracticeDateTime
+        updatedPractice.duration = duration
+        updatedPractice.location = location.isEmpty ? nil : location
+        updatedPractice.notes = notes.isEmpty ? nil : notes
+        updatedPractice.weather = weather
+        updatedPractice.drills = selectedDrills.map { drillWithTime in
+            var drill = drillWithTime.drill
+            drill.duration = drillWithTime.customDuration
+            return drill
+        }
+        
+        // Use TeamManager's updatePractice method with the LOCAL COPY
+        teamManager.updatePractice(in: team, practice: updatedPractice)
+        
+        presentationMode.wrappedValue.dismiss()
+    }
+    
+    private func weatherIcon(for weather: String) -> String {
+        switch weather {
+        case "Clear": return "sun.max.fill"
+        case "Cloudy": return "cloud.fill"
+        case "Rainy": return "cloud.rain.fill"
+        case "Windy": return "wind"
+        case "Hot": return "thermometer.sun.fill"
+        case "Cold": return "thermometer.snowflake"
+        case "Indoor": return "house.fill"
+        default: return "questionmark.circle"
+        }
+    }
+}
+
+// MARK: - Drill Picker View
+struct EditPracticeDrillPicker: View {
+    @Binding var selectedDrills: [DrillWithCustomTime]
+    @Binding var searchText: String
+    @Binding var selectedCategory: String
+    @Environment(\.presentationMode) var presentationMode
+    
+    var filteredDrills: [Drill] {
+        let allDrills = DrillLibrary.shared.getAllDrills()
+        let categoryFiltered = selectedCategory == "All" ?
+            allDrills :
+            allDrills.filter { $0.category == selectedCategory }
+        
+        if searchText.isEmpty {
+            return categoryFiltered
+        } else {
+            return categoryFiltered.filter {
+                $0.name.localizedCaseInsensitiveContains(searchText) ||
+                $0.description.localizedCaseInsensitiveContains(searchText)
+            }
+        }
+    }
+    
+    var categories: [String] {
+        ["All"] + DrillLibrary.shared.allCategories
+    }
+    
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 0) {
+                // Search bar
+                HStack {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundColor(.secondary)
+                    TextField("Search drills...", text: $searchText)
+                }
+                .padding(10)
+                .background(Color(.systemGray6))
+                .cornerRadius(10)
+                .padding()
+                
+                // Category filter
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(categories, id: \.self) { category in
+                            Button(action: { selectedCategory = category }) {
+                                Text(category)
+                                    .font(.subheadline)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(selectedCategory == category ? Color.blue : Color(.systemGray5))
+                                    .foregroundColor(selectedCategory == category ? .white : .primary)
+                                    .cornerRadius(16)
+                            }
+                        }
+                    }
+                    .padding(.horizontal)
+                }
+                .padding(.bottom, 8)
+                
+                // Drill list
+                List {
+                    ForEach(filteredDrills) { drill in
+                        Button(action: {
+                            addDrill(drill)
+                        }) {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(drill.name)
+                                        .font(.subheadline)
+                                        .fontWeight(.medium)
+                                        .foregroundColor(.primary)
+                                    
+                                    HStack {
+                                        Text("\(drill.duration) min")
+                                        Text("•")
+                                        Text(drill.category)
+                                        Text("•")
+                                        Text(drill.difficulty)
+                                            .foregroundColor(difficultyColor(drill.difficulty))
+                                    }
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                }
+                                
+                                Spacer()
+                                
+                                if selectedDrills.contains(where: { $0.drill.id == drill.id }) {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundColor(.green)
+                                } else {
+                                    Image(systemName: "plus.circle")
+                                        .foregroundColor(.blue)
+                                }
+                            }
+                        }
+                    }
+                }
+                .listStyle(PlainListStyle())
+            }
+            .navigationTitle("Add Drills")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                    .fontWeight(.semibold)
+                }
+            }
+        }
+    }
+    
+    private func addDrill(_ drill: Drill) {
+        if !selectedDrills.contains(where: { $0.drill.id == drill.id }) {
+            selectedDrills.append(DrillWithCustomTime(drill: drill, customDuration: drill.duration))
+        }
+    }
+    
+    private func difficultyColor(_ difficulty: String) -> Color {
+        switch difficulty {
+        case "Easy": return .green
+        case "Medium": return .orange
+        case "Hard": return .red
+        default: return .gray
+        }
     }
 }
 // MARK: - Drill Detail View
@@ -1573,315 +2002,251 @@ struct LocationPickerView: View {
         }
     }
     
-    // MARK: - Practice Detail View (UPDATED with Share Functionality)
-    struct PracticeDetailView: View {
-        @Binding var practice: Practice
-        @Binding var team: Team
-        @EnvironmentObject var teamManager: TeamManager
-        @State private var showingEditPractice = false
-        @State private var showingShareSheet = false
-        @State private var shareImage: UIImage?
-        @State private var showingDeleteAlert = false
-        @State private var showingOptionsMenu = false
-        @Environment(\.presentationMode) var presentationMode
-        
-        var attendanceCount: Int {
-            practice.attendance.values.filter { $0 }.count
+struct PracticeDetailView: View {
+    @Binding var practice: Practice
+    @Binding var team: Team
+    @EnvironmentObject var teamManager: TeamManager
+    @State private var showingEditPractice = false
+    @State private var showingShareSheet = false
+    @State private var shareImage: UIImage?
+    @State private var showingDeleteAlert = false
+    @State private var showingOptionsMenu = false
+    @Environment(\.presentationMode) var presentationMode
+    
+    // CRITICAL FIX: Get fresh practice data from TeamManager
+    private var currentPractice: Practice {
+        if let freshTeam = teamManager.teams.first(where: { $0.id == team.id }),
+           let freshPractice = freshTeam.practices.first(where: { $0.id == practice.id }) {
+            return freshPractice
         }
-        
-        var body: some View {
-            VStack(spacing: 0) {
-                // Custom Header with Ellipsis Menu
-                VStack(spacing: 16) {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Practice Details")
-                                .font(.largeTitle)
-                                .bold()
-                            Text(practice.date.formatted(date: .abbreviated, time: .shortened))
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                        }
-                        
-                        Spacer()
-                        
-                        // Ellipsis Menu Button
-                        Button(action: {
-                            showingOptionsMenu = true
-                        }) {
-                            Image(systemName: "ellipsis.circle")
-                                .font(.title2)
-                                .foregroundColor(.blue)
-                        }
+        return practice
+    }
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Custom Header with Ellipsis Menu
+            VStack(spacing: 16) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Practice Details")
+                            .font(.largeTitle)
+                            .bold()
+                        Text(currentPractice.date.formatted(date: .abbreviated, time: .shortened))
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    Spacer()
+                    
+                    // Ellipsis Menu Button
+                    Button(action: {
+                        showingOptionsMenu = true
+                    }) {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.title2)
+                            .foregroundColor(.blue)
                     }
                 }
-                .padding()
-                .background(Color(.systemBackground))
-                
-                // Content
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 20) {
-                        
-                        // Header Info
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                Image(systemName: "clock")
-                                    .foregroundColor(.orange)
-                                Text("\(practice.duration) minutes")
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                        .padding()
-                        
-                        // Location and Weather
-                        if practice.location != nil || practice.weather != nil {
-                            VStack(alignment: .leading, spacing: 12) {
-                                if let location = practice.location {
-                                    HStack {
-                                        Image(systemName: "location.fill")
-                                            .foregroundColor(.red)
-                                            .frame(width: 30)
-                                        Text(location)
-                                            .font(.subheadline)
-                                    }
-                                }
-                                
-                                if let weather = practice.weather {
-                                    HStack {
-                                        Image(systemName: weatherIcon(for: weather))
-                                            .foregroundColor(.blue)
-                                            .frame(width: 30)
-                                        Text(weather)
-                                            .font(.subheadline)
-                                    }
-                                }
-                            }
-                            .padding()
-                            .background(Color(.systemBackground))
-                            .cornerRadius(12)
-                            .padding(.horizontal)
-                        }
-                        
-                        // Practice Plan
-                        VStack(alignment: .leading, spacing: 12) {
-                            HStack {
-                                Text("Practice Plan")
-                                    .font(.headline)
-                                Spacer()
-                                Text("\(practice.drills.count) drills")
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                            }
-                            .padding(.horizontal)
-                            
-                            if practice.drills.isEmpty {
-                                Text("No drills added yet")
-                                    .foregroundColor(.secondary)
-                                    .padding()
-                                    .frame(maxWidth: .infinity)
-                                    .background(Color(.systemBackground))
-                                    .cornerRadius(10)
-                                    .padding(.horizontal)
-                            } else {
-                                ForEach(Array(practice.drills.enumerated()), id: \.element.id) { index, drill in
-                                    PracticeDrillRow(drill: drill, index: index + 1)
-                                        .padding(.horizontal)
-                                }
-                            }
-                        }
-                        
-                        // Attendance
-                        VStack(alignment: .leading, spacing: 12) {
-                            HStack {
-                                Text("Attendance")
-                                    .font(.headline)
-                                Spacer()
-                                Text("\(attendanceCount) / \(team.players.count)")
-                                    .font(.subheadline)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 4)
-                                    .background(Color.green.opacity(0.2))
-                                    .cornerRadius(8)
-                            }
-                            .padding(.horizontal)
-                            
-                            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                                ForEach(team.players.sorted(by: { $0.jerseyNumber < $1.jerseyNumber })) { player in
-                                    if let attended = practice.attendance[player.id] {
-                                        HStack {
-                                            Image(systemName: attended ? "checkmark.circle.fill" : "xmark.circle.fill")
-                                                .foregroundColor(attended ? .green : .red)
-                                            Text(player.name)
-                                                .font(.caption)
-                                                .lineLimit(1)
-                                            Spacer()
-                                        }
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 8)
-                                        .background(Color(.systemBackground))
-                                        .cornerRadius(8)
-                                    }
-                                }
-                            }
-                            .padding(.horizontal)
-                        }
-                        
-                        // Notes
-                        if let notes = practice.notes, !notes.isEmpty {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Notes")
-                                    .font(.headline)
-                                    .padding(.horizontal)
-                                
-                                Text(notes)
-                                    .font(.subheadline)
-                                    .padding()
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(Color(.systemBackground))
-                                    .cornerRadius(10)
-                                    .padding(.horizontal)
-                            }
-                        }
-                    }
-                    .padding(.vertical)
-                }
-                .background(Color(.systemGroupedBackground))
             }
-            .navigationBarHidden(true)
-            .actionSheet(isPresented: $showingOptionsMenu) {
-                ActionSheet(
-                    title: Text("Practice Options"),
-                    buttons: [
-                        .default(Text("Edit Practice")) {
-                            showingEditPractice = true
-                        },
-                        .default(Text("Share Practice Report")) {
-                            sharePracticeReport()
-                        },
-                        .destructive(Text("Delete Practice")) {
-                            showingDeleteAlert = true
-                        },
-                        .cancel()
-                    ]
-                )
-            }
-            .sheet(isPresented: $showingEditPractice) {
-                EditPracticeView(practice: $practice, team: $team)
-                    .environmentObject(teamManager)
-            }
-            .sheet(isPresented: $showingShareSheet) {
-                if let image = shareImage {
-                    ShareSheet(activityItems: [image])
-                }
-            }
-            .alert("Delete Practice", isPresented: $showingDeleteAlert) {
-                Button("Cancel", role: .cancel) { }
-                Button("Delete", role: .destructive) {
-                    deletePractice()
-                }
-            } message: {
-                Text("Are you sure you want to permanently delete this practice session? This action cannot be undone.")
-            }
-        }
-        
-        private func deletePractice() {
-            print("🗑️ Attempting to delete practice with ID: \(practice.id)")
+            .padding()
+            .background(Color(.systemBackground))
             
-            // Use TeamManager method instead of direct binding manipulation
-            teamManager.deletePractice(from: team, practiceId: practice.id)
-            
-            // Wrap dismiss in async dispatch
-            DispatchQueue.main.async {
-                presentationMode.wrappedValue.dismiss()
-            }
-        }
-        
-        private func weatherIcon(for weather: String) -> String {
-            switch weather.lowercased() {
-            case "clear", "sunny": return "sun.max.fill"
-            case "cloudy", "overcast": return "cloud.fill"
-            case "rainy", "rain": return "cloud.rain.fill"
-            case "windy": return "wind"
-            case "hot": return "thermometer.sun.fill"
-            case "cold": return "thermometer.snowflake"
-            case "indoor": return "house.fill"
-            default: return "cloud.sun.fill"
-            }
-        }
-        
-        // MARK: - Share Practice Report
-        private func sharePracticeReport() {
-            let fullContentView = VStack(spacing: 0) {
-                VStack(spacing: 16) {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Practice Session")
-                                .font(.title2)
-                                .bold()
-                            
-                            Text(practice.date.formatted(.dateTime.weekday(.wide).month(.wide).day()))
+            // Content
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    
+                    // Header Info
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Image(systemName: "clock")
+                                .foregroundColor(.orange)
+                            Text("\(currentPractice.duration) minutes")
                                 .font(.subheadline)
-                                .foregroundColor(.secondary)
-                            
-                            Text("Practice Report")
-                                .font(.headline)
-                                .foregroundColor(.blue)
-                        }
-                        
-                        Spacer()
-                        
-                        VStack(alignment: .trailing, spacing: 4) {
-                            Text("\(practice.duration) min")
-                                .font(.title2)
-                                .bold()
-                            Text("Duration")
-                                .font(.caption)
                                 .foregroundColor(.secondary)
                         }
                     }
                     .padding()
-                    .background(Color(.systemBackground))
+                    
+                    // Location and Weather
+                    if currentPractice.location != nil || currentPractice.weather != nil {
+                        VStack(alignment: .leading, spacing: 12) {
+                            if let location = currentPractice.location {
+                                HStack {
+                                    Image(systemName: "location.fill")
+                                        .foregroundColor(.red)
+                                        .frame(width: 30)
+                                    Text(location)
+                                        .font(.subheadline)
+                                }
+                            }
+                            
+                            if let weather = currentPractice.weather {
+                                HStack {
+                                    Image(systemName: weatherIcon(for: weather))
+                                        .foregroundColor(.blue)
+                                        .frame(width: 30)
+                                    Text(weather)
+                                        .font(.subheadline)
+                                }
+                            }
+                        }
+                        .padding()
+                        .background(Color(.systemBackground))
+                        .cornerRadius(12)
+                        .padding(.horizontal)
+                    }
+                    
+                    // Practice Plan
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Text("Practice Plan")
+                                .font(.headline)
+                            Spacer()
+                            Text("\(currentPractice.drills.count) drills")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.horizontal)
+                        
+                        if currentPractice.drills.isEmpty {
+                            Text("No drills added yet")
+                                .foregroundColor(.secondary)
+                                .padding()
+                                .frame(maxWidth: .infinity)
+                                .background(Color(.systemBackground))
+                                .cornerRadius(10)
+                                .padding(.horizontal)
+                        } else {
+                            ForEach(Array(currentPractice.drills.enumerated()), id: \.element.id) { index, drill in
+                                PracticeDrillRow(drill: drill, index: index + 1)
+                                    .padding(.horizontal)
+                            }
+                        }
+                    }
+                    
+                    // Notes
+                    if let notes = currentPractice.notes, !notes.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Notes")
+                                .font(.headline)
+                                .padding(.horizontal)
+                            
+                            Text(notes)
+                                .font(.subheadline)
+                                .padding()
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color(.systemBackground))
+                                .cornerRadius(10)
+                                .padding(.horizontal)
+                        }
+                    }
+                    
+                    // Bottom padding
+                    Color.clear.frame(height: 40)
                 }
-                
-                FullCapturePracticeContent(practice: practice, team: team)
+                .padding(.vertical)
             }
-                .background(Color(.systemGroupedBackground))
-            
-            let hostingController = UIHostingController(rootView: fullContentView)
-            hostingController.view.backgroundColor = UIColor.systemGroupedBackground
-            
-            let screenWidth = UIScreen.main.bounds.width
-            let maxHeight: CGFloat = 10000
-            
-            let targetSize = CGSize(width: screenWidth, height: maxHeight)
-            hostingController.view.frame = CGRect(origin: .zero, size: targetSize)
-            
-            hostingController.view.setNeedsLayout()
-            hostingController.view.layoutIfNeeded()
-            
-            let fittingSize = hostingController.view.systemLayoutSizeFitting(
-                CGSize(width: screenWidth, height: UIView.layoutFittingCompressedSize.height),
-                withHorizontalFittingPriority: .required,
-                verticalFittingPriority: .fittingSizeLevel
+            .background(Color(.systemGroupedBackground))
+        }
+        .navigationBarHidden(true)
+        .actionSheet(isPresented: $showingOptionsMenu) {
+            ActionSheet(
+                title: Text("Practice Options"),
+                buttons: [
+                    .default(Text("Edit Practice")) {
+                        showingEditPractice = true
+                    },
+                    .default(Text("Share Practice Report")) {
+                        sharePracticeReport()
+                    },
+                    .destructive(Text("Delete Practice")) {
+                        showingDeleteAlert = true
+                    },
+                    .cancel()
+                ]
             )
-            
-            let finalSize = CGSize(width: screenWidth, height: max(fittingSize.height + 100, 400))
-            
-            hostingController.view.frame = CGRect(origin: .zero, size: finalSize)
-            hostingController.view.setNeedsLayout()
-            hostingController.view.layoutIfNeeded()
-            
-            let renderer = UIGraphicsImageRenderer(size: finalSize)
-            let image = renderer.image { context in
-                hostingController.view.drawHierarchy(in: CGRect(origin: .zero, size: finalSize), afterScreenUpdates: true)
+        }
+        .sheet(isPresented: $showingEditPractice) {
+            // CRITICAL FIX: Create binding that reads from TeamManager
+            let practiceBinding = Binding<Practice>(
+                get: { currentPractice },
+                set: { _ in } // Setter not needed - EditPracticeView uses teamManager.updatePractice
+            )
+            EditPracticeView(practice: practiceBinding, team: $team)
+                .environmentObject(teamManager)
+        }
+        .sheet(isPresented: $showingShareSheet) {
+            if let image = shareImage {
+                ShareSheet(activityItems: [image])
             }
-            
-            shareImage = image
-            showingShareSheet = true
+        }
+        .alert("Delete Practice", isPresented: $showingDeleteAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) {
+                deletePractice()
+            }
+        } message: {
+            Text("Are you sure you want to permanently delete this practice session? This action cannot be undone.")
         }
     }
     
+    private func deletePractice() {
+        print("🗑️ Attempting to delete practice with ID: \(practice.id)")
+        
+        // Use TeamManager method instead of direct binding manipulation
+        teamManager.deletePractice(from: team, practiceId: practice.id)
+        
+        // Wrap dismiss in async dispatch
+        DispatchQueue.main.async {
+            presentationMode.wrappedValue.dismiss()
+        }
+    }
+    
+    private func weatherIcon(for weather: String) -> String {
+        switch weather {
+        case "Clear": return "sun.max.fill"
+        case "Cloudy": return "cloud.fill"
+        case "Rainy": return "cloud.rain.fill"
+        case "Windy": return "wind"
+        case "Hot": return "thermometer.sun.fill"
+        case "Cold": return "thermometer.snowflake"
+        case "Indoor": return "house.fill"
+        default: return "questionmark.circle"
+        }
+    }
+    
+    private func sharePracticeReport() {
+        let drillsList = currentPractice.drills.enumerated().map { index, drill in
+            "\(index + 1). \(drill.name) (\(drill.duration) min)"
+        }.joined(separator: "\n")
+        
+        let reportText = """
+        📋 PRACTICE PLAN
+        
+        📅 \(currentPractice.date.formatted(date: .abbreviated, time: .shortened))
+        ⏱️ Duration: \(currentPractice.duration) minutes
+        \(currentPractice.location.map { "📍 Location: \($0)" } ?? "")
+        \(currentPractice.weather.map { "🌤️ Weather: \($0)" } ?? "")
+        
+        📝 DRILLS:
+        \(drillsList.isEmpty ? "No drills planned" : drillsList)
+        
+        \(currentPractice.notes.map { "📌 Notes:\n\($0)" } ?? "")
+        
+        —
+        Created with Coach Caddie
+        """
+        
+        shareImage = nil
+        let activityVC = UIActivityViewController(activityItems: [reportText], applicationActivities: nil)
+        
+        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let window = windowScene.windows.first,
+           let rootVC = window.rootViewController {
+            rootVC.present(activityVC, animated: true)
+        }
+    }
+}
     // MARK: - Full Capture Practice Content (Non-scrollable version for sharing)
     struct FullCapturePracticeContent: View {
         let practice: Practice

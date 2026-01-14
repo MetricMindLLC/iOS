@@ -899,6 +899,10 @@ struct SimplePlayerRowView: View {
     }
 }
 
+enum GameSectionType {
+    case inProgress, upcoming, completed
+}
+
 struct TeamGamesTab: View {
     @Binding var team: Team
     @Binding var showingNewGame: Bool
@@ -915,35 +919,94 @@ struct TeamGamesTab: View {
         teamManager.teams.first(where: { $0.id == team.id }) ?? team
     }
     
+    // MARK: - Computed Properties
+    private var upcomingGames: [Game] {
+        currentTeam.games
+            .filter { $0.result == nil && $0.date >= Calendar.current.startOfDay(for: Date()) }
+            .sorted { $0.date < $1.date }
+    }
+    
+    private var completedGames: [Game] {
+        currentTeam.games
+            .filter { $0.result != nil }
+            .sorted { $0.date > $1.date }
+    }
+    
+    private var inProgressGames: [Game] {
+        currentTeam.games.filter { game in
+            game.result == nil && game.date < Date() && Calendar.current.isDateInToday(game.date)
+        }
+    }
+    
+    private var record: (wins: Int, losses: Int, draws: Int) {
+        let completed = completedGames
+        let wins = completed.filter { ($0.result?.goalsFor ?? 0) > ($0.result?.goalsAgainst ?? 0) }.count
+        let losses = completed.filter { ($0.result?.goalsFor ?? 0) < ($0.result?.goalsAgainst ?? 0) }.count
+        let draws = completed.filter { ($0.result?.goalsFor ?? 0) == ($0.result?.goalsAgainst ?? 0) }.count
+        return (wins, losses, draws)
+    }
+    
+    private var goalsFor: Int {
+        completedGames.reduce(0) { $0 + ($1.result?.goalsFor ?? 0) }
+    }
+    
+    private var goalsAgainst: Int {
+        completedGames.reduce(0) { $0 + ($1.result?.goalsAgainst ?? 0) }
+    }
+    
+    private var recentForm: [Game] {
+        Array(completedGames.prefix(5))
+    }
+    
     var body: some View {
         VStack {
             if currentTeam.games.isEmpty {
                 TeamEmptyGamesView(showingNewGame: $showingNewGame)
             } else {
-                List {
-                    ForEach(currentTeam.games.sorted(by: { $0.date < $1.date })) { game in
-                        Button(action: {
-                            selectedGame = game
-                            showingGameDetail = true
-                        }) {
-                            TeamGameRowView(game: game)
+                ScrollView {
+                    VStack(spacing: 20) {
+                        // Stats Summary Header
+                        gameStatsHeader
+                            .padding(.horizontal)
+                            .padding(.top, 16)
+                        
+                        // In Progress Games (if any)
+                        if !inProgressGames.isEmpty {
+                            gameSection(
+                                title: "In Progress",
+                                icon: "sportscourt.fill",
+                                iconColor: .red,
+                                games: inProgressGames,
+                                sectionType: .inProgress
+                            )
                         }
-                        .buttonStyle(PlainButtonStyle())
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
-                        .padding(.horizontal)
-                        .padding(.vertical, 4)
-                    }
-                    
-                    // Add bottom padding to prevent tab bar overlap
-                    if !currentTeam.games.isEmpty {
-                        Color.clear
-                            .frame(height: 120)
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
+                        
+                        // Upcoming Games Section
+                        if !upcomingGames.isEmpty {
+                            gameSection(
+                                title: "Upcoming",
+                                icon: "calendar.badge.clock",
+                                iconColor: .blue,
+                                games: upcomingGames,
+                                sectionType: .upcoming
+                            )
+                        }
+                        
+                        // Completed Games Section
+                        if !completedGames.isEmpty {
+                            gameSection(
+                                title: "Completed",
+                                icon: "checkmark.circle.fill",
+                                iconColor: .green,
+                                games: completedGames,
+                                sectionType: .completed
+                            )
+                        }
+                        
+                        // Bottom padding for tab bar
+                        Color.clear.frame(height: 100)
                     }
                 }
-                .listStyle(PlainListStyle())
                 .background(Color(.systemGroupedBackground))
             }
         }
@@ -974,10 +1037,394 @@ struct TeamGamesTab: View {
         }
     }
     
+    // MARK: - Stats Header
+    private var gameStatsHeader: some View {
+        VStack(spacing: 16) {
+            // Record Row
+            HStack(spacing: 0) {
+                // Wins
+                VStack(spacing: 4) {
+                    Text("\(record.wins)")
+                        .font(.system(size: 28, weight: .bold))
+                        .foregroundColor(.green)
+                    Text("Wins")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                
+                // Draws
+                VStack(spacing: 4) {
+                    Text("\(record.draws)")
+                        .font(.system(size: 28, weight: .bold))
+                        .foregroundColor(.orange)
+                    Text("Draws")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                
+                // Losses
+                VStack(spacing: 4) {
+                    Text("\(record.losses)")
+                        .font(.system(size: 28, weight: .bold))
+                        .foregroundColor(.red)
+                    Text("Losses")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+            }
+            
+            Divider()
+            
+            // Goals and Form Row
+            HStack(spacing: 20) {
+                // Goals For/Against
+                HStack(spacing: 16) {
+                    VStack(spacing: 2) {
+                        Text("\(goalsFor)")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundColor(.primary)
+                        Text("GF")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    Text("-")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.secondary)
+                    
+                    VStack(spacing: 2) {
+                        Text("\(goalsAgainst)")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundColor(.primary)
+                        Text("GA")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(Color(.systemGray6))
+                .cornerRadius(10)
+                
+                Spacer()
+                
+                // Recent Form
+                if !recentForm.isEmpty {
+                    HStack(spacing: 4) {
+                        Text("Form:")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                        
+                        ForEach(recentForm.reversed(), id: \.id) { game in
+                            FormIndicator(game: game)
+                        }
+                    }
+                }
+            }
+        }
+        .padding()
+        .background(Color(.systemBackground))
+        .cornerRadius(16)
+        .shadow(color: .black.opacity(0.05), radius: 5, x: 0, y: 2)
+    }
+    
+    private func gameSection(title: String, icon: String, iconColor: Color, games: [Game], sectionType: GameSectionType) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Section Header
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .foregroundColor(iconColor)
+                    .font(.system(size: 16, weight: .semibold))
+                
+                Text(title)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(.primary)
+                
+                Text("(\(games.count))")
+                    .font(.system(size: 14))
+                    .foregroundColor(.secondary)
+                
+                Spacer()
+            }
+            .padding(.horizontal)
+            
+            // Game Cards
+            VStack(spacing: 12) {
+                ForEach(games) { game in
+                    Button(action: {
+                        selectedGame = game
+                        showingGameDetail = true
+                    }) {
+                        EnhancedGameCard(
+                            game: game,
+                            teamColor: team.primaryColor,
+                            sectionType: sectionType
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+            }
+            .padding(.horizontal)
+        }
+    }
+    
     private func checkPermissions() {
         Task {
             userRole = await teamManager.getCurrentUserRole(for: team)
         }
+    }
+}
+
+// MARK: - Form Indicator
+struct FormIndicator: View {
+    let game: Game
+    
+    private var result: String {
+        guard let r = game.result else { return "?" }
+        if r.goalsFor > r.goalsAgainst { return "W" }
+        if r.goalsFor < r.goalsAgainst { return "L" }
+        return "D"
+    }
+    
+    private var color: Color {
+        guard let r = game.result else { return .gray }
+        if r.goalsFor > r.goalsAgainst { return .green }
+        if r.goalsFor < r.goalsAgainst { return .red }
+        return .orange
+    }
+    
+    var body: some View {
+        Text(result)
+            .font(.system(size: 10, weight: .bold))
+            .foregroundColor(.white)
+            .frame(width: 20, height: 20)
+            .background(color)
+            .cornerRadius(4)
+    }
+}
+
+// MARK: - Enhanced Game Card
+struct EnhancedGameCard: View {
+    let game: Game
+    let teamColor: Color
+    let sectionType: GameSectionType
+    
+    private var isToday: Bool {
+        Calendar.current.isDateInToday(game.date)
+    }
+    
+    private var isTomorrow: Bool {
+        Calendar.current.isDateInTomorrow(game.date)
+    }
+    
+    private var dayString: String {
+        if isToday { return "Today" }
+        if isTomorrow { return "Tomorrow" }
+        return game.date.formatted(.dateTime.weekday(.abbreviated))
+    }
+    
+    private var resultColor: Color {
+        guard let result = game.result else { return .gray }
+        if result.goalsFor > result.goalsAgainst { return .green }
+        if result.goalsFor < result.goalsAgainst { return .red }
+        return .orange
+    }
+    
+    private var resultText: String {
+        guard let result = game.result else { return "" }
+        if result.goalsFor > result.goalsAgainst { return "Win" }
+        if result.goalsFor < result.goalsAgainst { return "Loss" }
+        return "Draw"
+    }
+    
+    var body: some View {
+        HStack(spacing: 14) {
+            // Date Column
+            VStack(spacing: 2) {
+                if isToday || isTomorrow {
+                    Text(dayString)
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(dateColumnForeground)
+                        .textCase(.uppercase)
+                } else {
+                    Text(game.date.formatted(.dateTime.weekday(.abbreviated)))
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(dateColumnForeground.opacity(0.8))
+                        .textCase(.uppercase)
+                }
+                
+                Text(game.date.formatted(.dateTime.day()))
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundColor(dateColumnForeground)
+                
+                Text(game.date.formatted(.dateTime.month(.abbreviated)))
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(dateColumnForeground.opacity(0.8))
+                    .textCase(.uppercase)
+            }
+            .frame(width: 56)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(dateColumnBackground)
+            )
+            
+            // Game Details
+            VStack(alignment: .leading, spacing: 8) {
+                // Opponent Row
+                HStack {
+                    Text("vs \(game.opponent)")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.primary)
+                        .lineLimit(1)
+                    
+                    Spacer()
+                    
+                    // Result or Time
+                    if let result = game.result {
+                        HStack(spacing: 4) {
+                            Text("\(result.goalsFor) - \(result.goalsAgainst)")
+                                .font(.system(size: 18, weight: .bold))
+                                .foregroundColor(resultColor)
+                        }
+                    } else if sectionType == .inProgress {
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(Color.red)
+                                .frame(width: 8, height: 8)
+                            Text("Live")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(.red)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.red.opacity(0.1))
+                        .cornerRadius(8)
+                    } else {
+                        Text(game.date.formatted(.dateTime.hour().minute()))
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.secondary)
+                    }
+                }
+                
+                // Info Row
+                HStack(spacing: 12) {
+                    // Home/Away Badge
+                    HStack(spacing: 4) {
+                        Image(systemName: game.isHome ? "house.fill" : "airplane")
+                            .font(.system(size: 10))
+                        Text(game.isHome ? "Home" : "Away")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundColor(game.isHome ? .green : .orange)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(game.isHome ? Color.green.opacity(0.1) : Color.orange.opacity(0.1))
+                    .cornerRadius(6)
+                    
+                    // Location
+                    if let location = game.location, !location.isEmpty {
+                        HStack(spacing: 4) {
+                            Image(systemName: "location.fill")
+                                .font(.system(size: 10))
+                            Text(location)
+                                .font(.system(size: 11))
+                                .lineLimit(1)
+                        }
+                        .foregroundColor(.secondary)
+                    }
+                    
+                    Spacer()
+                    
+                    // Result Badge for completed games
+                    if game.result != nil {
+                        Text(resultText)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(resultColor)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(resultColor.opacity(0.1))
+                            .cornerRadius(6)
+                    }
+                }
+            }
+            
+            // Chevron
+            Image(systemName: "chevron.right")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(.secondary)
+        }
+        .padding(12)
+        .background(Color(.systemBackground))
+        .cornerRadius(16)
+        .shadow(color: .black.opacity(shadowOpacity), radius: shadowRadius, x: 0, y: 2)
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(borderColor, lineWidth: borderWidth)
+        )
+    }
+    
+    // MARK: - Styling Helpers
+    private var dateColumnBackground: Color {
+        switch sectionType {
+        case .inProgress:
+            return .red
+        case .upcoming:
+            return isToday ? .green : teamColor
+        case .completed:
+            return Color(.systemGray5)
+        }
+    }
+    
+    private var dateColumnForeground: Color {
+        switch sectionType {
+        case .inProgress, .upcoming:
+            return .white
+        case .completed:
+            return .primary
+        }
+    }
+    
+    private var shadowOpacity: Double {
+        switch sectionType {
+        case .inProgress:
+            return 0.15
+        case .upcoming:
+            return 0.1
+        case .completed:
+            return 0.03
+        }
+    }
+    
+    private var shadowRadius: CGFloat {
+        switch sectionType {
+        case .inProgress:
+            return 10
+        case .upcoming:
+            return 8
+        case .completed:
+            return 4
+        }
+    }
+    
+    private var borderColor: Color {
+        if sectionType == .inProgress {
+            return Color.red.opacity(0.5)
+        }
+        if isToday && sectionType == .upcoming {
+            return Color.green.opacity(0.5)
+        }
+        return .clear
+    }
+    
+    private var borderWidth: CGFloat {
+        if sectionType == .inProgress || (isToday && sectionType == .upcoming) {
+            return 2
+        }
+        return 0
     }
 }
 
@@ -990,35 +1437,76 @@ struct TeamPracticesTab: View {
     @State private var selectedPractice: Practice?
     @State private var showingPracticeDetail = false
     
+    private var upcomingPractices: [Practice] {
+        team.practices.filter { $0.date > Date() }.sorted { $0.date < $1.date }
+    }
+    
+    private var pastPractices: [Practice] {
+        team.practices.filter { $0.date <= Date() }.sorted { $0.date > $1.date }
+    }
+    
+    private var thisMonthPracticeCount: Int {
+        let calendar = Calendar.current
+        let now = Date()
+        return team.practices.filter {
+            calendar.isDate($0.date, equalTo: now, toGranularity: .month)
+        }.count
+    }
+    
+    private var totalDrillsThisMonth: Int {
+        let calendar = Calendar.current
+        let now = Date()
+        return team.practices
+            .filter { calendar.isDate($0.date, equalTo: now, toGranularity: .month) }
+            .reduce(0) { $0 + $1.drills.count }
+    }
+    
+    private var totalMinutesThisMonth: Int {
+        let calendar = Calendar.current
+        let now = Date()
+        return team.practices
+            .filter { calendar.isDate($0.date, equalTo: now, toGranularity: .month) }
+            .reduce(0) { $0 + $1.duration }
+    }
+    
     var body: some View {
-        VStack {
+        VStack(spacing: 0) {
             if team.practices.isEmpty {
                 EmptyPracticesView(showingNewPractice: $showingNewPractice)
             } else {
-                List {
-                    ForEach(team.practices.sorted(by: { $0.date > $1.date })) { practice in
-                        Button(action: {
-                            selectedPractice = practice
-                            showingPracticeDetail = true
-                        }) {
-                            PracticeRowView(practice: practice)
+                ScrollView {
+                    VStack(spacing: 20) {
+                        // Stats Summary Header
+                        practiceStatsHeader
+                            .padding(.horizontal)
+                            .padding(.top, 16)
+                        
+                        // Upcoming Practices Section
+                        if !upcomingPractices.isEmpty {
+                            practiceSection(
+                                title: "Upcoming",
+                                icon: "calendar.badge.clock",
+                                iconColor: .green,
+                                practices: upcomingPractices,
+                                isUpcoming: true
+                            )
                         }
-                        .buttonStyle(PlainButtonStyle())
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
-                        .padding(.horizontal)
-                        .padding(.vertical, 4)
-                    }
-                    
-                    // Add bottom padding to prevent tab bar overlap
-                    if !team.practices.isEmpty {
-                        Color.clear
-                            .frame(height: 120)
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
+                        
+                        // Past Practices Section
+                        if !pastPractices.isEmpty {
+                            practiceSection(
+                                title: "Past Practices",
+                                icon: "clock.arrow.circlepath",
+                                iconColor: .secondary,
+                                practices: pastPractices,
+                                isUpcoming: false
+                            )
+                        }
+                        
+                        // Bottom padding for tab bar
+                        Color.clear.frame(height: 100)
                     }
                 }
-                .listStyle(PlainListStyle())
                 .background(Color(.systemGroupedBackground))
             }
         }
@@ -1041,22 +1529,298 @@ struct TeamPracticesTab: View {
         }
     }
     
-    private func bindingForPractice(_ practice: Practice) -> Binding<Practice> {
-        return Binding<Practice>(
-            get: {
-                team.practices.first(where: { $0.id == practice.id }) ?? practice
-            },
-            set: { newPractice in
-                if let index = team.practices.firstIndex(where: { $0.id == practice.id }) {
-                    team.practices[index] = newPractice
+    // MARK: - Stats Header
+    private var practiceStatsHeader: some View {
+        VStack(spacing: 12) {
+            HStack {
+                Text(Date().formatted(.dateTime.month(.wide).year()))
+                    .font(.headline)
+                    .foregroundColor(.primary)
+                Spacer()
+            }
+            
+            HStack(spacing: 12) {
+                StatCard(
+                    icon: "figure.run",
+                    value: "\(thisMonthPracticeCount)",
+                    label: "Practices",
+                    color: .blue
+                )
+                
+                StatCard(
+                    icon: "list.bullet.clipboard",
+                    value: "\(totalDrillsThisMonth)",
+                    label: "Drills",
+                    color: .orange
+                )
+                
+                StatCard(
+                    icon: "clock.fill",
+                    value: "\(totalMinutesThisMonth)",
+                    label: "Minutes",
+                    color: .green
+                )
+            }
+        }
+        .padding()
+        .background(Color(.systemBackground))
+        .cornerRadius(16)
+        .shadow(color: .black.opacity(0.05), radius: 5, x: 0, y: 2)
+    }
+    
+    // MARK: - Practice Section
+    private func practiceSection(title: String, icon: String, iconColor: Color, practices: [Practice], isUpcoming: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Section Header
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .foregroundColor(iconColor)
+                    .font(.system(size: 16, weight: .semibold))
+                
+                Text(title)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(.primary)
+                
+                Text("(\(practices.count))")
+                    .font(.system(size: 14))
+                    .foregroundColor(.secondary)
+                
+                Spacer()
+            }
+            .padding(.horizontal)
+            
+            // Practice Cards
+            VStack(spacing: 12) {
+                ForEach(practices) { practice in
+                    Button(action: {
+                        selectedPractice = practice
+                        showingPracticeDetail = true
+                    }) {
+                        EnhancedPracticeCard(practice: practice, isUpcoming: isUpcoming, teamColor: team.primaryColor)
+                    }
+                    .buttonStyle(PlainButtonStyle())
                 }
             }
-        )
+            .padding(.horizontal)
+        }
     }
     
     private func checkPermissions() {
         Task {
             userRole = await teamManager.getCurrentUserRole(for: team)
+        }
+    }
+}
+
+// MARK: - Stat Card
+struct StatCard: View {
+    let icon: String
+    let value: String
+    let label: String
+    let color: Color
+    
+    var body: some View {
+        VStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 20))
+                .foregroundColor(color)
+            
+            Text(value)
+                .font(.system(size: 20, weight: .bold))
+                .foregroundColor(.primary)
+            
+            Text(label)
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
+        .background(color.opacity(0.1))
+        .cornerRadius(12)
+    }
+}
+
+// MARK: - Enhanced Practice Card
+struct EnhancedPracticeCard: View {
+    let practice: Practice
+    let isUpcoming: Bool
+    let teamColor: Color
+    
+    private var isToday: Bool {
+        Calendar.current.isDateInToday(practice.date)
+    }
+    
+    private var isTomorrow: Bool {
+        Calendar.current.isDateInTomorrow(practice.date)
+    }
+    
+    private var dayString: String {
+        if isToday { return "Today" }
+        if isTomorrow { return "Tomorrow" }
+        return practice.date.formatted(.dateTime.weekday(.abbreviated))
+    }
+    
+    var body: some View {
+        HStack(spacing: 14) {
+            // Date Column
+            VStack(spacing: 2) {
+                if isToday || isTomorrow {
+                    Text(dayString)
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(isUpcoming ? .white : .secondary)
+                        .textCase(.uppercase)
+                } else {
+                    Text(practice.date.formatted(.dateTime.weekday(.abbreviated)))
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(isUpcoming ? .white.opacity(0.8) : .secondary)
+                        .textCase(.uppercase)
+                }
+                
+                Text(practice.date.formatted(.dateTime.day()))
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundColor(isUpcoming ? .white : .primary)
+                
+                Text(practice.date.formatted(.dateTime.month(.abbreviated)))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(isUpcoming ? .white.opacity(0.8) : .secondary)
+                    .textCase(.uppercase)
+            }
+            .frame(width: 56)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(isUpcoming ? (isToday ? Color.green : teamColor) : Color(.systemGray5))
+            )
+            
+            // Practice Details
+            VStack(alignment: .leading, spacing: 8) {
+                // Time Row
+                HStack(spacing: 6) {
+                    Image(systemName: "clock.fill")
+                        .font(.system(size: 12))
+                        .foregroundColor(.orange)
+                    
+                    Text(practice.date.formatted(.dateTime.hour().minute()))
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.primary)
+                    
+                    Text("•")
+                        .foregroundColor(.secondary)
+                    
+                    Text("\(practice.duration) min")
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
+                    
+                    Spacer()
+                    
+                    // Weather Icon
+                    if let weather = practice.weather {
+                        Image(systemName: weatherIcon(for: weather))
+                            .font(.system(size: 14))
+                            .foregroundColor(weatherColor(for: weather))
+                    }
+                }
+                
+                // Location Row
+                if let location = practice.location, !location.isEmpty {
+                    HStack(spacing: 6) {
+                        Image(systemName: "location.fill")
+                            .font(.system(size: 11))
+                            .foregroundColor(.red)
+                        
+                        Text(location)
+                            .font(.system(size: 13))
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                
+                // Drills Row
+                HStack(spacing: 8) {
+                    if practice.drills.isEmpty {
+                        HStack(spacing: 4) {
+                            Image(systemName: "exclamationmark.circle")
+                                .font(.system(size: 11))
+                            Text("No drills planned")
+                                .font(.system(size: 12))
+                        }
+                        .foregroundColor(.orange)
+                    } else {
+                        HStack(spacing: 4) {
+                            Image(systemName: "list.bullet.clipboard.fill")
+                                .font(.system(size: 11))
+                                .foregroundColor(.blue)
+                            
+                            Text("\(practice.drills.count) drill\(practice.drills.count == 1 ? "" : "s")")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(.blue)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.blue.opacity(0.1))
+                        .cornerRadius(6)
+                        
+                        // Show first 2 drill names as pills
+                        ForEach(practice.drills.prefix(2), id: \.id) { drill in
+                            Text(drill.name)
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(Color(.systemGray5))
+                                .cornerRadius(4)
+                        }
+                        
+                        if practice.drills.count > 2 {
+                            Text("+\(practice.drills.count - 2)")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    
+                    Spacer()
+                }
+            }
+            
+            // Chevron
+            Image(systemName: "chevron.right")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(.secondary)
+        }
+        .padding(12)
+        .background(Color(.systemBackground))
+        .cornerRadius(16)
+        .shadow(color: .black.opacity(isUpcoming ? 0.08 : 0.03), radius: isUpcoming ? 8 : 4, x: 0, y: 2)
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(isToday ? Color.green.opacity(0.5) : Color.clear, lineWidth: 2)
+        )
+    }
+    
+    private func weatherIcon(for weather: String) -> String {
+        switch weather {
+        case "Clear": return "sun.max.fill"
+        case "Cloudy": return "cloud.fill"
+        case "Rainy": return "cloud.rain.fill"
+        case "Windy": return "wind"
+        case "Hot": return "thermometer.sun.fill"
+        case "Cold": return "thermometer.snowflake"
+        case "Indoor": return "house.fill"
+        default: return "questionmark.circle"
+        }
+    }
+    
+    private func weatherColor(for weather: String) -> Color {
+        switch weather {
+        case "Clear": return .yellow
+        case "Cloudy": return .gray
+        case "Rainy": return .blue
+        case "Windy": return .cyan
+        case "Hot": return .red
+        case "Cold": return .blue
+        case "Indoor": return .purple
+        default: return .gray
         }
     }
 }
@@ -1196,52 +1960,6 @@ struct StatRowView: View {
 }
 
 
-struct TeamGameRowView: View {
-    let game: Game
-    
-    var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("vs \(game.opponent)")
-                    .font(.headline)
-                Text(game.date.formatted(.dateTime.weekday(.wide).month(.wide).day()))
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                Text(game.isHome ? "Home" : "Away")
-                    .font(.caption)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 2)
-                    .background(game.isHome ? Color(red: 0.13, green: 0.47, blue: 0.25).opacity(0.2) : Color.orange.opacity(0.2))
-                    .cornerRadius(4)
-            }
-            
-            Spacer()
-            
-            if let result = game.result {
-                VStack(alignment: .trailing) {
-                    Text("\(result.goalsFor) - \(result.goalsAgainst)")
-                        .font(.title2)
-                        .bold()
-                    Text(result.goalsFor > result.goalsAgainst ? "Win" : result.goalsFor < result.goalsAgainst ? "Loss" : "Draw")
-                        .font(.caption)
-                        .foregroundColor(result.goalsFor > result.goalsAgainst ? Color(red: 0.13, green: 0.47, blue: 0.25) : result.goalsFor < result.goalsAgainst ? .red : .orange)
-                }
-            } else {
-                Text("Scheduled")
-                    .font(.caption)
-                    .foregroundColor(Color(red: 0.05, green: 0.15, blue: 0.35))
-            }
-        }
-        .padding()
-        .background(Color(.systemBackground))
-        .cornerRadius(12)
-        .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 1)
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color(.systemGray4), lineWidth: 0.5)
-        )
-    }
-}
 
 struct PracticeRowView: View {
     let practice: Practice
