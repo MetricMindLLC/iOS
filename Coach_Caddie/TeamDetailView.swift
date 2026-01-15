@@ -1437,18 +1437,23 @@ struct TeamPracticesTab: View {
     @State private var selectedPractice: Practice?
     @State private var showingPracticeDetail = false
     
+    // Get fresh team data from teamManager
+    private var currentTeam: Team {
+        teamManager.teams.first(where: { $0.id == team.id }) ?? team
+    }
+    
     private var upcomingPractices: [Practice] {
-        team.practices.filter { $0.date > Date() }.sorted { $0.date < $1.date }
+        currentTeam.practices.filter { $0.date > Date() }.sorted { $0.date < $1.date }
     }
     
     private var pastPractices: [Practice] {
-        team.practices.filter { $0.date <= Date() }.sorted { $0.date > $1.date }
+        currentTeam.practices.filter { $0.date <= Date() }.sorted { $0.date > $1.date }
     }
     
     private var thisMonthPracticeCount: Int {
         let calendar = Calendar.current
         let now = Date()
-        return team.practices.filter {
+        return currentTeam.practices.filter {
             calendar.isDate($0.date, equalTo: now, toGranularity: .month)
         }.count
     }
@@ -1456,7 +1461,7 @@ struct TeamPracticesTab: View {
     private var totalDrillsThisMonth: Int {
         let calendar = Calendar.current
         let now = Date()
-        return team.practices
+        return currentTeam.practices
             .filter { calendar.isDate($0.date, equalTo: now, toGranularity: .month) }
             .reduce(0) { $0 + $1.drills.count }
     }
@@ -1464,14 +1469,14 @@ struct TeamPracticesTab: View {
     private var totalMinutesThisMonth: Int {
         let calendar = Calendar.current
         let now = Date()
-        return team.practices
+        return currentTeam.practices
             .filter { calendar.isDate($0.date, equalTo: now, toGranularity: .month) }
             .reduce(0) { $0 + $1.duration }
     }
     
     var body: some View {
         VStack(spacing: 0) {
-            if team.practices.isEmpty {
+            if currentTeam.practices.isEmpty {
                 EmptyPracticesView(showingNewPractice: $showingNewPractice)
             } else {
                 ScrollView {
@@ -1514,10 +1519,11 @@ struct TeamPracticesTab: View {
         .sheet(isPresented: $showingPracticeDetail) {
             if let selectedPractice = selectedPractice {
                 let practiceBinding = Binding<Practice>(
-                    get: { team.practices.first(where: { $0.id == selectedPractice.id }) ?? selectedPractice },
+                    get: { currentTeam.practices.first(where: { $0.id == selectedPractice.id }) ?? selectedPractice },
                     set: { newPractice in
-                        if let index = team.practices.firstIndex(where: { $0.id == selectedPractice.id }) {
-                            team.practices[index] = newPractice
+                        if let teamIndex = teamManager.teams.firstIndex(where: { $0.id == team.id }),
+                           let practiceIndex = teamManager.teams[teamIndex].practices.firstIndex(where: { $0.id == selectedPractice.id }) {
+                            teamManager.teams[teamIndex].practices[practiceIndex] = newPractice
                         }
                     }
                 )
@@ -1548,7 +1554,7 @@ struct TeamPracticesTab: View {
                 )
                 
                 StatCard(
-                    icon: "list.bullet.clipboard",
+                    icon: "cone.fill",
                     value: "\(totalDrillsThisMonth)",
                     label: "Drills",
                     color: .orange
@@ -1564,18 +1570,16 @@ struct TeamPracticesTab: View {
         }
         .padding()
         .background(Color(.systemBackground))
-        .cornerRadius(16)
-        .shadow(color: .black.opacity(0.05), radius: 5, x: 0, y: 2)
+        .cornerRadius(12)
+        .shadow(radius: 2)
     }
     
     // MARK: - Practice Section
     private func practiceSection(title: String, icon: String, iconColor: Color, practices: [Practice], isUpcoming: Bool) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Section Header
-            HStack(spacing: 8) {
+            HStack {
                 Image(systemName: icon)
                     .foregroundColor(iconColor)
-                    .font(.system(size: 16, weight: .semibold))
                 
                 Text(title)
                     .font(.system(size: 18, weight: .semibold))
@@ -1596,7 +1600,7 @@ struct TeamPracticesTab: View {
                         selectedPractice = practice
                         showingPracticeDetail = true
                     }) {
-                        EnhancedPracticeCard(practice: practice, isUpcoming: isUpcoming, teamColor: team.primaryColor)
+                        EnhancedPracticeCard(practice: practice, isUpcoming: isUpcoming, teamColor: currentTeam.primaryColor)
                     }
                     .buttonStyle(PlainButtonStyle())
                 }
@@ -1606,12 +1610,9 @@ struct TeamPracticesTab: View {
     }
     
     private func checkPermissions() {
-        Task {
-            userRole = await teamManager.getCurrentUserRole(for: team)
-        }
+        userRole = teamManager.getCurrentUserRole(for: currentTeam)
     }
 }
-
 // MARK: - Stat Card
 struct StatCard: View {
     let icon: String
@@ -1851,18 +1852,52 @@ struct QuickActionButton: View {
     }
 }
 
-// MARK: - Team Stats Summary (UPDATED TO COMBINE GAME DATA + MANUAL EDITS)
+// MARK: - Team Stats Summary (UPDATED TO CALCULATE DYNAMICALLY)
 struct TeamStatsSummary: View {
     let team: Team
     
-    // Calculate total goals: sum of all player seasonStats (which includes manual edits)
+    // Calculate total goals dynamically: game events + season adjustments + overall adjustments
     var totalGoals: Int {
-        return team.players.reduce(0) { $0 + $1.seasonStats.goals }
+        var total = 0
+        
+        for player in team.players {
+            // Count from all game events
+            for game in team.games {
+                for event in game.gameEvents where event.playerId == player.id && event.eventType == .goal {
+                    total += 1
+                }
+            }
+            
+            // Add all season manual adjustments
+            total += player.seasonStats.getTotalSeasonAdjustments("goals")
+            
+            // Add overall manual adjustments
+            total += player.seasonStats.getManualAdjustment("goals")
+        }
+        
+        return total
     }
     
-    // Calculate total assists: sum of all player seasonStats (which includes manual edits)
+    // Calculate total assists dynamically
     var totalAssists: Int {
-        return team.players.reduce(0) { $0 + $1.seasonStats.assists }
+        var total = 0
+        
+        for player in team.players {
+            // Count from all game events
+            for game in team.games {
+                for event in game.gameEvents where event.playerId == player.id && event.eventType == .assist {
+                    total += 1
+                }
+            }
+            
+            // Add all season manual adjustments
+            total += player.seasonStats.getTotalSeasonAdjustments("assists")
+            
+            // Add overall manual adjustments
+            total += player.seasonStats.getManualAdjustment("assists")
+        }
+        
+        return total
     }
     
     var gamesWon: Int {
@@ -1886,14 +1921,34 @@ struct TeamStatsSummary: View {
         }.count
     }
     
-    // Calculate top scorer from player seasonStats (which includes manual edits)
-    var topScorer: Player? {
-        return team.players.max(by: { $0.seasonStats.goals < $1.seasonStats.goals })
-    }
-    
-    // Get the actual goal count for the top scorer from their seasonStats
-    var topScorerGoals: Int {
-        return topScorer?.seasonStats.goals ?? 0
+    // Calculate top scorer dynamically
+    var topScorer: (player: Player, goals: Int)? {
+        var playerGoals: [(Player, Int)] = []
+        
+        for player in team.players {
+            var goals = 0
+            
+            // Count from all game events
+            for game in team.games {
+                for event in game.gameEvents where event.playerId == player.id && event.eventType == .goal {
+                    goals += 1
+                }
+            }
+            
+            // Add all season manual adjustments
+            goals += player.seasonStats.getTotalSeasonAdjustments("goals")
+            
+            // Add overall manual adjustments
+            goals += player.seasonStats.getManualAdjustment("goals")
+            
+            playerGoals.append((player, goals))
+        }
+        
+        guard let top = playerGoals.max(by: { $0.1 < $1.1 }), top.1 > 0 else {
+            return nil
+        }
+        
+        return (top.0, top.1)
     }
     
     var body: some View {
@@ -1917,9 +1972,9 @@ struct TeamStatsSummary: View {
                 
                 StatRowView(icon: "xmark.circle.fill", title: "Losses", value: "\(gamesLost)")
                 
-                if let topScorer = topScorer, topScorerGoals > 0 {
+                if let topScorer = topScorer {
                     Divider().padding(.horizontal)
-                    StatRowView(icon: "crown.fill", title: "Top Scorer", value: "\(topScorer.name) (\(topScorerGoals))")
+                    StatRowView(icon: "crown.fill", title: "Top Scorer", value: "\(topScorer.player.name) (\(topScorer.goals))")
                 }
             }
             .background(Color(.systemBackground))

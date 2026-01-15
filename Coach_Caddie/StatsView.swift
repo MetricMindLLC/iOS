@@ -277,7 +277,6 @@ struct EnhancedQuickStatsView: View {
                         trend: overallStats.winPercentage < 0 ? nil : overallStats.winTrend
                     )
                     
-                    // NEW: Goals For tile
                     MetricCard(
                         title: "Goals For",
                         value: "\(overallStats.goalsFor)",
@@ -286,7 +285,6 @@ struct EnhancedQuickStatsView: View {
                         trend: nil
                     )
                     
-                    // NEW: Goals Against tile
                     MetricCard(
                         title: "Goals Against",
                         value: "\(overallStats.goalsAgainst)",
@@ -297,12 +295,13 @@ struct EnhancedQuickStatsView: View {
                 }
             }
             
-            // Only show goals chart if permitted
-            if visibilitySettings.showGoalsChart && !overallStats.recentGames.isEmpty {
-                TotalGoalsChartView(teams: filteredTeams)
+            // Top Performers section
+            if visibilitySettings.showTopPerformers {
+                TopPerformersSection(
+                    teams: filteredTeams,
+                    selectedSeasonId: selectedSeasonId
+                )
             }
-            
-            // REMOVED: Top Performers section
             
             // Only show team comparison if permitted
             if visibilitySettings.showTeamComparison && filteredTeams.count > 1 {
@@ -822,6 +821,192 @@ struct PlayerStatsCard: View {
             .frame(maxWidth: 200)
         }
         .padding(.vertical, 8)
+    }
+}
+
+// MARK: - Top Performers Section
+struct TopPerformersSection: View {
+    let teams: [Team]
+    let selectedSeasonId: UUID?
+    
+    private var allPlayers: [Player] {
+        teams.flatMap { $0.players }
+    }
+    
+    private var topPerformers: [(player: Player, goals: Int, assists: Int, points: Int)] {
+        var playerStats: [(Player, Int, Int, Int)] = []
+        
+        for team in teams {
+            for player in team.players {
+                let stats = calculatePlayerStats(player: player, team: team)
+                playerStats.append((player, stats.goals, stats.assists, stats.goals + stats.assists))
+            }
+        }
+        
+        // Sort by points (goals + assists), then by goals as tiebreaker
+        return playerStats
+            .sorted {
+                if $0.3 != $1.3 {
+                    return $0.3 > $1.3
+                }
+                return $0.1 > $1.1
+            }
+            .prefix(5)
+            .map { ($0.0, $0.1, $0.2, $0.3) }
+    }
+    
+    private func calculatePlayerStats(player: Player, team: Team) -> (goals: Int, assists: Int) {
+        var goals = 0
+        var assists = 0
+        
+        if let seasonId = selectedSeasonId {
+            // Season-specific: game events for that season + season manual adjustments
+            let seasonGames = team.games.filter { $0.seasonId == seasonId }
+            
+            for game in seasonGames {
+                for event in game.gameEvents where event.playerId == player.id {
+                    if event.eventType == .goal {
+                        goals += 1
+                    } else if event.eventType == .assist {
+                        assists += 1
+                    }
+                }
+            }
+            
+            // Add season-specific manual adjustments
+            goals += player.seasonStats.getSeasonManualAdjustment("goals", forSeason: seasonId)
+            assists += player.seasonStats.getSeasonManualAdjustment("assists", forSeason: seasonId)
+        } else {
+            // All-time: all game events + all season adjustments + overall adjustments
+            for game in team.games {
+                for event in game.gameEvents where event.playerId == player.id {
+                    if event.eventType == .goal {
+                        goals += 1
+                    } else if event.eventType == .assist {
+                        assists += 1
+                    }
+                }
+            }
+            
+            // Add all season manual adjustments
+            goals += player.seasonStats.getTotalSeasonAdjustments("goals")
+            assists += player.seasonStats.getTotalSeasonAdjustments("assists")
+            
+            // Add overall manual adjustments
+            goals += player.seasonStats.getManualAdjustment("goals")
+            assists += player.seasonStats.getManualAdjustment("assists")
+        }
+        
+        return (goals, assists)
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Top Performers")
+                    .font(.headline)
+                
+                Spacer()
+                
+                Text("by Points (G+A)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            .padding(.horizontal)
+            
+            if topPerformers.isEmpty || topPerformers.first?.points == 0 {
+                Text("No stats recorded yet")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color(.systemBackground))
+                    .cornerRadius(12)
+                    .padding(.horizontal)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(topPerformers.enumerated()), id: \.element.player.id) { index, performer in
+                        HStack(spacing: 12) {
+                            // Rank
+                            ZStack {
+                                Circle()
+                                    .fill(rankColor(for: index))
+                                    .frame(width: 28, height: 28)
+                                
+                                Text("\(index + 1)")
+                                    .font(.caption)
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.white)
+                            }
+                            
+                            // Player info
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(performer.player.name)
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                
+                                Text("#\(performer.player.jerseyNumber) • \(performer.player.positions.first ?? "Player")")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            
+                            Spacer()
+                            
+                            // Stats
+                            HStack(spacing: 16) {
+                                VStack(spacing: 2) {
+                                    Text("\(performer.goals)")
+                                        .font(.subheadline)
+                                        .fontWeight(.semibold)
+                                    Text("G")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
+                                
+                                VStack(spacing: 2) {
+                                    Text("\(performer.assists)")
+                                        .font(.subheadline)
+                                        .fontWeight(.semibold)
+                                    Text("A")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
+                                
+                                VStack(spacing: 2) {
+                                    Text("\(performer.points)")
+                                        .font(.subheadline)
+                                        .fontWeight(.bold)
+                                        .foregroundColor(Color(red: 0.13, green: 0.47, blue: 0.25))
+                                    Text("Pts")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        
+                        if index < topPerformers.count - 1 {
+                            Divider()
+                                .padding(.horizontal)
+                        }
+                    }
+                }
+                .background(Color(.systemBackground))
+                .cornerRadius(12)
+                .shadow(radius: 2)
+                .padding(.horizontal)
+            }
+        }
+    }
+    
+    private func rankColor(for index: Int) -> Color {
+        switch index {
+        case 0: return Color(red: 0.85, green: 0.65, blue: 0.13) // Gold
+        case 1: return Color(red: 0.6, green: 0.6, blue: 0.65)   // Silver
+        case 2: return Color(red: 0.72, green: 0.45, blue: 0.2)  // Bronze
+        default: return Color(red: 0.05, green: 0.15, blue: 0.35) // Navy
+        }
     }
 }
 // MARK: - Stat Edit Sheet
