@@ -2003,13 +2003,24 @@ struct PositionSwapView: View {
     @Binding var game: Game
     let lineupPositions: [LineupPosition]
     let onPositionChangeAdded: () -> Void
+    let initialMinute: Int  // NEW
     
     @Environment(\.presentationMode) var presentationMode
-    @State private var selectedMinute: Int = 15
+    @State private var selectedMinute: Int
     @State private var playerA: Player?
     @State private var playerB: Player?
     @State private var playerAPosition: Position?
     @State private var playerBPosition: Position?
+    
+    // NEW: Custom init to set initial minute
+    init(team: Team, game: Binding<Game>, lineupPositions: [LineupPosition], onPositionChangeAdded: @escaping () -> Void, initialMinute: Int = 0) {
+        self.team = team
+        self._game = game
+        self.lineupPositions = lineupPositions
+        self.onPositionChangeAdded = onPositionChangeAdded
+        self.initialMinute = initialMinute
+        self._selectedMinute = State(initialValue: initialMinute)
+    }
     
     var playersOnFieldAtSelectedTime: [Player] {
         calculatePlayersOnField(atMinute: selectedMinute)
@@ -2249,26 +2260,29 @@ struct IndividualSubstitutionPlanner: View {
     @State private var shareImage: UIImage?
     @State private var showingPositionChange = false
     
-    // Group substitutions by minute ranges
     private var groupedSubstitutions: [(groupIndex: Int, groupName: String, substitutions: [PlannedSubstitution])] {
-        let sortedSubs = game.plannedSubstitutions.sorted { $0.plannedMinute < $1.plannedMinute }
+        // Group by stored subGroupIndex, not by time proximity
         var groups: [Int: [PlannedSubstitution]] = [:]
-        var currentGroupIndex = 1
-        var lastMinute = -1
         
-        for sub in sortedSubs {
-            if sub.plannedMinute - lastMinute > 5 && lastMinute != -1 {
-                currentGroupIndex += 1
-            }
-            
-            groups[currentGroupIndex, default: []].append(sub)
-            lastMinute = sub.plannedMinute
+        for sub in game.plannedSubstitutions {
+            let groupIndex = sub.subGroupIndex ?? 1
+            groups[groupIndex, default: []].append(sub)
         }
         
+        // Sort each group's subs by planned minute, then return sorted groups
         return groups.keys.sorted().compactMap { groupIndex in
-            guard let subs = groups[groupIndex], !subs.isEmpty else { return nil }
+            guard var subs = groups[groupIndex], !subs.isEmpty else { return nil }
+            subs.sort { $0.plannedMinute < $1.plannedMinute }
             return (groupIndex: groupIndex, groupName: "Sub \(groupIndex)", substitutions: subs)
         }
+    }
+    
+    private var nextSubstitutionMinute: Int {
+        if game.plannedSubstitutions.isEmpty {
+            return 0
+        }
+        // Return the last substitution's minute
+        return game.plannedSubstitutions.map { $0.plannedMinute }.max() ?? 0
     }
     
     var body: some View {
@@ -2469,8 +2483,9 @@ struct IndividualSubstitutionPlanner: View {
                 game: $game,
                 lineupPositions: lineupPositions,
                 onSubstitutionAdded: {
-                    onPlanningDataChanged()  // NOTIFY OF CHANGES
-                }
+                    onPlanningDataChanged()
+                },
+                initialMinute: nextSubstitutionMinute
             )
         }
         .sheet(isPresented: $showingMultiSubstitution) {
@@ -2479,8 +2494,9 @@ struct IndividualSubstitutionPlanner: View {
                 game: $game,
                 lineupPositions: lineupPositions,
                 onSubstitutionsAdded: {
-                    onPlanningDataChanged()  // NOTIFY OF CHANGES
-                }
+                    onPlanningDataChanged()
+                },
+                initialMinute: nextSubstitutionMinute
             )
         }
         .sheet(isPresented: $showingPositionChange) {
@@ -2489,8 +2505,9 @@ struct IndividualSubstitutionPlanner: View {
                 game: $game,
                 lineupPositions: lineupPositions,
                 onPositionChangeAdded: {
-                    onPlanningDataChanged()  // NOTIFY OF CHANGES
-                }
+                    onPlanningDataChanged()
+                },
+                initialMinute: nextSubstitutionMinute
             )
         }
         .sheet(isPresented: $showingShareSheet) {
@@ -2940,12 +2957,23 @@ struct MultiSubstitutionView: View {
     @Binding var game: Game
     let lineupPositions: [LineupPosition]
     let onSubstitutionsAdded: () -> Void
+    let initialMinute: Int  // NEW
     
     @Environment(\.presentationMode) var presentationMode
-    @State private var selectedMinute: Int = 15
+    @State private var selectedMinute: Int
     @State private var selectedReason: SubstitutionReason = .tactical
     @State private var playersOut: [Player] = []
     @State private var playersIn: [Player] = []
+    
+    // NEW: Custom init to set initial minute
+    init(team: Team, game: Binding<Game>, lineupPositions: [LineupPosition], onSubstitutionsAdded: @escaping () -> Void, initialMinute: Int = 0) {
+        self.team = team
+        self._game = game
+        self.lineupPositions = lineupPositions
+        self.onSubstitutionsAdded = onSubstitutionsAdded
+        self.initialMinute = initialMinute
+        self._selectedMinute = State(initialValue: initialMinute)
+    }
     
     var playersOnFieldAtSelectedTime: [Player] {
         calculatePlayersOnField(atMinute: selectedMinute)
@@ -2955,30 +2983,13 @@ struct MultiSubstitutionView: View {
         calculatePlayersOnBench(atMinute: selectedMinute)
     }
     
-    // Calculate which sub group this would belong to
     private var subGroupIndex: Int {
-        let existingSubs = game.plannedSubstitutions.sorted { $0.plannedMinute < $1.plannedMinute }
-        var currentGroupIndex = 1
-        var lastMinute = -1
-        
-        for sub in existingSubs {
-            if sub.plannedMinute - lastMinute > 5 && lastMinute != -1 {
-                currentGroupIndex += 1
-            }
-            lastMinute = sub.plannedMinute
-            
-            // If our minute is close to this substitution's minute, use same group
-            if abs(selectedMinute - sub.plannedMinute) <= 5 {
-                return sub.subGroupIndex ?? currentGroupIndex
-            }
+        // Simply get the next available group index
+        let existingGroupIndices = game.plannedSubstitutions.compactMap { $0.subGroupIndex }
+        if existingGroupIndices.isEmpty {
+            return 1
         }
-        
-        // If no close substitution found, check if we need a new group
-        if let lastSub = existingSubs.last, selectedMinute - lastSub.plannedMinute > 5 {
-            return currentGroupIndex + 1
-        }
-        
-        return currentGroupIndex
+        return (existingGroupIndices.max() ?? 0) + 1
     }
     
     var body: some View {
@@ -3480,12 +3491,23 @@ struct AddSubstitutionView: View {
     @Binding var game: Game
     let lineupPositions: [LineupPosition]
     let onSubstitutionAdded: () -> Void
+    let initialMinute: Int  // NEW
     
     @Environment(\.presentationMode) var presentationMode
     @State private var selectedPlayerOut: Player?
     @State private var selectedPlayerIn: Player?
-    @State private var selectedMinute: Int = 15
+    @State private var selectedMinute: Int
     @State private var selectedReason: SubstitutionReason = .tactical
+    
+    // NEW: Custom init to set initial minute
+    init(team: Team, game: Binding<Game>, lineupPositions: [LineupPosition], onSubstitutionAdded: @escaping () -> Void, initialMinute: Int = 0) {
+        self.team = team
+        self._game = game
+        self.lineupPositions = lineupPositions
+        self.onSubstitutionAdded = onSubstitutionAdded
+        self.initialMinute = initialMinute
+        self._selectedMinute = State(initialValue: initialMinute)
+    }
     
     // MARK: - Smart Player Lists Based on Time
     var playersOnFieldAtSelectedTime: [Player] {
@@ -3496,30 +3518,13 @@ struct AddSubstitutionView: View {
         calculatePlayersOnBench(atMinute: selectedMinute)
     }
     
-    // Calculate which sub group this would belong to
     private var subGroupIndex: Int {
-        let existingSubs = game.plannedSubstitutions.sorted { $0.plannedMinute < $1.plannedMinute }
-        var currentGroupIndex = 1
-        var lastMinute = -1
-        
-        for sub in existingSubs {
-            if sub.plannedMinute - lastMinute > 5 && lastMinute != -1 {
-                currentGroupIndex += 1
-            }
-            lastMinute = sub.plannedMinute
-            
-            // If our minute is close to this substitution's minute, use same group
-            if abs(selectedMinute - sub.plannedMinute) <= 5 {
-                return sub.subGroupIndex ?? currentGroupIndex
-            }
+        // Simply get the next available group index
+        let existingGroupIndices = game.plannedSubstitutions.compactMap { $0.subGroupIndex }
+        if existingGroupIndices.isEmpty {
+            return 1
         }
-        
-        // If no close substitution found, check if we need a new group
-        if let lastSub = existingSubs.last, selectedMinute - lastSub.plannedMinute > 5 {
-            return currentGroupIndex + 1
-        }
-        
-        return currentGroupIndex
+        return (existingGroupIndices.max() ?? 0) + 1
     }
     
     var body: some View {
