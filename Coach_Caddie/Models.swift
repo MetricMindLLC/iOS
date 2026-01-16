@@ -1992,10 +1992,9 @@ struct PlannedPositionChange: Identifiable, Codable, Equatable {
 
 
 
-// MARK: - Game (UPDATED with seasonId for season support)
 struct Game: Identifiable, Codable, Equatable {
     var id: UUID = UUID()
-    var seasonId: UUID?                     // NEW: Which season this game belongs to
+    var seasonId: UUID?                     // Which season this game belongs to
     var date: Date
     var opponent: String
     var isHome: Bool = true
@@ -2017,12 +2016,16 @@ struct Game: Identifiable, Codable, Equatable {
     var plannedPositionChanges: [PlannedPositionChange] = []
     var substitutionNotes: String? = nil
     
+    // OPTIMIZATION: Track whether subcollections have been loaded from Firebase
+    // This is NOT persisted - it's a runtime flag only
+    var subcollectionsLoaded: Bool = false
+    
     // MARK: - Custom Decoding for Backward Compatibility
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         
         id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
-        seasonId = try container.decodeIfPresent(UUID.self, forKey: .seasonId)  // NEW: Backward compatible
+        seasonId = try container.decodeIfPresent(UUID.self, forKey: .seasonId)
         date = try container.decode(Date.self, forKey: .date)
         opponent = try container.decode(String.self, forKey: .opponent)
         isHome = try container.decodeIfPresent(Bool.self, forKey: .isHome) ?? true
@@ -2043,11 +2046,15 @@ struct Game: Identifiable, Codable, Equatable {
         actualStartingLineup = try container.decodeIfPresent([LineupPosition].self, forKey: .actualStartingLineup)
         plannedPositionChanges = try container.decodeIfPresent([PlannedPositionChange].self, forKey: .plannedPositionChanges) ?? []
         substitutionNotes = try container.decodeIfPresent(String.self, forKey: .substitutionNotes)
+        
+        // subcollectionsLoaded defaults to false - not decoded from storage
+        // If we have auditLog/playerStats data, mark as loaded
+        subcollectionsLoaded = (auditLog != nil && !(auditLog?.isEmpty ?? true)) || !playerStats.isEmpty
     }
     
-    // MARK: - Standard Initializer (UPDATED with seasonId)
+    // MARK: - Standard Initializer
     init(id: UUID = UUID(),
-         seasonId: UUID? = nil,             // NEW
+         seasonId: UUID? = nil,
          date: Date,
          opponent: String,
          isHome: Bool = true,
@@ -2057,7 +2064,7 @@ struct Game: Identifiable, Codable, Equatable {
          result: GameResult? = nil,
          notes: String? = nil) {
         self.id = id
-        self.seasonId = seasonId            // NEW
+        self.seasonId = seasonId
         self.date = date
         self.opponent = opponent
         self.isHome = isHome
@@ -2066,10 +2073,11 @@ struct Game: Identifiable, Codable, Equatable {
         self.startingLineup = startingLineup
         self.result = result
         self.notes = notes
+        self.subcollectionsLoaded = false
         // All other properties will use their default values
     }
     
-    // MARK: - Coding Keys (UPDATED with seasonId)
+    // MARK: - Coding Keys (subcollectionsLoaded is intentionally excluded - not persisted)
     enum CodingKeys: String, CodingKey {
         case id, seasonId, date, opponent, isHome, location, formation, startingLineup, result
         case gameEvents, playerStats, substitutions, notes, auditLog, isCompleted, playerRSVPs

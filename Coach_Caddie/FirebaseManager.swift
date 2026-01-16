@@ -28,7 +28,7 @@ class FirebaseManager: NSObject, ObservableObject {
     private var activeOperations: Set<String> = []
     private let operationQueue = DispatchQueue(label: "com.app.firebase.operations", attributes: .concurrent)
     private var subcollectionCache: [String: (data: Any, timestamp: Date)] = [:]
-    private let cacheExpiration: TimeInterval = 300
+    private let cacheExpiration: TimeInterval = 1800
     private var activeLoadOperations: Set<String> = []
     
     override init() {
@@ -557,35 +557,76 @@ class FirebaseManager: NSObject, ObservableObject {
         return fullGame
     }
     
-    // MARK: - Real-time Listeners
     func startListening(to team: Team, completion: @escaping (Team) -> Void) {
-        let teamRef = db.collection("teams").document(team.id.uuidString)
+        let teamId = team.id.uuidString
+        
+        // Remove existing listener if any
+        teamListeners[teamId]?.remove()
+        
+        let teamRef = db.collection("teams").document(teamId)
+        
+        // Track the last known sync date to detect meaningful changes
+        var lastKnownSyncDate: Date? = team.lastSyncDate
+        var isFirstCallback = true
         
         let listener = teamRef.addSnapshotListener { [weak self] snapshot, error in
+            guard let self = self else { return }
+            
             if let error = error {
                 print("Firebase listener error: \(error)")
                 
+                // Retry after delay
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                    self?.startListening(to: team, completion: completion)
+                    self.startListening(to: team, completion: completion)
                 }
                 return
             }
             
             guard let data = snapshot?.data() else { return }
             
+            // Check if this is from cache or server
+            let isFromCache = snapshot?.metadata.isFromCache ?? true
+            
             do {
                 var updatedTeam = try Firestore.Decoder().decode(Team.self, from: data)
                 
+                // Check if the team document actually changed meaningfully
+                let newSyncDate = updatedTeam.lastSyncDate
+                let hasActualChanges = newSyncDate != lastKnownSyncDate
+                
+                // Skip redundant cache replays (but allow first callback)
+                if !hasActualChanges && isFromCache && !isFirstCallback {
+                    print("📦 Listener: cached data unchanged, skipping reload for: \(team.name)")
+                    return
+                }
+                
+                isFirstCallback = false
+                lastKnownSyncDate = newSyncDate
+                
                 Task {
-                    // If using subcollections, load them
+                    // For subcollection teams, ONLY reload if we detect actual changes
+                    // OR if this is the first load (team has no data)
                     if updatedTeam.useSubcollections {
-                        updatedTeam.players = try await self?.loadPlayersFromSubcollection(for: updatedTeam) ?? []
-                        updatedTeam.games = try await self?.loadGamesWithSubcollections(for: updatedTeam) ?? []
-                        updatedTeam.practices = try await self?.loadPracticesFromSubcollection(for: updatedTeam) ?? []
+                        let needsFullReload = team.players.isEmpty ||
+                                              team.games.isEmpty ||
+                                              hasActualChanges
+                        
+                        if needsFullReload {
+                            print("🔄 Listener: changes detected, reloading subcollections for: \(team.name)")
+                            updatedTeam.players = try await self.loadPlayersFromSubcollection(for: updatedTeam)
+                            updatedTeam.games = try await self.loadGamesFromSubcollection(for: updatedTeam)
+                            updatedTeam.practices = try await self.loadPracticesFromSubcollection(for: updatedTeam)
+                        } else {
+                            // Preserve existing subcollection data
+                            print("📦 Listener: no changes, preserving existing data for: \(team.name)")
+                            updatedTeam.players = team.players
+                            updatedTeam.games = team.games
+                            updatedTeam.practices = team.practices
+                        }
                     }
                     
-                    // NEW: Always load seasons
-                    updatedTeam.seasons = try await self?.loadSeasonsFromSubcollection(for: updatedTeam) ?? []
+                    // Always load seasons (they're small and cached)
+                    updatedTeam.seasons = try await self.loadSeasonsFromSubcollection(for: updatedTeam)
                     
                     await MainActor.run {
                         completion(updatedTeam)
@@ -596,7 +637,8 @@ class FirebaseManager: NSObject, ObservableObject {
             }
         }
         
-        teamListeners[team.id.uuidString] = listener
+        teamListeners[teamId] = listener
+        print("👂 Smart listener started for team: \(team.name)")
     }
     
     func stopListening(to team: Team) {

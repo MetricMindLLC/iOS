@@ -66,15 +66,20 @@ struct PlayerDetailView: View {
             }
             .navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $showingEditPlayer) {
-                if let currentPlayer = self.player, let currentTeam = self.team {
+                if let teamIndex = teamManager.teams.firstIndex(where: { $0.id == teamId }),
+                   let playerIndex = teamManager.teams[teamIndex].players.firstIndex(where: { $0.id == playerId }) {
                     EditPlayerView(
                         player: Binding(
-                            get: { currentPlayer },
-                            set: { _ in }
+                            get: { teamManager.teams[teamIndex].players[playerIndex] },
+                            set: { newPlayer in
+                                teamManager.teams[teamIndex].players[playerIndex] = newPlayer
+                            }
                         ),
                         team: Binding(
-                            get: { currentTeam },
-                            set: { _ in }
+                            get: { teamManager.teams[teamIndex] },
+                            set: { newTeam in
+                                teamManager.teams[teamIndex] = newTeam
+                            }
                         )
                     )
                 }
