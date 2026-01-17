@@ -793,15 +793,16 @@ struct TeamPlayersTab: View {
         ScrollView {
             LazyVStack(spacing: 12) {
                 ForEach(team.players.sorted { $0.jerseyNumber < $1.jerseyNumber }, id: \.id) { player in
-                    // Simple player row showing name, position, and goals
+                    let displayStats = player.calculateDisplayStats(from: team.games)
+                    
                     HStack(spacing: 12) {
-                        // Jersey number circle
+                        // Jersey number circle with position color
                         Circle()
-                            .fill(player.preferredPositionEnum.color)
-                            .frame(width: 40, height: 40)
+                            .fill(positionColor(for: player.positions.first ?? "MID"))
+                            .frame(width: 44, height: 44)
                             .overlay(
                                 Text("\(player.jerseyNumber)")
-                                    .font(.caption)
+                                    .font(.subheadline)
                                     .fontWeight(.bold)
                                     .foregroundColor(.white)
                             )
@@ -818,13 +819,34 @@ struct TeamPlayersTab: View {
                         
                         Spacer()
                         
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text("\(player.calculateDisplayStats(from: team.games).goals)")
-                                .font(.subheadline)
-                                .fontWeight(.semibold)
-                            Text("Goals")
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
+                        // Multi-stat display
+                        HStack(spacing: 12) {
+                            VStack(spacing: 2) {
+                                Text("\(displayStats.goals)")
+                                    .font(.subheadline)
+                                    .fontWeight(.bold)
+                                Text("G")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                            
+                            VStack(spacing: 2) {
+                                Text("\(displayStats.assists)")
+                                    .font(.subheadline)
+                                    .fontWeight(.bold)
+                                Text("A")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                            
+                            VStack(spacing: 2) {
+                                Text("\(displayStats.gamesPlayed)")
+                                    .font(.subheadline)
+                                    .fontWeight(.bold)
+                                Text("GP")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
                         }
                     }
                     .padding(.vertical, 4)
@@ -842,6 +864,20 @@ struct TeamPlayersTab: View {
                 }
             }
             .padding(.vertical)
+        }
+    }
+
+    // Helper function for position colors
+    private func positionColor(for position: String) -> Color {
+        let pos = position.uppercased()
+        if pos.contains("GK") || pos.contains("GOAL") {
+            return .yellow
+        } else if pos.contains("DEF") || pos.contains("CB") || pos.contains("LB") || pos.contains("RB") {
+            return .blue
+        } else if pos.contains("FWD") || pos.contains("ST") || pos.contains("LW") || pos.contains("RW") || pos.contains("CF") || pos.contains("FORWARD") {
+            return .red
+        } else {
+            return .green  // MID and everything else
         }
     }
     
