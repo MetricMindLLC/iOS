@@ -1250,6 +1250,67 @@ struct Player: Identifiable, Codable, Equatable, Hashable {
         }
     }
     
+    // MARK: - Calculated Display Stats
+    func calculateDisplayStats(from games: [Game]) -> PlayerStats {
+        var stats = PlayerStats()
+        
+        // Count from ALL game events
+        for game in games {
+            for event in game.gameEvents where event.playerId == self.id {
+                switch event.eventType {
+                case .goal:
+                    stats.goals += 1
+                case .assist:
+                    stats.assists += 1
+                case .shot, .shotOnTarget:
+                    stats.shots += 1
+                case .save:
+                    stats.saves += 1
+                case .goalAgainst:
+                    stats.goalsConceded += 1
+                case .yellowCard:
+                    stats.yellowCards += 1
+                case .redCard:
+                    stats.redCards += 1
+                default:
+                    break
+                }
+            }
+            
+            // Count games played and minutes
+            if let playerGameStats = game.playerStats.first(where: { $0.playerId == self.id }) {
+                if game.isCompleted {
+                    stats.gamesPlayed += 1
+                }
+                stats.minutesPlayed += playerGameStats.minutesPlayed
+            }
+        }
+        
+        // Add ALL season manual adjustments
+        stats.goals += seasonStats.getTotalSeasonAdjustments("goals")
+        stats.assists += seasonStats.getTotalSeasonAdjustments("assists")
+        stats.shots += seasonStats.getTotalSeasonAdjustments("shots")
+        stats.saves += seasonStats.getTotalSeasonAdjustments("saves")
+        stats.goalsConceded += seasonStats.getTotalSeasonAdjustments("goalsConceded")
+        stats.yellowCards += seasonStats.getTotalSeasonAdjustments("yellowCards")
+        stats.redCards += seasonStats.getTotalSeasonAdjustments("redCards")
+        stats.gamesPlayed += seasonStats.getTotalSeasonAdjustments("gamesPlayed")
+        stats.minutesPlayed += seasonStats.getTotalSeasonAdjustments("minutesPlayed")
+        
+        // Add overall manual adjustments
+        stats.goals += seasonStats.getManualAdjustment("goals")
+        stats.assists += seasonStats.getManualAdjustment("assists")
+        stats.shots += seasonStats.getManualAdjustment("shots")
+        stats.saves += seasonStats.getManualAdjustment("saves")
+        stats.goalsConceded += seasonStats.getManualAdjustment("goalsConceded")
+        stats.yellowCards += seasonStats.getManualAdjustment("yellowCards")
+        stats.redCards += seasonStats.getManualAdjustment("redCards")
+        stats.gamesPlayed += seasonStats.getManualAdjustment("gamesPlayed")
+        stats.minutesPlayed += seasonStats.getManualAdjustment("minutesPlayed")
+        
+        return stats
+    }
+    
     private func nameWithLastInitial() -> String {
         let components = name.components(separatedBy: " ")
         guard components.count > 1 else { return name }

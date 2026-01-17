@@ -172,25 +172,27 @@ struct PlayerDetailView: View {
     }
     
     private func statsSection(player: Player) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
+        let displayStats = player.calculateDisplayStats(from: team?.games ?? [])
+        
+        return VStack(alignment: .leading, spacing: 16) {
             Text("Season Stats")
                 .font(.headline)
                 .padding(.horizontal)
             
             VStack(spacing: 0) {
-                StatRowView(icon: "gamecontroller.fill", title: "Games Played", value: "\(player.seasonStats.gamesPlayed)")
+                StatRowView(icon: "gamecontroller.fill", title: "Games Played", value: "\(displayStats.gamesPlayed)")
                 Divider().padding(.horizontal)
                 
-                StatRowView(icon: "soccerball", title: "Goals", value: "\(player.seasonStats.goals)")
+                StatRowView(icon: "soccerball", title: "Goals", value: "\(displayStats.goals)")
                 Divider().padding(.horizontal)
                 
-                StatRowView(icon: "hands.and.sparkles.fill", title: "Assists", value: "\(player.seasonStats.assists)")
+                StatRowView(icon: "hands.and.sparkles.fill", title: "Assists", value: "\(displayStats.assists)")
                 Divider().padding(.horizontal)
                 
-                StatRowView(icon: "scope", title: "Shots", value: "\(player.seasonStats.shots)")
+                StatRowView(icon: "scope", title: "Shots", value: "\(displayStats.shots)")
                 Divider().padding(.horizontal)
                 
-                StatRowView(icon: "hand.raised.fill", title: "Saves", value: "\(player.seasonStats.saves)")
+                StatRowView(icon: "hand.raised.fill", title: "Saves", value: "\(displayStats.saves)")
             }
             .padding()
             .background(Color(.systemBackground))

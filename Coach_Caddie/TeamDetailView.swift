@@ -819,7 +819,7 @@ struct TeamPlayersTab: View {
                         Spacer()
                         
                         VStack(alignment: .trailing, spacing: 2) {
-                            Text("\(player.seasonStats.goals)")
+                            Text("\(player.calculateDisplayStats(from: team.games).goals)")
                                 .font(.subheadline)
                                 .fontWeight(.semibold)
                             Text("Goals")

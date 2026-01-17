@@ -2542,63 +2542,51 @@ struct IndividualSubstitutionPlanner: View {
         )
         
         let hostingController = UIHostingController(rootView: substitutionPlanView)
-        hostingController.view.backgroundColor = UIColor.systemGroupedBackground
+        hostingController.view.backgroundColor = .white
         
-        let screenWidth = UIScreen.main.bounds.width
-        let maxHeight: CGFloat = 8000  // Reduced from 15000 for better reliability
-        let minHeight: CGFloat = 400
+        // Wider format for two columns
+        let printWidth: CGFloat = 650
+        let maxHeight: CGFloat = 1200
         
-        // Set initial frame
-        hostingController.view.frame = CGRect(origin: .zero, size: CGSize(width: screenWidth, height: maxHeight))
+        hostingController.view.frame = CGRect(origin: .zero, size: CGSize(width: printWidth, height: maxHeight))
         
-        // Add to a temporary window for proper rendering
-        let window = UIWindow(frame: UIScreen.main.bounds)
+        let window = UIWindow(frame: CGRect(origin: .zero, size: CGSize(width: printWidth, height: maxHeight)))
         window.rootViewController = UIViewController()
         window.makeKeyAndVisible()
         window.rootViewController?.view.addSubview(hostingController.view)
         
-        // Force layout
         hostingController.view.setNeedsLayout()
         hostingController.view.layoutIfNeeded()
         
-        // Calculate actual content size
         let contentSize = hostingController.view.systemLayoutSizeFitting(
-            CGSize(width: screenWidth, height: UIView.layoutFittingCompressedSize.height),
+            CGSize(width: printWidth, height: UIView.layoutFittingCompressedSize.height),
             withHorizontalFittingPriority: .required,
             verticalFittingPriority: .fittingSizeLevel
         )
         
-        // Set final size with reasonable constraints
-        let finalHeight = min(max(contentSize.height + 100, minHeight), maxHeight)
-        let finalSize = CGSize(width: screenWidth, height: finalHeight)
+        let finalHeight = min(max(contentSize.height + 40, 300), maxHeight)
+        let finalSize = CGSize(width: printWidth, height: finalHeight)
         
         hostingController.view.frame = CGRect(origin: .zero, size: finalSize)
         hostingController.view.setNeedsLayout()
         hostingController.view.layoutIfNeeded()
         
-        // Give the view time to settle
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            // Use iOS 10+ compatible rendering
-            UIGraphicsBeginImageContextWithOptions(finalSize, false, UIScreen.main.scale)
+            UIGraphicsBeginImageContextWithOptions(finalSize, true, 2.0)
             defer { UIGraphicsEndImageContext() }
             
-            guard let context = UIGraphicsGetCurrentContext() else {
-                print("Failed to get graphics context")
-                return
-            }
+            guard let context = UIGraphicsGetCurrentContext() else { return }
             
-            // Render the view
+            context.setFillColor(UIColor.white.cgColor)
+            context.fill(CGRect(origin: .zero, size: finalSize))
+            
             hostingController.view.layer.render(in: context)
             
             if let image = UIGraphicsGetImageFromCurrentImageContext() {
                 self.shareImage = image
                 self.showingShareSheet = true
-                print("Successfully generated share image - Size: \(finalSize)")
-            } else {
-                print("Failed to generate image from context")
             }
             
-            // Clean up
             hostingController.view.removeFromSuperview()
             window.isHidden = true
         }
@@ -3753,228 +3741,320 @@ struct AddSubstitutionView: View {
         return isOnField ? currentPosition : nil
     }
 }
-// MARK: - Simplified SubstitutionPlanShareView (FIXED for large content)
+// MARK: - Print-Optimized SubstitutionPlanShareView (Two-Column Layout)
 struct SubstitutionPlanShareView: View {
     let game: Game
     let team: Team
     let lineupPositions: [LineupPosition]
     let groupedSubstitutions: [(groupIndex: Int, groupName: String, substitutions: [PlannedSubstitution])]
     
-    // Create combined timeline of events
-    private func createCombinedTimeline() -> [TimelineEvent] {
-        var events: [Int: TimelineEvent] = [:]
-        
-        // Add substitutions
-        for sub in game.plannedSubstitutions {
-            let minute = sub.plannedMinute
-            if events[minute] == nil {
-                events[minute] = TimelineEvent(minute: minute, substitutions: [], positionChanges: [])
-            }
-            events[minute]?.substitutions.append(sub)
-        }
-        
-        // Add position changes
-        for posChange in game.plannedPositionChanges {
-            let minute = posChange.plannedMinute
-            if events[minute] == nil {
-                events[minute] = TimelineEvent(minute: minute, substitutions: [], positionChanges: [])
-            }
-            events[minute]?.positionChanges.append(posChange)
-        }
-        
-        return events.values.sorted { $0.minute < $1.minute }
+    private var halfLength: Int {
+        team.defaultHalfLength
     }
     
-    private var playingTimeData: [(Player, Int)] {
-        calculateProjectedPlayingTime()
+    // Split groups into first half and second half
+    private var firstHalfGroups: [(groupIndex: Int, groupName: String, substitutions: [PlannedSubstitution])] {
+        groupedSubstitutions.compactMap { group in
+            let firstHalfSubs = group.substitutions.filter { $0.plannedMinute < halfLength }
+            if firstHalfSubs.isEmpty { return nil }
+            return (groupIndex: group.groupIndex, groupName: group.groupName, substitutions: firstHalfSubs)
+        }
+    }
+    
+    private var secondHalfGroups: [(groupIndex: Int, groupName: String, substitutions: [PlannedSubstitution])] {
+        groupedSubstitutions.compactMap { group in
+            let secondHalfSubs = group.substitutions.filter { $0.plannedMinute >= halfLength }
+            if secondHalfSubs.isEmpty { return nil }
+            return (groupIndex: group.groupIndex, groupName: group.groupName, substitutions: secondHalfSubs)
+        }
     }
     
     var body: some View {
         VStack(spacing: 16) {
-            // Header - Simplified
-            VStack(spacing: 8) {
-                Text("Substitution Plan")
+            // Header
+            VStack(spacing: 6) {
+                Text("SUBSTITUTION PLAN")
                     .font(.title2)
-                    .bold()
+                    .fontWeight(.bold)
                 
-                Text("vs \(game.opponent)")
-                    .font(.headline)
-                    .foregroundColor(.secondary)
+                HStack(spacing: 8) {
+                    Text(team.name)
+                        .fontWeight(.semibold)
+                    Text("vs")
+                        .foregroundColor(.secondary)
+                    Text(game.opponent)
+                        .fontWeight(.semibold)
+                }
+                .font(.headline)
                 
-                Text(game.date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
+                Text(game.date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().year()))
                     .font(.subheadline)
                     .foregroundColor(.secondary)
             }
-            .padding()
-            .background(Color(.systemBackground))
-            .cornerRadius(12)
+            .padding(.bottom, 8)
             
-            if groupedSubstitutions.isEmpty && game.plannedPositionChanges.isEmpty {
-                Text("No substitutions or position changes planned")
-                    .foregroundColor(.secondary)
-                    .padding()
-            } else {
-                // Timeline Section - Simplified
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Game Plan Timeline")
+            // Two-column layout
+            HStack(alignment: .top, spacing: 24) {
+                // First Half
+                VStack(alignment: .leading, spacing: 0) {
+                    // Column header
+                    Text("FIRST HALF (0-\(halfLength)')")
                         .font(.headline)
-                        .padding(.horizontal)
+                        .fontWeight(.bold)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, 8)
+                        .background(Color.blue.opacity(0.15))
                     
-                    // Create combined timeline of all events
-                    let allEvents = createCombinedTimeline()
-                    
-                    VStack(spacing: 8) {
-                        ForEach(allEvents, id: \.minute) { event in
-                            VStack(alignment: .leading, spacing: 8) {
-                                // Event Header - Simplified
-                                HStack {
-                                    Text("Minute \(event.minute)")
-                                        .font(.subheadline)
-                                        .fontWeight(.semibold)
-                                        .foregroundColor(.blue)
-                                    
-                                    Spacer()
-                                    
-                                    Text("\(event.substitutions.count + event.positionChanges.count) changes")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(Color.blue.opacity(0.1))
-                                .cornerRadius(6)
-                                
-                                // Substitutions for this minute
-                                ForEach(event.substitutions.sorted(by: { $0.plannedMinute < $1.plannedMinute })) { sub in
-                                    SimpleSubstitutionRow(substitution: sub, team: team)
-                                }
-                                
-                                // Position changes for this minute
-                                ForEach(event.positionChanges.sorted(by: { $0.plannedMinute < $1.plannedMinute })) { posChange in
-                                    SimplePositionChangeRow(positionChange: posChange, team: team)
-                                }
+                    VStack(alignment: .leading, spacing: 12) {
+                        // Starters section
+                        startersSection
+                        
+                        // Substitution Groups
+                        if firstHalfGroups.isEmpty {
+                            Text("No subs planned")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                                .padding(.top, 4)
+                        } else {
+                            ForEach(firstHalfGroups, id: \.groupIndex) { group in
+                                substitutionGroupView(group: group)
                             }
-                            .padding(8)
-                            .background(Color(.systemGray6).opacity(0.5))
-                            .cornerRadius(8)
                         }
                     }
+                    .padding(12)
+                    
+                    Spacer(minLength: 0)
                 }
-                .padding(.horizontal)
-            }
-            
-            // Playing Time Summary - Simplified
-            if !playingTimeData.isEmpty && playingTimeData.count <= 20 { // Limit for rendering
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Projected Playing Time")
+                .frame(maxWidth: .infinity)
+                .background(Color.gray.opacity(0.05))
+                .cornerRadius(8)
+                
+                // Second Half
+                VStack(alignment: .leading, spacing: 0) {
+                    // Column header
+                    Text("SECOND HALF (\(halfLength)'+)")
                         .font(.headline)
-                        .padding(.horizontal)
+                        .fontWeight(.bold)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, 8)
+                        .background(Color.green.opacity(0.15))
                     
-                    // Use simple VStack instead of LazyVGrid for better rendering
-                    VStack(spacing: 4) {
-                        ForEach(Array(playingTimeData.prefix(15).enumerated()), id: \.offset) { index, playerTime in
-                            let (player, minutes) = playerTime
-                            HStack {
-                                Text("#\(player.jerseyNumber)")
-                                    .font(.caption)
-                                    .fontWeight(.bold)
-                                    .frame(width: 25)
-                                
-                                Text(player.name.components(separatedBy: " ").first ?? "")
-                                    .font(.caption)
-                                    .lineLimit(1)
-                                
-                                Spacer()
-                                
-                                Text("\(minutes)m")
-                                    .font(.caption)
-                                    .bold()
-                                    .foregroundColor(getPlayingTimeColor(minutes: minutes))
+                    // Groups
+                    if secondHalfGroups.isEmpty {
+                        Text("No subs planned")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .padding()
+                            .frame(maxWidth: .infinity)
+                    } else {
+                        VStack(alignment: .leading, spacing: 12) {
+                            ForEach(secondHalfGroups, id: \.groupIndex) { group in
+                                substitutionGroupView(group: group)
                             }
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 2)
                         }
+                        .padding(12)
                     }
-                    .padding(.horizontal)
-                }
-            }
-            
-            // Coaching Notes - Simplified
-            if let notes = game.substitutionNotes, !notes.isEmpty, notes.count < 500 { // Limit length
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Coaching Notes")
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .padding(.horizontal)
                     
-                    Text(notes)
-                        .font(.caption)
-                        .padding(8)
-                        .background(Color(.systemGray6))
-                        .cornerRadius(6)
-                        .padding(.horizontal)
+                    Spacer(minLength: 0)
                 }
+                .frame(maxWidth: .infinity)
+                .background(Color.gray.opacity(0.05))
+                .cornerRadius(8)
             }
-            
+
+            // Position Changes (if any) - compact
+            if !game.plannedPositionChanges.isEmpty {
+                positionChangesSection
+            }
+
             // Footer
-            Text("Generated by Soccer Coach App")
-                .font(.caption2)
+            HStack {
+                Text("Generated by Coach Caddie")
+                Spacer()
+                Text(Date().formatted(.dateTime.month().day().hour().minute()))
+            }
+            .font(.caption)
+            .foregroundColor(.secondary)
+            .padding(.top, 8)
+        }
+        .padding(20)
+        .background(Color.white)
+    }
+    
+    // MARK: - Starters Section
+    private var startersSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Starters")
+                .font(.subheadline)
+                .fontWeight(.bold)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.green.opacity(0.15))
+                .cornerRadius(4)
+            
+            // Show starting players with positions
+            ForEach(sortedStarters, id: \.player.id) { starter in
+                HStack(spacing: 4) {
+                    Text("#\(starter.player.jerseyNumber)")
+                        .fontWeight(.bold)
+                    Text(starter.player.name.components(separatedBy: " ").first ?? "")
+                    Text("(\(starter.position.abbreviation))")
+                        .foregroundColor(.secondary)
+                }
+                .font(.subheadline)
+                .padding(.leading, 8)
+            }
+        }
+    }
+
+    // Helper to get sorted starters
+    private var sortedStarters: [(player: Player, position: Position)] {
+        var result: [(player: Player, position: Position)] = []
+        
+        for lineupPosition in lineupPositions {
+            guard let playerId = lineupPosition.playerId,
+                  let player = team.players.first(where: { $0.id == playerId }) else {
+                continue
+            }
+            result.append((player: player, position: lineupPosition.position))
+        }
+        
+        return result.sorted(by: { positionSortOrder($0.position) < positionSortOrder($1.position) })
+    }
+
+    // Helper to define position sort order (GK first, then DEF, MID, FWD)
+    private func positionSortOrder(_ position: Position) -> Int {
+        let abbr = position.abbreviation.uppercased()
+        if abbr.contains("GK") { return 0 }
+        if abbr.contains("DEF") || abbr.contains("CB") || abbr.contains("LB") || abbr.contains("RB") { return 1 }
+        if abbr.contains("MID") || abbr.contains("CM") || abbr.contains("LM") || abbr.contains("RM") || abbr.contains("DM") || abbr.contains("AM") { return 2 }
+        if abbr.contains("FWD") || abbr.contains("ST") || abbr.contains("LW") || abbr.contains("RW") || abbr.contains("CF") { return 3 }
+        return 4
+    }
+    
+    // MARK: - Substitution Group View
+    private func substitutionGroupView(group: (groupIndex: Int, groupName: String, substitutions: [PlannedSubstitution])) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            // Group header with minute
+            let firstMinute = group.substitutions.map { $0.plannedMinute }.min() ?? 0
+            HStack {
+                Text(group.groupName)
+                    .font(.subheadline)
+                    .fontWeight(.bold)
+                Text("(\(firstMinute)')")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.blue.opacity(0.1))
+            .cornerRadius(4)
+            
+            // Substitutions in this group
+            ForEach(group.substitutions) { sub in
+                substitutionRow(sub: sub)
+            }
+        }
+    }
+    
+    // MARK: - Single Substitution Row
+    private func substitutionRow(sub: PlannedSubstitution) -> some View {
+        HStack(spacing: 4) {
+            // Player In (coming on)
+            if let playerIn = team.players.first(where: { $0.id == sub.playerIn }) {
+                Text("#\(playerIn.jerseyNumber)")
+                    .fontWeight(.bold)
+                Text(playerIn.name.components(separatedBy: " ").first ?? "")
+            }
+            
+            Text("→")
+                .foregroundColor(.blue)
+            
+            // Player Out (going off)
+            if let playerOut = team.players.first(where: { $0.id == sub.playerOut }) {
+                Text("#\(playerOut.jerseyNumber)")
+                    .fontWeight(.bold)
+                Text(playerOut.name.components(separatedBy: " ").first ?? "")
+            }
+            
+            Text("(\(sub.targetPosition.abbreviation))")
                 .foregroundColor(.secondary)
-                .padding(.top, 8)
         }
-        .padding()
-        .background(Color(.systemGroupedBackground))
+        .font(.subheadline)
+        .padding(.leading, 8)
     }
     
-    private func calculateProjectedPlayingTime() -> [(Player, Int)] {
-        let totalGameTime = team.defaultHalfLength * 2
-        var playingTime: [UUID: Int] = [:]
-        
-        // Initialize with starting lineup getting full game time
-        for position in lineupPositions {
-            if let playerId = position.playerId {
-                playingTime[playerId] = totalGameTime
-            }
-        }
-        
-        // Apply planned substitutions in chronological order
-        let sortedSubs = game.plannedSubstitutions.sorted { $0.plannedMinute < $1.plannedMinute }
-        
-        for sub in sortedSubs {
-            let remainingTime = max(0, totalGameTime - sub.plannedMinute)
+    // MARK: - Position Changes Section (compact)
+    private var positionChangesSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("POSITION CHANGES")
+                .font(.subheadline)
+                .fontWeight(.bold)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.purple.opacity(0.15))
+                .cornerRadius(4)
             
-            // Player going out loses remaining time
-            if let currentTime = playingTime[sub.playerOut] {
-                playingTime[sub.playerOut] = max(0, currentTime - remainingTime)
-            }
+            // Compact horizontal list
+            let changes = game.plannedPositionChanges.sorted { $0.plannedMinute < $1.plannedMinute }
             
-            // Player coming in gains remaining time
-            playingTime[sub.playerIn] = (playingTime[sub.playerIn] ?? 0) + remainingTime
-        }
-        
-        // Cap all playing times at total game time
-        for playerId in playingTime.keys {
-            playingTime[playerId] = min(playingTime[playerId] ?? 0, totalGameTime)
-        }
-        
-        return team.players.compactMap { player in
-            if let minutes = playingTime[player.id], minutes > 0 {
-                return (player, minutes)
+            SubstitutionFlowLayout(spacing: 8) {
+                ForEach(changes) { change in
+                    if let player = team.players.first(where: { $0.id == change.playerId }) {
+                        Text("\(change.plannedMinute)': #\(player.jerseyNumber) \(change.fromPosition.abbreviation)→\(change.toPosition.abbreviation)")
+                            .font(.caption)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(Color.purple.opacity(0.1))
+                            .cornerRadius(4)
+                    }
+                }
             }
-            return nil
-        }.sorted { $0.1 > $1.1 }
+        }
+        .padding(12)
+        .background(Color.gray.opacity(0.05))
+        .cornerRadius(8)
+    }
+}
+
+// MARK: - Simple Flow Layout for Position Changes
+struct SubstitutionFlowLayout: Layout {
+    var spacing: CGFloat = 8
+    
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let result = computeLayout(proposal: proposal, subviews: subviews)
+        return result.size
     }
     
-    private func getPlayingTimeColor(minutes: Int) -> Color {
-        let totalGameTime = team.defaultHalfLength * 2
-        let percentage = Double(minutes) / Double(totalGameTime)
-        
-        switch percentage {
-        case 0.5...: return .green
-        case 0.25..<0.5: return .orange
-        case 0.01..<0.25: return .red
-        default: return .gray
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let result = computeLayout(proposal: proposal, subviews: subviews)
+        for (index, position) in result.positions.enumerated() {
+            subviews[index].place(at: CGPoint(x: bounds.minX + position.x, y: bounds.minY + position.y), proposal: .unspecified)
         }
+    }
+    
+    private func computeLayout(proposal: ProposedViewSize, subviews: Subviews) -> (size: CGSize, positions: [CGPoint]) {
+        var positions: [CGPoint] = []
+        var currentX: CGFloat = 0
+        var currentY: CGFloat = 0
+        var lineHeight: CGFloat = 0
+        let maxWidth = proposal.width ?? .infinity
+        
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            
+            if currentX + size.width > maxWidth && currentX > 0 {
+                currentX = 0
+                currentY += lineHeight + spacing
+                lineHeight = 0
+            }
+            
+            positions.append(CGPoint(x: currentX, y: currentY))
+            currentX += size.width + spacing
+            lineHeight = max(lineHeight, size.height)
+        }
+        
+        return (CGSize(width: maxWidth, height: currentY + lineHeight), positions)
     }
 }
 
