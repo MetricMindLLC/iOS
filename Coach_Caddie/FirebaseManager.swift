@@ -1432,25 +1432,89 @@ class FirebaseManager: NSObject, ObservableObject {
         var updatedTeam = team
         
         for index in updatedTeam.players.indices {
+            let playerId = updatedTeam.players[index].id
+            
+            // CRITICAL: Preserve manual adjustments before resetting
+            let manualAdjustments = updatedTeam.players[index].seasonStats.manualAdjustments
+            let seasonManualAdjustments = updatedTeam.players[index].seasonStats.seasonManualAdjustments
+            
+            // Reset stats
             updatedTeam.players[index].seasonStats = PlayerStats()
-        }
-        
-        for game in updatedTeam.games where game.isCompleted {
-            for gamePlayerStats in game.playerStats {
-                if let playerIndex = updatedTeam.players.firstIndex(where: { $0.id == gamePlayerStats.playerId }) {
-                    updatedTeam.players[playerIndex].seasonStats.goals += gamePlayerStats.goals
-                    updatedTeam.players[playerIndex].seasonStats.assists += gamePlayerStats.assists
-                    updatedTeam.players[playerIndex].seasonStats.saves += gamePlayerStats.saves
-                    updatedTeam.players[playerIndex].seasonStats.goalsConceded += gamePlayerStats.goalsConceded
-                    updatedTeam.players[playerIndex].seasonStats.yellowCards += gamePlayerStats.yellowCards
-                    updatedTeam.players[playerIndex].seasonStats.redCards += gamePlayerStats.redCards
-                    updatedTeam.players[playerIndex].seasonStats.minutesPlayed += gamePlayerStats.minutesPlayed
+            
+            // Recalculate from all completed games
+            for game in updatedTeam.games where game.isCompleted {
+                // First check playerStats (for manually scored games)
+                if let gamePlayerStats = game.playerStats.first(where: { $0.playerId == playerId }) {
+                    updatedTeam.players[index].seasonStats.goals += gamePlayerStats.goals
+                    updatedTeam.players[index].seasonStats.assists += gamePlayerStats.assists
+                    updatedTeam.players[index].seasonStats.saves += gamePlayerStats.saves
+                    updatedTeam.players[index].seasonStats.goalsConceded += gamePlayerStats.goalsConceded
+                    updatedTeam.players[index].seasonStats.yellowCards += gamePlayerStats.yellowCards
+                    updatedTeam.players[index].seasonStats.redCards += gamePlayerStats.redCards
+                    updatedTeam.players[index].seasonStats.minutesPlayed += gamePlayerStats.minutesPlayed
                     
                     if gamePlayerStats.minutesPlayed > 0 {
-                        updatedTeam.players[playerIndex].seasonStats.gamesPlayed += 1
+                        updatedTeam.players[index].seasonStats.gamesPlayed += 1
+                    }
+                }
+                
+                // Also check auditLog (for live game mode) - but only if playerStats was empty for this player
+                // This prevents double-counting since endGame() should have created playerStats from auditLog
+                if game.playerStats.first(where: { $0.playerId == playerId }) == nil,
+                   let auditLog = game.auditLog {
+                    var countedGame = false
+                    for entry in auditLog where entry.playerId == playerId {
+                        switch entry.eventType {
+                        case .goal:
+                            updatedTeam.players[index].seasonStats.goals += 1
+                        case .assist:
+                            updatedTeam.players[index].seasonStats.assists += 1
+                        case .save:
+                            updatedTeam.players[index].seasonStats.saves += 1
+                        case .goalAgainst:
+                            updatedTeam.players[index].seasonStats.goalsConceded += 1
+                        case .yellowCard:
+                            updatedTeam.players[index].seasonStats.yellowCards += 1
+                        case .redCard:
+                            updatedTeam.players[index].seasonStats.redCards += 1
+                        default:
+                            break
+                        }
+                        countedGame = true
+                    }
+                    if countedGame {
+                        updatedTeam.players[index].seasonStats.gamesPlayed += 1
                     }
                 }
             }
+            
+            // CRITICAL: Apply manual adjustments
+            updatedTeam.players[index].seasonStats.goals += manualAdjustments["goals"] ?? 0
+            updatedTeam.players[index].seasonStats.assists += manualAdjustments["assists"] ?? 0
+            updatedTeam.players[index].seasonStats.shots += manualAdjustments["shots"] ?? 0
+            updatedTeam.players[index].seasonStats.saves += manualAdjustments["saves"] ?? 0
+            updatedTeam.players[index].seasonStats.goalsConceded += manualAdjustments["goalsConceded"] ?? 0
+            updatedTeam.players[index].seasonStats.yellowCards += manualAdjustments["yellowCards"] ?? 0
+            updatedTeam.players[index].seasonStats.redCards += manualAdjustments["redCards"] ?? 0
+            updatedTeam.players[index].seasonStats.gamesPlayed += manualAdjustments["gamesPlayed"] ?? 0
+            updatedTeam.players[index].seasonStats.minutesPlayed += manualAdjustments["minutesPlayed"] ?? 0
+            
+            // CRITICAL: Apply season manual adjustments
+            for (_, adjustments) in seasonManualAdjustments {
+                updatedTeam.players[index].seasonStats.goals += adjustments["goals"] ?? 0
+                updatedTeam.players[index].seasonStats.assists += adjustments["assists"] ?? 0
+                updatedTeam.players[index].seasonStats.shots += adjustments["shots"] ?? 0
+                updatedTeam.players[index].seasonStats.saves += adjustments["saves"] ?? 0
+                updatedTeam.players[index].seasonStats.goalsConceded += adjustments["goalsConceded"] ?? 0
+                updatedTeam.players[index].seasonStats.yellowCards += adjustments["yellowCards"] ?? 0
+                updatedTeam.players[index].seasonStats.redCards += adjustments["redCards"] ?? 0
+                updatedTeam.players[index].seasonStats.gamesPlayed += adjustments["gamesPlayed"] ?? 0
+                updatedTeam.players[index].seasonStats.minutesPlayed += adjustments["minutesPlayed"] ?? 0
+            }
+            
+            // CRITICAL: Restore the adjustment dictionaries
+            updatedTeam.players[index].seasonStats.manualAdjustments = manualAdjustments
+            updatedTeam.players[index].seasonStats.seasonManualAdjustments = seasonManualAdjustments
         }
         
         print("🏆 Recalculated season stats after subcollection load")

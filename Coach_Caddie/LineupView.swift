@@ -7710,31 +7710,7 @@ struct FullCaptureGameLineupTab: View {
                     .foregroundColor(.secondary)
                     .padding()
             }
-            
-            // Substitutions
-            if !game.substitutions.isEmpty {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Substitutions")
-                        .font(.headline)
-                        .padding(.horizontal)
-                    
-                    VStack(spacing: 8) {
-                        ForEach(game.substitutions.sorted { $0.minute < $1.minute }, id: \.playerIn) { sub in
-                            if let playerIn = team.players.first(where: { $0.id == sub.playerIn }),
-                               let playerOut = team.players.first(where: { $0.id == sub.playerOut }) {
-                                
-                                SubstitutionRow(
-                                    playerIn: playerIn,
-                                    playerOut: playerOut,
-                                    minute: sub.minute,
-                                    reason: sub.reason
-                                )
-                            }
-                        }
-                    }
-                    .padding(.horizontal)
-                }
-            }
+
         }
         .padding(.vertical)
     }
@@ -8309,31 +8285,6 @@ struct FullCaptureGameLineupTab: View {
                         Text("No lineup recorded for this game")
                             .foregroundColor(.secondary)
                             .padding()
-                    }
-                    
-                    // Substitutions
-                    if !game.substitutions.isEmpty {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Substitutions")
-                                .font(.headline)
-                                .padding(.horizontal)
-                            
-                            VStack(spacing: 8) {
-                                ForEach(game.substitutions.sorted { $0.minute < $1.minute }, id: \.playerIn) { sub in
-                                    if let playerIn = team.players.first(where: { $0.id == sub.playerIn }),
-                                       let playerOut = team.players.first(where: { $0.id == sub.playerOut }) {
-                                        
-                                        SubstitutionRow(
-                                            playerIn: playerIn,
-                                            playerOut: playerOut,
-                                            minute: sub.minute,
-                                            reason: sub.reason
-                                        )
-                                    }
-                                }
-                            }
-                            .padding(.horizontal)
-                        }
                     }
                 }
                 .padding(.vertical)

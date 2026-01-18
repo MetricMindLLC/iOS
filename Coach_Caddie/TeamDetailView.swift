@@ -936,7 +936,7 @@ struct SimplePlayerRowView: View {
 }
 
 enum GameSectionType {
-    case inProgress, upcoming, completed
+    case inProgress, upcoming, completed, unscored
 }
 
 struct TeamGamesTab: View {
@@ -965,6 +965,12 @@ struct TeamGamesTab: View {
     private var completedGames: [Game] {
         currentTeam.games
             .filter { $0.result != nil }
+            .sorted { $0.date > $1.date }
+    }
+    
+    private var unscoredGames: [Game] {
+        currentTeam.games
+            .filter { $0.result == nil && $0.date < Calendar.current.startOfDay(for: Date()) && !Calendar.current.isDateInToday($0.date) }
             .sorted { $0.date > $1.date }
     }
     
@@ -1014,6 +1020,17 @@ struct TeamGamesTab: View {
                                 iconColor: .red,
                                 games: inProgressGames,
                                 sectionType: .inProgress
+                            )
+                        }
+                        
+                        // Unscored Games Section (past games without results)
+                        if !unscoredGames.isEmpty {
+                            gameSection(
+                                title: "Unscored",
+                                icon: "questionmark.circle.fill",
+                                iconColor: Color.orange,
+                                games: unscoredGames,
+                                sectionType: .unscored
                             )
                         }
                         
@@ -1258,7 +1275,7 @@ struct EnhancedGameCard: View {
     
     private var dayString: String {
         if isToday { return "Today" }
-        if isTomorrow { return "Tomorrow" }
+        if isTomorrow { return "TMRW" }
         return game.date.formatted(.dateTime.weekday(.abbreviated))
     }
     
@@ -1403,7 +1420,6 @@ struct EnhancedGameCard: View {
         )
     }
     
-    // MARK: - Styling Helpers
     private var dateColumnBackground: Color {
         switch sectionType {
         case .inProgress:
@@ -1412,34 +1428,36 @@ struct EnhancedGameCard: View {
             return isToday ? .green : teamColor
         case .completed:
             return Color(.systemGray5)
+        case .unscored:
+            return .orange
         }
     }
-    
+
     private var dateColumnForeground: Color {
         switch sectionType {
-        case .inProgress, .upcoming:
+        case .inProgress, .upcoming, .unscored:
             return .white
         case .completed:
             return .primary
         }
     }
-    
+
     private var shadowOpacity: Double {
         switch sectionType {
         case .inProgress:
             return 0.15
-        case .upcoming:
+        case .upcoming, .unscored:
             return 0.1
         case .completed:
             return 0.03
         }
     }
-    
+
     private var shadowRadius: CGFloat {
         switch sectionType {
         case .inProgress:
             return 10
-        case .upcoming:
+        case .upcoming, .unscored:
             return 8
         case .completed:
             return 4
@@ -1693,7 +1711,7 @@ struct EnhancedPracticeCard: View {
     
     private var dayString: String {
         if isToday { return "Today" }
-        if isTomorrow { return "Tomorrow" }
+        if isTomorrow { return "TMRW" }
         return practice.date.formatted(.dateTime.weekday(.abbreviated))
     }
     
@@ -1706,6 +1724,8 @@ struct EnhancedPracticeCard: View {
                         .font(.system(size: 11, weight: .bold))
                         .foregroundColor(isUpcoming ? .white : .secondary)
                         .textCase(.uppercase)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                 } else {
                     Text(practice.date.formatted(.dateTime.weekday(.abbreviated)))
                         .font(.system(size: 10, weight: .medium))

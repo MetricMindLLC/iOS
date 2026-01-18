@@ -1106,7 +1106,7 @@ var teamsICreated: [Team] {
         
         // UPDATED: Only load local data if user is authenticated
         guard let currentUser = Auth.auth().currentUser, !currentUser.isAnonymous else {
-            print("🔒 No authenticated user - not loading local data")
+            print("🔑 No authenticated user - not loading local data")
             return
         }
         
@@ -1114,13 +1114,13 @@ var teamsICreated: [Team] {
         
         loadLocalData()
         
-        // ADDED: Recalculate stats after loading data to ensure they're current
-        recalculateAllStatsAfterLoad()
-        
         Task {
             await loadTeamsFromFirebase()
             await MainActor.run {
+                // CRITICAL FIX: Recalculate stats AFTER Firebase data is fully loaded
+                recalculateAllStatsAfterLoad()
                 self.isCurrentlyLoadingData = false
+                print("✅ Stats recalculated after Firebase load complete")
             }
         }
     }
@@ -1723,12 +1723,13 @@ var teamsICreated: [Team] {
             
             // CRITICAL FIX: Preserve the manual adjustments before resetting
             let manualAdjustments = updatedTeam.players[playerIndex].seasonStats.manualAdjustments
+            let seasonManualAdjustments = updatedTeam.players[playerIndex].seasonStats.seasonManualAdjustments
             
-            var newStats = PlayerSeasonStats() // Reset to zero
+            var newStats = PlayerStats() // Reset to zero
             
             // Count stats from all games
             for game in team.games {
-                // Count from game events
+                // Count from game events (manually entered games)
                 for event in game.gameEvents where event.playerId == playerId {
                     switch event.eventType {
                     case .goal:
@@ -1747,6 +1748,30 @@ var teamsICreated: [Team] {
                         newStats.redCards += 1
                     default:
                         break
+                    }
+                }
+                
+                // CRITICAL FIX: Also count from auditLog (live game mode)
+                if let auditLog = game.auditLog {
+                    for entry in auditLog where entry.playerId == playerId {
+                        switch entry.eventType {
+                        case .goal:
+                            newStats.goals += 1
+                        case .assist:
+                            newStats.assists += 1
+                        case .shot:
+                            newStats.shots += 1
+                        case .save:
+                            newStats.saves += 1
+                        case .goalAgainst:
+                            newStats.goalsConceded += 1
+                        case .yellowCard:
+                            newStats.yellowCards += 1
+                        case .redCard:
+                            newStats.redCards += 1
+                        default:
+                            break
+                        }
                     }
                 }
                 
@@ -1785,8 +1810,23 @@ var teamsICreated: [Team] {
             newStats.minutesPlayed += manualAdjustments["minutesPlayed"] ?? 0
             newStats.shotOnTarget += manualAdjustments["shotOnTarget"] ?? 0
             
-            // CRITICAL FIX: Restore the manual adjustments dictionary
+            // CRITICAL FIX: Apply season manual adjustments to the calculated stats
+            for (_, adjustments) in seasonManualAdjustments {
+                newStats.goals += adjustments["goals"] ?? 0
+                newStats.assists += adjustments["assists"] ?? 0
+                newStats.shots += adjustments["shots"] ?? 0
+                newStats.saves += adjustments["saves"] ?? 0
+                newStats.goalsConceded += adjustments["goalsConceded"] ?? 0
+                newStats.yellowCards += adjustments["yellowCards"] ?? 0
+                newStats.redCards += adjustments["redCards"] ?? 0
+                newStats.gamesPlayed += adjustments["gamesPlayed"] ?? 0
+                newStats.minutesPlayed += adjustments["minutesPlayed"] ?? 0
+                newStats.shotOnTarget += adjustments["shotOnTarget"] ?? 0
+            }
+            
+            // CRITICAL FIX: Restore the adjustment dictionaries
             newStats.manualAdjustments = manualAdjustments
+            newStats.seasonManualAdjustments = seasonManualAdjustments
             
             updatedTeam.players[playerIndex].seasonStats = newStats
         }

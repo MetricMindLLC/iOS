@@ -575,10 +575,10 @@ struct EnhancedQuickStatsView: View {
                     let seasonManualAdjustments = updatedTeam.players[playerIndex].seasonStats.seasonManualAdjustments
                     
                     var calculatedStats = PlayerStats() // Start fresh
-                    
+
                     // Count stats from all games (ALWAYS count, no locks)
                     for game in team.games {
-                        // Count from game events
+                        // Count from game events (manually entered games)
                         for event in game.gameEvents where event.playerId == playerId {
                             switch event.eventType {
                             case .goal:
@@ -597,6 +597,30 @@ struct EnhancedQuickStatsView: View {
                                 calculatedStats.redCards += 1
                             default:
                                 break
+                            }
+                        }
+                        
+                        // CRITICAL FIX: Also count from auditLog (live game mode)
+                        if let auditLog = game.auditLog {
+                            for entry in auditLog where entry.playerId == playerId {
+                                switch entry.eventType {
+                                case .goal:
+                                    calculatedStats.goals += 1
+                                case .assist:
+                                    calculatedStats.assists += 1
+                                case .shot:
+                                    calculatedStats.shots += 1
+                                case .save:
+                                    calculatedStats.saves += 1
+                                case .goalAgainst:
+                                    calculatedStats.goalsConceded += 1
+                                case .yellowCard:
+                                    calculatedStats.yellowCards += 1
+                                case .redCard:
+                                    calculatedStats.redCards += 1
+                                default:
+                                    break
+                                }
                             }
                         }
 
