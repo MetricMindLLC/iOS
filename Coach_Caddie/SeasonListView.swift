@@ -17,13 +17,18 @@ struct SeasonListView: View {
     @State private var refreshID = UUID()
     @State private var showArchived: Bool = false
     
+    // CRITICAL: Get team directly from teamManager to ensure fresh data
+    private var currentTeam: Team {
+        teamManager.teams.first(where: { $0.id == team.id }) ?? team
+    }
+    
     // Check migration locally - only check games, not practices
     private var needsMigration: Bool {
         guard !isMigrating else { return false }
         
-        let validSeasonIds = Set(team.seasons.map { $0.id })
+        let validSeasonIds = Set(currentTeam.seasons.map { $0.id })
         
-        let unassignedGames = team.games.filter { game in
+        let unassignedGames = currentTeam.games.filter { game in
             game.seasonId == nil || (game.seasonId != nil && !validSeasonIds.contains(game.seasonId!))
         }.count
         
@@ -31,15 +36,15 @@ struct SeasonListView: View {
     }
 
     private var unassignedGamesCount: Int {
-        let validSeasonIds = Set(team.seasons.map { $0.id })
-        return team.games.filter { game in
+        let validSeasonIds = Set(currentTeam.seasons.map { $0.id })
+        return currentTeam.games.filter { game in
             game.seasonId == nil || (game.seasonId != nil && !validSeasonIds.contains(game.seasonId!))
         }.count
     }
     
     private var unassignedPracticesCount: Int {
-        let validSeasonIds = Set(team.seasons.map { $0.id })
-        return team.practices.filter { practice in
+        let validSeasonIds = Set(currentTeam.seasons.map { $0.id })
+        return currentTeam.practices.filter { practice in
             practice.seasonId == nil || (practice.seasonId != nil && !validSeasonIds.contains(practice.seasonId!))
         }.count
     }
@@ -65,11 +70,23 @@ struct SeasonListView: View {
                 .disabled(isMigrating)
             }
         }
-        .sheet(isPresented: $showingNewSeason) {
+        .sheet(isPresented: $showingNewSeason, onDismiss: {
+            // Sync binding from manager and refresh
+            if let index = teamManager.teams.firstIndex(where: { $0.id == team.id }) {
+                team = teamManager.teams[index]
+            }
+            refreshID = UUID()
+        }) {
             NewSeasonView(team: $team)
                 .environmentObject(teamManager)
         }
-        .sheet(item: $selectedSeasonForEdit) { season in
+        .sheet(item: $selectedSeasonForEdit, onDismiss: {
+            // Sync binding from manager and refresh
+            if let index = teamManager.teams.firstIndex(where: { $0.id == team.id }) {
+                team = teamManager.teams[index]
+            }
+            refreshID = UUID()
+        }) { season in
             EditSeasonView(team: $team, season: season)
                 .environmentObject(teamManager)
         }
@@ -82,8 +99,8 @@ struct SeasonListView: View {
             }
         } message: {
             if let season = seasonToDelete {
-                let gameCount = team.games(for: season.id).count
-                let practiceCount = team.practices(for: season.id).count
+                let gameCount = currentTeam.games(for: season.id).count
+                let practiceCount = currentTeam.practices(for: season.id).count
                 Text("Are you sure you want to delete '\(season.displayName)'? This will also remove the season assignment from \(gameCount) game(s) and \(practiceCount) practice(s).")
             }
         }
@@ -98,7 +115,7 @@ struct SeasonListView: View {
         .alert("Migration Complete", isPresented: $showingMigrationSuccess) {
             Button("OK") { }
         } message: {
-            Text("Successfully created '\(migratedSeasonName)' and assigned \(team.games.count) game(s) and \(team.practices.count) practice(s) to it.")
+            Text("Successfully created '\(migratedSeasonName)' and assigned \(currentTeam.games.count) game(s) and \(currentTeam.practices.count) practice(s) to it.")
         }
         .alert("Migration Failed", isPresented: $showingMigrationError) {
             Button("OK") { }
@@ -112,7 +129,11 @@ struct SeasonListView: View {
         }
         .allowsHitTesting(!isMigrating)
         .onAppear {
-            showArchived = team.showArchivedSeasons
+            showArchived = currentTeam.showArchivedSeasons
+        }
+        // CRITICAL: Watch for changes in teamManager and refresh
+        .onReceive(teamManager.objectWillChange) { _ in
+            refreshID = UUID()
         }
     }
 
@@ -127,12 +148,12 @@ struct SeasonListView: View {
 
     @ViewBuilder
     private var seasonStatusSection: some View {
-        if !team.seasons.isEmpty {
+        if !currentTeam.seasons.isEmpty {
             Section {
                 HStack {
-                    Image(systemName: team.seasonStatus.icon)
+                    Image(systemName: currentTeam.seasonStatus.icon)
                         .foregroundColor(.accentColor)
-                    Text(team.seasonStatus.displayText)
+                    Text(currentTeam.seasonStatus.displayText)
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                     Spacer()
@@ -323,7 +344,7 @@ struct SeasonListView: View {
     
     private var currentSeasons: [Season] {
         let today = Calendar.current.startOfDay(for: Date())
-        return team.seasons.filter { season in
+        return currentTeam.seasons.filter { season in
             let start = Calendar.current.startOfDay(for: season.startDate)
             let end = Calendar.current.startOfDay(for: season.endDate)
             let isCurrent = today >= start && today <= end
@@ -334,7 +355,7 @@ struct SeasonListView: View {
 
     private var upcomingSeasons: [Season] {
         let today = Calendar.current.startOfDay(for: Date())
-        return team.seasons.filter { season in
+        return currentTeam.seasons.filter { season in
             let isUpcoming = Calendar.current.startOfDay(for: season.startDate) > today
             let shouldShow = showArchived || !season.isArchived
             return isUpcoming && shouldShow
@@ -343,7 +364,7 @@ struct SeasonListView: View {
 
     private var pastSeasons: [Season] {
         let today = Calendar.current.startOfDay(for: Date())
-        return team.seasons.filter { season in
+        return currentTeam.seasons.filter { season in
             let isPast = Calendar.current.startOfDay(for: season.endDate) < today
             let shouldShow = showArchived || !season.isArchived
             return isPast && shouldShow
@@ -412,27 +433,39 @@ struct SeasonListView: View {
                 try await teamManager.firebaseManager.deleteSeason(season, from: team)
                 
                 await MainActor.run {
-                    team.seasons.removeAll { $0.id == season.id }
-                    
-                    // Clear seasonId from associated games and practices
-                    for index in team.games.indices {
-                        if team.games[index].seasonId == season.id {
-                            team.games[index].seasonId = nil
+                    // Update the manager's team first
+                    if let teamIndex = teamManager.teams.firstIndex(where: { $0.id == team.id }) {
+                        teamManager.teams[teamIndex].seasons.removeAll { $0.id == season.id }
+                        
+                        // Clear seasonId from associated games and practices
+                        for index in teamManager.teams[teamIndex].games.indices {
+                            if teamManager.teams[teamIndex].games[index].seasonId == season.id {
+                                teamManager.teams[teamIndex].games[index].seasonId = nil
+                            }
                         }
-                    }
-                    for index in team.practices.indices {
-                        if team.practices[index].seasonId == season.id {
-                            team.practices[index].seasonId = nil
+                        for index in teamManager.teams[teamIndex].practices.indices {
+                            if teamManager.teams[teamIndex].practices[index].seasonId == season.id {
+                                teamManager.teams[teamIndex].practices[index].seasonId = nil
+                            }
                         }
+                        
+                        // Clear active season if this was it
+                        if teamManager.teams[teamIndex].activeSeasonId == season.id {
+                            teamManager.teams[teamIndex].activeSeasonId = nil
+                        }
+                        
+                        // Update the binding FROM the manager
+                        team = teamManager.teams[teamIndex]
+                        
+                        // Save locally
+                        teamManager.saveLocalData()
+                        
+                        // CRITICAL: Force TeamManager to notify observers
+                        teamManager.objectWillChange.send()
+                        
+                        // Force UI refresh
+                        refreshID = UUID()
                     }
-                    
-                    // Clear active season if this was it
-                    if team.activeSeasonId == season.id {
-                        team.activeSeasonId = nil
-                    }
-                    
-                    updateTeamInManager()
-                    refreshID = UUID()
                 }
             } catch {
                 print("Failed to delete season: \(error)")

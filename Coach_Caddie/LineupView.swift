@@ -144,10 +144,11 @@ struct LineupView: View {
         }
         .sheet(isPresented: $showingGameSelector) {
             ModernGameSelectorView(
-                team: team,
+                teamId: team.id,
                 selectedGame: $selectedGame,
                 showingCreateGame: $showingCreateGame
             )
+            .environmentObject(teamManager)
         }
         .sheet(isPresented: $showingCreateGame) {
             SuperEnhancedNewGameView(team: $team)
@@ -4253,10 +4254,16 @@ struct ModernGameSelectorButton: View {
 
 // MARK: - Modern Game Selector View (UPDATED)
 struct ModernGameSelectorView: View {
-    let team: Team
+    let teamId: UUID
     @Binding var selectedGame: Game?
     @Binding var showingCreateGame: Bool
+    @EnvironmentObject var teamManager: TeamManager
     @Environment(\.presentationMode) var presentationMode
+    
+    // CRITICAL: Get team directly from teamManager to ensure fresh data
+    private var team: Team {
+        teamManager.teams.first(where: { $0.id == teamId }) ?? Team(name: "Unknown", format: .elevenVEleven)
+    }
     
     // Get current date at start of day for comparison
     private var todayStart: Date {

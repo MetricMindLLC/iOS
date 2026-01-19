@@ -1,5 +1,7 @@
 import SwiftUI
 
+import SwiftUI
+
 struct SuperEnhancedNewGameView: View {
     @Binding var team: Team
     @EnvironmentObject var teamManager: TeamManager
@@ -12,6 +14,11 @@ struct SuperEnhancedNewGameView: View {
     @State private var showingLocationPicker = false
     @State private var selectedLocation: GameLocation?
     @Environment(\.presentationMode) var presentationMode
+    
+    // CRITICAL: Get team directly from teamManager to ensure fresh data
+    private var currentTeam: Team {
+        teamManager.teams.first(where: { $0.id == team.id }) ?? team
+    }
     
     // Common locations for quick selection
     let commonLocations = [
@@ -327,7 +334,7 @@ struct SuperEnhancedNewGameView: View {
         }()
         
         // Auto-assign to the effective active season
-        let seasonId = team.seasonIdForNewEvents
+        let seasonId = currentTeam.seasonIdForNewEvents
         
         let game = Game(
             seasonId: seasonId,  // NEW: Auto-assign season
