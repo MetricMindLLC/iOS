@@ -844,7 +844,14 @@ struct Team: Identifiable, Codable, Equatable {
     var seasonStatus: SeasonStatus {
         let today = Calendar.current.startOfDay(for: Date())
         
-        // Check if we're currently in a season
+        // FIRST: Check if user has manually set an active season
+        if let activeId = activeSeasonId,
+           let activeSeason = seasons.first(where: { $0.id == activeId }),
+           !activeSeason.isArchived {
+            return .inSeason(activeSeason)
+        }
+        
+        // Check if we're currently in a season (by dates)
         let currentSeason = seasons.first { season in
             let start = Calendar.current.startOfDay(for: season.startDate)
             let end = Calendar.current.startOfDay(for: season.endDate)

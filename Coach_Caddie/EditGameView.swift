@@ -13,6 +13,7 @@ struct EditGameView: View {
     @State private var notes: String
     @State private var showingLocationPicker = false
     @State private var selectedLocation: GameLocation?
+    @State private var selectedSeasonId: UUID?  // NEW: Season selection
     
     // Score editing states
     @State private var hasScore: Bool
@@ -20,6 +21,29 @@ struct EditGameView: View {
     @State private var goalsAgainst: Int
     
     @Environment(\.presentationMode) var presentationMode
+    
+    // CRITICAL: Get team directly from teamManager to ensure fresh data
+    private var currentTeam: Team {
+        teamManager.teams.first(where: { $0.id == team.id }) ?? team
+    }
+    
+    // Seasons available for selection (current, upcoming, or recently ended)
+    private var eligibleSeasons: [Season] {
+        let today = Calendar.current.startOfDay(for: Date())
+        let thirtyDaysAgo = Calendar.current.date(byAdding: .day, value: -30, to: today) ?? today
+        
+        return currentTeam.seasons.filter { season in
+            let start = Calendar.current.startOfDay(for: season.startDate)
+            let end = Calendar.current.startOfDay(for: season.endDate)
+            
+            // Include if: current, upcoming, or ended within 30 days
+            let isCurrent = today >= start && today <= end
+            let isUpcoming = start > today
+            let isRecentlyEnded = end >= thirtyDaysAgo && end < today
+            
+            return (isCurrent || isUpcoming || isRecentlyEnded) && !season.isArchived
+        }.sorted { $0.startDate > $1.startDate }
+    }
     
     // Common locations for quick selection
     let commonLocations = [
@@ -38,6 +62,7 @@ struct EditGameView: View {
         self._gameDate = State(initialValue: game.wrappedValue.date)
         self._isHome = State(initialValue: game.wrappedValue.isHome)
         self._notes = State(initialValue: game.wrappedValue.notes ?? "")
+        self._selectedSeasonId = State(initialValue: game.wrappedValue.seasonId)  // NEW
         
         // Initialize score states
         self._hasScore = State(initialValue: game.wrappedValue.result != nil)
@@ -90,6 +115,31 @@ struct EditGameView: View {
                                         RoundedRectangle(cornerRadius: 10)
                                             .strokeBorder(Color.gray.opacity(0.2), lineWidth: 1)
                                     )
+                            }
+                            
+                            // Season Picker
+                            if !eligibleSeasons.isEmpty {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Label("Season", systemImage: "calendar.badge.clock")
+                                        .font(.headline)
+                                        .foregroundColor(.primary)
+                                    
+                                    Picker("Season", selection: $selectedSeasonId) {
+                                        Text("No Season").tag(nil as UUID?)
+                                        ForEach(eligibleSeasons) { season in
+                                            Text(season.displayName + (currentTeam.activeSeasonId == season.id ? " (Active)" : ""))
+                                                .tag(season.id as UUID?)
+                                        }
+                                    }
+                                    .pickerStyle(.menu)
+                                    .padding()
+                                    .background(Color(.systemBackground))
+                                    .cornerRadius(10)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .strokeBorder(Color.gray.opacity(0.2), lineWidth: 1)
+                                    )
+                                }
                             }
                             
                             // Date and Time Field
@@ -492,6 +542,8 @@ struct EditGameView: View {
         print("   New isHome: \(isHome)")
         print("   Original location: '\(game.location ?? "nil")'")
         print("   New location parts: location='\(location)', address='\(address)'")
+        print("   Original seasonId: \(game.seasonId?.uuidString ?? "nil")")
+        print("   New seasonId: \(selectedSeasonId?.uuidString ?? "nil")")
         print("   Has score: \(hasScore)")
         if hasScore {
             print("   Goals for: \(goalsFor), Goals against: \(goalsAgainst)")
@@ -516,6 +568,7 @@ struct EditGameView: View {
         updatedGame.isHome = isHome
         updatedGame.location = gameLocation
         updatedGame.notes = notes.isEmpty ? nil : notes
+        updatedGame.seasonId = selectedSeasonId
         
         // Handle score
         if hasScore {

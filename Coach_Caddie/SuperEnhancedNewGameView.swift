@@ -2,6 +2,8 @@ import SwiftUI
 
 import SwiftUI
 
+import SwiftUI
+
 struct SuperEnhancedNewGameView: View {
     @Binding var team: Team
     @EnvironmentObject var teamManager: TeamManager
@@ -13,11 +15,30 @@ struct SuperEnhancedNewGameView: View {
     @State private var notes = ""
     @State private var showingLocationPicker = false
     @State private var selectedLocation: GameLocation?
+    @State private var selectedSeasonId: UUID?  // NEW: User-selected season
     @Environment(\.presentationMode) var presentationMode
     
     // CRITICAL: Get team directly from teamManager to ensure fresh data
     private var currentTeam: Team {
         teamManager.teams.first(where: { $0.id == team.id }) ?? team
+    }
+    
+    // Seasons available for selection (current, upcoming, or recently ended)
+    private var eligibleSeasons: [Season] {
+        let today = Calendar.current.startOfDay(for: Date())
+        let thirtyDaysAgo = Calendar.current.date(byAdding: .day, value: -30, to: today) ?? today
+        
+        return currentTeam.seasons.filter { season in
+            let start = Calendar.current.startOfDay(for: season.startDate)
+            let end = Calendar.current.startOfDay(for: season.endDate)
+            
+            // Include if: current, upcoming, or ended within 30 days
+            let isCurrent = today >= start && today <= end
+            let isUpcoming = start > today
+            let isRecentlyEnded = end >= thirtyDaysAgo && end < today
+            
+            return (isCurrent || isUpcoming || isRecentlyEnded) && !season.isArchived
+        }.sorted { $0.startDate > $1.startDate }
     }
     
     // Common locations for quick selection
@@ -62,6 +83,31 @@ struct SuperEnhancedNewGameView: View {
                                         RoundedRectangle(cornerRadius: 10)
                                             .strokeBorder(Color.gray.opacity(0.2), lineWidth: 1)
                                     )
+                            }
+                            
+                            // Season Picker (moved up)
+                            if !eligibleSeasons.isEmpty {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Label("Season", systemImage: "calendar.badge.clock")
+                                        .font(.headline)
+                                        .foregroundColor(.primary)
+                                    
+                                    Picker("Season", selection: $selectedSeasonId) {
+                                        Text("No Season").tag(nil as UUID?)
+                                        ForEach(eligibleSeasons) { season in
+                                            Text(season.displayName + (currentTeam.activeSeasonId == season.id ? " (Active)" : ""))
+                                                .tag(season.id as UUID?)
+                                        }
+                                    }
+                                    .pickerStyle(.menu)
+                                    .padding()
+                                    .background(Color(.systemBackground))
+                                    .cornerRadius(10)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .strokeBorder(Color.gray.opacity(0.2), lineWidth: 1)
+                                    )
+                                }
                             }
                             
                             // Date and Time Field
@@ -179,7 +225,7 @@ struct SuperEnhancedNewGameView: View {
                             }
                         }
                         .padding(.horizontal)
-                        
+
                         // Game Summary Preview
                         if isFormValid {
                             VStack(alignment: .leading, spacing: 12) {
@@ -319,9 +365,12 @@ struct SuperEnhancedNewGameView: View {
                     customAddress: $address
                 )
             }
+            .onAppear {
+                // Initialize with the current active season
+                selectedSeasonId = currentTeam.seasonIdForNewEvents
+            }
         }
     }
-    
     func createGame() {
         let gameLocation: String? = {
             if location.isEmpty {
@@ -333,11 +382,9 @@ struct SuperEnhancedNewGameView: View {
             }
         }()
         
-        // Auto-assign to the effective active season
-        let seasonId = currentTeam.seasonIdForNewEvents
-        
+        // Use user-selected season (or nil if none selected)
         let game = Game(
-            seasonId: seasonId,  // NEW: Auto-assign season
+            seasonId: selectedSeasonId,
             date: gameDate,
             opponent: opponent.trimmingCharacters(in: .whitespacesAndNewlines),
             isHome: isHome,
@@ -346,14 +393,14 @@ struct SuperEnhancedNewGameView: View {
         )
         
         // Debug log
-        if let seasonId = seasonId,
-           let season = team.seasons.first(where: { $0.id == seasonId }) {
-            print("📅 New game auto-assigned to season: \(season.displayName)")
+        if let seasonId = selectedSeasonId,
+           let season = currentTeam.seasons.first(where: { $0.id == seasonId }) {
+            print("📅 New game assigned to season: \(season.displayName)")
         } else {
-            print("⚠️ New game created without season assignment (no active season)")
+            print("⚠️ New game created without season assignment")
         }
         
-        teamManager.addGame(to: team, game: game)
+        teamManager.addGame(to: currentTeam, game: game)
         presentationMode.wrappedValue.dismiss()
     }
     // Game Location Picker View - RENAMED FROM LocationPickerView

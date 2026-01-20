@@ -175,7 +175,7 @@ struct SeasonListView: View {
         if !currentSeasons.isEmpty {
             Section {
                 ForEach(currentSeasons) { season in
-                    SeasonRowView(season: season, team: team, isEffectiveActive: team.effectiveActiveSeason?.id == season.id)
+                    SeasonRowView(season: season, team: currentTeam, isEffectiveActive: currentTeam.effectiveActiveSeason?.id == season.id)
                         .contentShape(Rectangle())
                         .onTapGesture {
                             selectedSeasonForEdit = season
@@ -207,7 +207,7 @@ struct SeasonListView: View {
         if !upcomingSeasons.isEmpty {
             Section {
                 ForEach(upcomingSeasons) { season in
-                    SeasonRowView(season: season, team: team, isEffectiveActive: team.effectiveActiveSeason?.id == season.id)
+                    SeasonRowView(season: season, team: currentTeam, isEffectiveActive: currentTeam.effectiveActiveSeason?.id == season.id)
                         .contentShape(Rectangle())
                         .onTapGesture {
                             selectedSeasonForEdit = season
@@ -232,7 +232,7 @@ struct SeasonListView: View {
         if !pastSeasons.isEmpty {
             Section {
                 ForEach(pastSeasons) { season in
-                    SeasonRowView(season: season, team: team, isEffectiveActive: false)
+                    SeasonRowView(season: season, team: currentTeam, isEffectiveActive: false)
                         .opacity(season.isArchived ? 0.6 : 1.0)
                         .contentShape(Rectangle())
                         .onTapGesture {
@@ -1130,7 +1130,6 @@ struct PlayerSelectionRow: View {
     }
 }
 
-// MARK: - Edit Season View
 struct EditSeasonView: View {
     @Binding var team: Team
     let season: Season
@@ -1146,6 +1145,11 @@ struct EditSeasonView: View {
     @State private var isSaving = false
     @State private var showingRosterView = false
     @State private var showingGuestPlayers = false
+    
+    // CRITICAL: Get team directly from teamManager to ensure fresh data
+    private var currentTeam: Team {
+        teamManager.teams.first(where: { $0.id == team.id }) ?? team
+    }
     
     init(team: Binding<Team>, season: Season) {
         self._team = team
@@ -1190,9 +1194,9 @@ struct EditSeasonView: View {
                 
                 // Stats Summary
                 Section {
-                    let games = team.games(for: season.id)
-                    let practices = team.practices(for: season.id)
-                    let record = team.record(for: season.id)
+                    let games = currentTeam.games(for: season.id)
+                    let practices = currentTeam.practices(for: season.id)
+                    let record = currentTeam.record(for: season.id)
                     
                     HStack {
                         Text("Games")
@@ -1255,7 +1259,7 @@ struct EditSeasonView: View {
                 Section {
                     Toggle("Archived", isOn: $isArchived)
                     
-                    if team.activeSeasonId != season.id {
+                    if currentTeam.activeSeasonId != season.id {
                         Button("Set as Active Season") {
                             setAsActive()
                         }
@@ -1325,7 +1329,11 @@ struct EditSeasonView: View {
         
         // Save locally only
         teamManager.saveLocalData()
+        
+        // CRITICAL: Notify observers to refresh UI
+        teamManager.objectWillChange.send()
     }
+    
     private func saveSeason() {
         isSaving = true
         
