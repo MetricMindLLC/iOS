@@ -48,10 +48,9 @@ enum MembershipType: String, Codable, CaseIterable {
 // MARK: - Subscription Level
 enum SubscriptionLevel: String, Codable, Equatable {
     case free = "free"               // Legacy unlimited accounts
-    case trial = "trial"             // 3-day free trial
-    case pro = "pro"                // $3.49/month
-    case premium = "premium"         // $6.99/month
-    case club = "club"              // $55.99/month for clubs
+    case trial = "trial"             // 7-day free trial
+    case coach = "coach"             // $4.99/month - renamed from pro
+    case proCoach = "proCoach"       // $9.99/month - renamed from premium
     case sharedAccess = "sharedAccess"  // FREE: Access to shared teams only
     case cancelled = "cancelled"     // Cancelled but data retained
     case expired = "expired"         // Hard deleted after 180 days
@@ -60,9 +59,8 @@ enum SubscriptionLevel: String, Codable, Equatable {
         switch self {
         case .free: return "Legacy (Unlimited)"
         case .trial: return "Free Trial"
-        case .pro: return "Pro Coach"
-        case .premium: return "Premium Coach"
-        case .club: return "Club Administrator"
+        case .coach: return "Coach"
+        case .proCoach: return "Pro Coach"
         case .sharedAccess: return "Shared Team Access"
         case .cancelled: return "Cancelled"
         case .expired: return "Expired"
@@ -72,10 +70,9 @@ enum SubscriptionLevel: String, Codable, Equatable {
     var monthlyPrice: String {
         switch self {
         case .free: return "Free Forever"
-        case .trial: return "Free for 3 days"
-        case .pro: return "$3.49/month"        // CHANGED: from $4.99
-        case .premium: return "$6.99/month"    // CHANGED: from $9.99
-        case .club: return "$55.99/month"      // CHANGED: from $79.99
+        case .trial: return "Free for 7 days"
+        case .coach: return "$4.99/month"
+        case .proCoach: return "$9.99/month"
         case .sharedAccess: return "Free (Shared Access)"
         case .cancelled, .expired: return "Inactive"
         }
@@ -84,10 +81,9 @@ enum SubscriptionLevel: String, Codable, Equatable {
     var yearlyPrice: String {
         switch self {
         case .free: return "Free Forever"
-        case .trial: return "Free for 3 days"
-        case .pro: return "$34.99/year"        // CHANGED: from $49.99
-        case .premium: return "$69.99/year"    // CHANGED: from $99.99
-        case .club: return "$559.99/year"      // CHANGED: from $799.99
+        case .trial: return "Free for 7 days"
+        case .coach: return "$39.99/year (save 33%)"
+        case .proCoach: return "$79.99/year (save 33%)"
         case .sharedAccess: return "Free (Shared Access)"
         case .cancelled, .expired: return "Inactive"
         }
@@ -95,7 +91,7 @@ enum SubscriptionLevel: String, Codable, Equatable {
     
     var isActive: Bool {
         switch self {
-        case .free, .trial, .pro, .premium, .club, .sharedAccess: return true
+        case .free, .trial, .coach, .proCoach, .sharedAccess: return true
         case .cancelled, .expired: return false
         }
     }
@@ -103,14 +99,14 @@ enum SubscriptionLevel: String, Codable, Equatable {
     var canCreateTeams: Bool {
         switch self {
         case .sharedAccess: return false  // Cannot create own teams
-        case .free, .trial, .pro, .premium, .club: return true
+        case .free, .trial, .coach, .proCoach: return true
         case .cancelled, .expired: return false
         }
     }
     
     var canGenerateInvites: Bool {
         switch self {
-        case .free, .trial, .pro, .premium, .club, .sharedAccess: return true
+        case .free, .trial, .coach, .proCoach, .sharedAccess: return true
         case .cancelled, .expired: return false
         }
     }
@@ -119,9 +115,8 @@ enum SubscriptionLevel: String, Codable, Equatable {
         switch self {
         case .free: return 999        // UNLIMITED for legacy accounts
         case .trial: return 1
-        case .pro: return 1
-        case .premium: return 3
-        case .club: return 20
+        case .coach: return 2         // 2 teams for Coach tier
+        case .proCoach: return 999    // Unlimited for Pro Coach
         case .sharedAccess: return 0  // Cannot create own teams
         case .cancelled, .expired: return 0
         }
@@ -131,10 +126,9 @@ enum SubscriptionLevel: String, Codable, Equatable {
         switch self {
         case .free: return 999        // UNLIMITED for legacy accounts
         case .trial: return 1
-        case .pro: return 2
-        case .premium: return 3
-        case .club: return 3
-        case .sharedAccess: return 3  // Inherit max from premium teams they can access
+        case .coach: return 2
+        case .proCoach: return 3
+        case .sharedAccess: return 3
         case .cancelled, .expired: return 0
         }
     }
@@ -142,11 +136,10 @@ enum SubscriptionLevel: String, Codable, Equatable {
     var maxParentInvitesPerTeam: Int {
         switch self {
         case .free: return 999        // UNLIMITED for legacy accounts
-        case .trial: return 10
-        case .pro: return 20
-        case .premium: return 20
-        case .club: return 20
-        case .sharedAccess: return 20 // Same as premium since they're coaching shared teams
+        case .trial: return 15
+        case .coach: return 25
+        case .proCoach: return 25
+        case .sharedAccess: return 25
         case .cancelled, .expired: return 0
         }
     }
@@ -154,34 +147,11 @@ enum SubscriptionLevel: String, Codable, Equatable {
     var maxViewerInvitesPerTeam: Int {
         switch self {
         case .free: return 999        // UNLIMITED for legacy accounts
-        case .trial: return 10
-        case .pro: return 20
-        case .premium: return 20
-        case .club: return 20
-        case .sharedAccess: return 20 // Same as premium since they're coaching shared teams
+        case .trial: return 15
+        case .coach: return 25
+        case .proCoach: return 25
+        case .sharedAccess: return 25
         case .cancelled, .expired: return 0
-        }
-    }
-    
-    // NEW: Club-specific permissions
-    var canManageClub: Bool {
-        switch self {
-        case .club: return true
-        default: return false
-        }
-    }
-    
-    var canViewClubAnalytics: Bool {
-        switch self {
-        case .club: return true
-        default: return false
-        }
-    }
-    
-    var canTransferPlayers: Bool {
-        switch self {
-        case .club: return true
-        default: return false
         }
     }
     
@@ -192,48 +162,39 @@ enum SubscriptionLevel: String, Codable, Equatable {
                 "🎉 Legacy Account - Free Forever!",
                 "Unlimited teams",
                 "Unlimited invites",
-                "All premium features"
+                "All features included"
             ]
         case .trial:
             return [
-                "3-day free trial",
+                "7-day free trial",
                 "1 team",
-                "1 coach invite",
-                "10 parent invites",
-                "10 viewer invites",
-                "Full team management"
+                "Full team management",
+                "Formation planning",
+                "Game & practice tracking"
             ]
-        case .pro:
+        case .coach:
             return [
-                "1 team",
-                "2 coach invites",
-                "20 parent invites",
-                "20 viewer invites",
+                "Up to 2 teams",
+                "2 coach invites per team",
+                "25 parent/viewer invites",
                 "Advanced statistics",
+                "Season management",
                 "Export data"
             ]
-        case .premium:
+        case .proCoach:
             return [
-                "3 teams",
+                "Unlimited teams",
                 "3 coach invites per team",
-                "20 parent/viewer invites per team",
+                "25 parent/viewer invites",
                 "Advanced statistics",
+                "Season management",
                 "Export data",
-                "Priority support"
-            ]
-        case .club:
-            return [
-                "20 teams per club",
-                "3 coach invites per team",
-                "20 parent/viewer invites per team",
-                "Club administrator controls",
                 "Priority support"
             ]
         case .sharedAccess:
             return [
                 "🎯 Shared Team Access",
-                "Full coach access to shared teams",
-                "Generate invites for your teams",
+                "Full access to invited teams",
                 "All coaching features",
                 "Free forever"
             ]
@@ -390,7 +351,7 @@ struct User: Identifiable, Codable, Equatable {
     // EXISTING: Check if trial has expired
     var isTrialExpired: Bool {
         guard subscriptionLevel == .trial else { return false }
-        let trialEndDate = Calendar.current.date(byAdding: .day, value: 3, to: trialStartDate) ?? trialStartDate
+        let trialEndDate = Calendar.current.date(byAdding: .day, value: 7, to: trialStartDate) ?? trialStartDate
         return Date() > trialEndDate
     }
     
@@ -408,7 +369,7 @@ struct User: Identifiable, Codable, Equatable {
     // EXISTING: Get days remaining in trial
     var trialDaysRemaining: Int {
         guard subscriptionLevel == .trial else { return 0 }
-        let trialEndDate = Calendar.current.date(byAdding: .day, value: 3, to: trialStartDate) ?? trialStartDate
+        let trialEndDate = Calendar.current.date(byAdding: .day, value: 7, to: trialStartDate) ?? trialStartDate
         let daysLeft = Calendar.current.dateComponents([.day], from: Date(), to: trialEndDate).day ?? 0
         return max(0, daysLeft)
     }

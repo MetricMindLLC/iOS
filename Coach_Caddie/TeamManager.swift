@@ -2724,9 +2724,8 @@ extension User {
     var maxTeamsAllowed: Int {
         switch subscriptionLevel {
         case .trial: return 1
-        case .pro: return 1
-        case .premium: return 3
-        case .club: return 20
+        case .coach: return 2
+        case .proCoach: return Int.max  // Unlimited
         case .free: return Int.max  // Legacy unlimited
         case .sharedAccess: return 0  // Can't create teams, only join
         case .cancelled, .expired: return 0

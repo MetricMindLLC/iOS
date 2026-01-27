@@ -122,11 +122,15 @@ struct ExpiredTrialUpgradeView: View {
             await storeKit.purchase(product)
             
             await MainActor.run {
-                if storeKit.errorMessage == nil {
+                showingPurchase = false
+                
+                // Check if purchase actually succeeded (not just no error)
+                if storeKit.isProductPurchased(product.id) {
                     // Purchase successful, dismiss modal
                     dismiss()
                 }
-                showingPurchase = false
+                // If cancelled or failed, just stay on the screen
+                // Error message will show if there was an actual error
             }
         }
     }
@@ -140,9 +144,8 @@ struct UpgradeOptionCard: View {
     
     private var subscriptionLevel: SubscriptionLevel? {
         switch product.id {
-        case let id where id.contains("pro"): return .pro
-        case let id where id.contains("premium"): return .premium
-        case let id where id.contains("club"): return .club
+        case let id where id.contains(".premium."): return .proCoach
+        case let id where id.contains(".pro."): return .coach
         default: return nil
         }
     }
@@ -156,7 +159,7 @@ struct UpgradeOptionCard: View {
                             .font(.headline)
                             .fontWeight(.semibold)
                         
-                        if product.id.contains("premium") {
+                        if product.id.contains("coach") && !product.id.contains("procoach") {
                             Text("POPULAR")
                                 .font(.caption)
                                 .fontWeight(.bold)

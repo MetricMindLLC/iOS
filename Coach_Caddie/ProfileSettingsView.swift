@@ -650,7 +650,7 @@ struct TeamInviteGeneratorView: View {
                             }
                         }
                         
-                        if user.subscriptionLevel == .trial || user.subscriptionLevel == .pro {
+                        if user.subscriptionLevel == .trial || user.subscriptionLevel == .coach {
                             Button("Upgrade Plan") {
                                 // Handle upgrade
                             }
@@ -660,7 +660,7 @@ struct TeamInviteGeneratorView: View {
                 }
                 
                 if let errorMessage = errorMessage {
-                    Section {
+                    Section {   
                         Text(errorMessage)
                             .foregroundColor(.red)
                             .font(.caption)
@@ -1232,7 +1232,7 @@ struct ProfileSettingsView: View {
 
     private func isActivePaidSubscription(_ level: SubscriptionLevel) -> Bool {
         switch level {
-        case .pro, .premium, .club:
+        case .coach, .proCoach:
             return true
         case .trial, .free, .sharedAccess, .cancelled, .expired:
             return false
@@ -1241,9 +1241,9 @@ struct ProfileSettingsView: View {
 
     private func shouldShowUpgradeButton(for subscriptionLevel: SubscriptionLevel) -> Bool {
         switch subscriptionLevel {
-        case .trial, .pro, .premium, .cancelled, .expired:
+        case .trial, .coach, .cancelled, .expired:
             return true
-        case .sharedAccess, .free, .club:
+        case .sharedAccess, .free, .proCoach:
             return false
         }
     }

@@ -2007,8 +2007,6 @@ struct PracticeDetailView: View {
     @Binding var team: Team
     @EnvironmentObject var teamManager: TeamManager
     @State private var showingEditPractice = false
-    @State private var showingShareSheet = false
-    @State private var shareImage: UIImage?
     @State private var showingDeleteAlert = false
     @State private var showingOptionsMenu = false
     @Environment(\.presentationMode) var presentationMode
@@ -2175,11 +2173,6 @@ struct PracticeDetailView: View {
             EditPracticeView(practice: practiceBinding, team: $team)
                 .environmentObject(teamManager)
         }
-        .sheet(isPresented: $showingShareSheet) {
-            if let image = shareImage {
-                ShareSheet(activityItems: [image])
-            }
-        }
         .alert("Delete Practice", isPresented: $showingDeleteAlert) {
             Button("Cancel", role: .cancel) { }
             Button("Delete", role: .destructive) {
@@ -2237,12 +2230,22 @@ struct PracticeDetailView: View {
         Created with Coach Caddie
         """
         
-        shareImage = nil
-        let activityVC = UIActivityViewController(activityItems: [reportText], applicationActivities: nil)
+        // Create shareable items array
+        let itemsToShare: [Any] = [reportText]
         
+        // Present share sheet
         if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
            let window = windowScene.windows.first,
            let rootVC = window.rootViewController {
+            let activityVC = UIActivityViewController(activityItems: itemsToShare, applicationActivities: nil)
+            
+            // For iPad support
+            if let popoverController = activityVC.popoverPresentationController {
+                popoverController.sourceView = window
+                popoverController.sourceRect = CGRect(x: window.bounds.midX, y: window.bounds.midY, width: 0, height: 0)
+                popoverController.permittedArrowDirections = []
+            }
+            
             rootVC.present(activityVC, animated: true)
         }
     }

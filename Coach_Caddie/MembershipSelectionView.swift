@@ -214,9 +214,8 @@ struct StoreKitPlanSelectionView: View {
     
     enum SubscriptionOption {
         case startTrial
-        case subscribePro
-        case subscribePremium
-        case subscribeClub
+        case subscribeCoach
+        case subscribeProCoach
     }
     
     var body: some View {
@@ -248,23 +247,22 @@ struct StoreKitPlanSelectionView: View {
                         VStack(spacing: 16) {
                             // Only show trial if user is eligible
                             if let user = authManager.currentUser, user.isTrialEligible {
-                                // Trial Option
-                                PlanSelectionCard(
-                                    title: "Free Trial",
-                                    price: "Free for 3 days",
-                                    features: [
-                                        "1 team",
-                                        "Up to 20 players",
-                                        "Basic game & practice management",
-                                        "Formation planning",
-                                        "Limited team sharing"
-                                    ],
-                                    isRecommended: false,
-                                    isSelected: selectedOption == .startTrial,
-                                    badgeText: nil
-                                ) {
-                                    selectedOption = .startTrial
-                                }
+                        // Trial Option
+                                 PlanSelectionCard(
+                                     title: "Free Trial",
+                                     price: "Free for 7 days",
+                                     features: [
+                                         "1 team",
+                                         "Full team management",
+                                         "Formation planning",
+                                         "Game & practice tracking"
+                                     ],
+                                     isRecommended: false,
+                                     isSelected: selectedOption == .startTrial,
+                                     badgeText: nil
+                                 ) {
+                                     selectedOption = .startTrial
+                                 }
                             } else {
                                 // Show message for ineligible users
                                 VStack(spacing: 8) {
@@ -279,72 +277,47 @@ struct StoreKitPlanSelectionView: View {
                                 .background(Color(.systemGray6))
                                 .cornerRadius(12)
                             }
-                            
-                            // Pro Plans (always show)
-                            if let proMonthly = storeKit.products.first(where: { $0.id == "com.coachcaddie.pro.monthly" }),
-                               let proYearly = storeKit.products.first(where: { $0.id == "com.coachcaddie.pro.yearly" }) {
+
+                            // Coach Plans (always show)
+                            if let coachMonthly = storeKit.products.first(where: { $0.id == "com.coachcaddie.pro.monthly" }),
+                               let coachYearly = storeKit.products.first(where: { $0.id == "com.coachcaddie.pro.yearly" }) {
                                 PlanSelectionCard(
-                                    title: "Pro",
-                                    price: "\(proMonthly.displayPrice)/mo or \(proYearly.displayPrice)/yr",
+                                    title: "Coach",
+                                    price: "\(coachMonthly.displayPrice)/mo or \(coachYearly.displayPrice)/yr",
                                     features: [
-                                        "3 teams",
-                                        "Up to 30 players per team",
+                                        "Up to 2 teams",
                                         "Full game & practice management",
                                         "Advanced statistics",
-                                        "5 coach invites",
-                                        "10 parent invites"
+                                        "Season management",
+                                        "25 parent/viewer invites"
                                     ],
                                     isRecommended: true,
-                                    isSelected: selectedOption == .subscribePro,
+                                    isSelected: selectedOption == .subscribeCoach,
                                     badgeText: "MOST POPULAR"
                                 ) {
-                                    selectedOption = .subscribePro
+                                    selectedOption = .subscribeCoach
                                 }
-                            }
+                                                        }
                             
-                            // Premium Plans (always show)
-                            if let premiumMonthly = storeKit.products.first(where: { $0.id == "com.coachcaddie.premium.monthly" }),
-                               let premiumYearly = storeKit.products.first(where: { $0.id == "com.coachcaddie.premium.yearly" }) {
+                            // Pro Coach Plans (always show)
+                            if let proCoachMonthly = storeKit.products.first(where: { $0.id == "com.coachcaddie.premium.monthly" }),
+                               let proCoachYearly = storeKit.products.first(where: { $0.id == "com.coachcaddie.premium.yearly" }) {
                                 PlanSelectionCard(
-                                    title: "Premium",
-                                    price: "\(premiumMonthly.displayPrice)/mo or \(premiumYearly.displayPrice)/yr",
+                                    title: "Pro Coach",
+                                    price: "\(proCoachMonthly.displayPrice)/mo or \(proCoachYearly.displayPrice)/yr",
                                     features: [
-                                        "10 teams",
-                                        "Unlimited players",
-                                        "Everything in Pro",
-                                        "Season planning",
-                                        "15 coach invites",
-                                        "50 parent invites",
+                                        "Unlimited teams",
+                                        "Everything in Coach",
                                         "Priority support"
                                     ],
                                     isRecommended: false,
-                                    isSelected: selectedOption == .subscribePremium,
+                                    isSelected: selectedOption == .subscribeProCoach,
                                     badgeText: nil
                                 ) {
-                                    selectedOption = .subscribePremium
+                                    selectedOption = .subscribeProCoach
                                 }
                             }
-                            
-                            // Club Plans (always show)
-                            if let clubMonthly = storeKit.products.first(where: { $0.id == "com.coachcaddie.club.monthly" }),
-                               let clubYearly = storeKit.products.first(where: { $0.id == "com.coachcaddie.club.yearly" }) {
-                                PlanSelectionCard(
-                                    title: "Club",
-                                    price: "\(clubMonthly.displayPrice)/mo or \(clubYearly.displayPrice)/yr",
-                                    features: [
-                                        "50 teams",
-                                        "Everything in Premium",
-                                        "Club management tools",
-                                        "White-label options",
-                                        "Dedicated support"
-                                    ],
-                                    isRecommended: false,
-                                    isSelected: selectedOption == .subscribeClub,
-                                    badgeText: nil
-                                ) {
-                                    selectedOption = .subscribeClub
-                                }
-                            }
+
                         }
                         .padding(.horizontal)
                     }
@@ -377,7 +350,7 @@ struct StoreKitPlanSelectionView: View {
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                             
-                            Text("After 3 days, you'll need to choose a paid plan to continue")
+                            Text("After 7 days, you'll need to choose a paid plan to continue")
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
                         } else {
@@ -429,46 +402,39 @@ struct StoreKitPlanSelectionView: View {
         switch selectedOption {
         case .startTrial:
             return "Start Free Trial"
-        case .subscribePro:
-            return "Continue with Pro"
-        case .subscribePremium:
-            return "Continue with Premium"
-        case .subscribeClub:
-            return "Continue with Club"
+        case .subscribeCoach:
+            return "Continue with Coach"
+        case .subscribeProCoach:
+            return "Continue with Pro Coach"
         }
     }
     
     private func handleContinue() {
-        // NEW: Check trial eligibility before allowing trial selection
-        if selectedOption == .startTrial {
-            guard let user = authManager.currentUser, user.isTrialEligible else {
-                errorMessage = "Trial already used. Please select a paid plan."
-                showingError = true
-                return
+            // NEW: Check trial eligibility before allowing trial selection
+            if selectedOption == .startTrial {
+                guard let user = authManager.currentUser, user.isTrialEligible else {
+                    errorMessage = "Trial already used. Please select a paid plan."
+                    showingError = true
+                    return
+                }
+            }
+            
+            switch selectedOption {
+            case .startTrial:
+                // Start trial - just set membership and trial subscription
+                startFreeTrial()
+                
+            case .subscribeCoach:
+                currentSubscriptionType = "coach"
+                showingSubscriptionChoice = true
+                
+            case .subscribeProCoach:
+                currentSubscriptionType = "procoach"
+                showingSubscriptionChoice = true
             }
         }
         
-        switch selectedOption {
-        case .startTrial:
-            // Start trial - just set membership and trial subscription
-            startFreeTrial()
-            
-        case .subscribePro:
-            currentSubscriptionType = "pro"
-            showingSubscriptionChoice = true
-            
-        case .subscribePremium:
-            currentSubscriptionType = "premium"
-            showingSubscriptionChoice = true
-            
-        case .subscribeClub:
-            currentSubscriptionType = "club"
-            showingSubscriptionChoice = true
-        }
-    }
-    
-    private func startFreeTrial() {
-        isProcessing = true
+        private func startFreeTrial() {
         
         Task {
             do {
@@ -505,13 +471,21 @@ struct SubscriptionChoiceView: View {
     @State private var errorMessage: String?
     @State private var showingError = false
     
-    private var monthlyProduct: Product? {
-        storeKit.products.first { $0.id == "com.coachcaddie.\(subscriptionType).monthly" }
-    }
-    
-    private var yearlyProduct: Product? {
-        storeKit.products.first { $0.id == "com.coachcaddie.\(subscriptionType).yearly" }
-    }
+    private var productIdPrefix: String {
+            switch subscriptionType {
+            case "coach": return "pro"
+            case "procoach": return "premium"
+            default: return subscriptionType
+            }
+        }
+        
+        private var monthlyProduct: Product? {
+            storeKit.products.first { $0.id == "com.coachcaddie.\(productIdPrefix).monthly" }
+        }
+        
+        private var yearlyProduct: Product? {
+            storeKit.products.first { $0.id == "com.coachcaddie.\(productIdPrefix).yearly" }
+        }
     
     var body: some View {
         NavigationView {
@@ -627,9 +601,6 @@ struct SubscriptionChoiceView: View {
         isProcessing = true
         
         Task {
-            // FIXED: Don't set membership type here - let the purchase handle the subscription update
-            // Then StoreKit will automatically update the subscription level through its transaction handler
-            
             // Process the purchase
             await storeKit.purchase(product)
             
@@ -637,14 +608,13 @@ struct SubscriptionChoiceView: View {
                 isProcessing = false
                 
                 if let error = storeKit.errorMessage {
+                    // Actual error occurred
                     errorMessage = error
                     showingError = true
-                } else {
+                } else if storeKit.isProductPurchased(product.id) {
                     // Purchase successful - now set membership type to coach
-                    // The subscription level has already been set by StoreKit transaction handler
                     Task {
                         do {
-                            // Just set membership type, preserving the subscription that was just purchased
                             try await authManager.updateMembershipTypeAndSubscription(
                                 membershipType: .coach,
                                 subscriptionLevel: authManager.currentUser?.subscriptionLevel ?? .trial
@@ -661,6 +631,7 @@ struct SubscriptionChoiceView: View {
                         }
                     }
                 }
+                // If neither error nor purchased, user cancelled - do nothing, stay on screen
             }
         }
     }

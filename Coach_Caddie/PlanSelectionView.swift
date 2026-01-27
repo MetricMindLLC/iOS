@@ -51,81 +51,72 @@ struct PlanSelectionView: View {
                             )
                         }
                         
-                        // Pro Plan Card (always show)
+                        // Coach Plan Card (always show)
                         PlanCard(
-                            plan: .pro,
-                            isSelected: selectedPlan == .pro,
-                            isPopular: selectedPlan != .club,
+                            plan: .coach,
+                            isSelected: selectedPlan == .coach,
+                            isPopular: true,
                             isYearly: isYearly,
-                            onSelect: { selectedPlan = .pro }
+                            onSelect: { selectedPlan = .coach }
                         )
                         
-                        // Premium Plan Card (always show)
+                        // Pro Coach Plan Card (always show)
                         PlanCard(
-                            plan: .premium,
-                            isSelected: selectedPlan == .premium,
+                            plan: .proCoach,
+                            isSelected: selectedPlan == .proCoach,
                             isPopular: false,
                             isYearly: isYearly,
-                            onSelect: { selectedPlan = .premium }
+                            onSelect: { selectedPlan = .proCoach }
                         )
+                        .padding(.horizontal)
                         
-                        // Club Plan Card (always show)
-                        PlanCard(
-                            plan: .club,
-                            isSelected: selectedPlan == .club,
-                            isPopular: false,
-                            isYearly: isYearly,
-                            onSelect: { selectedPlan = .club }
-                        )
-                    }
-                    .padding(.horizontal)
-                    
-                    // Continue Button
-                    Button(action: handleContinue) {
-                        HStack {
-                            if isLoading || storeKit.purchaseInProgress {
-                                ProgressView()
-                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                    .scaleEffect(0.8)
+                        // Continue Button
+                        Button(action: handleContinue) {
+                            HStack {
+                                if isLoading || storeKit.purchaseInProgress {
+                                    ProgressView()
+                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                        .scaleEffect(0.8)
+                                }
+                                
+                                Text(selectedPlan == .trial ? "Start Free Trial" : "Subscribe & Continue")
+                                    .font(.headline)
+                                    .fontWeight(.semibold)
                             }
-                            
-                            Text(selectedPlan == .trial ? "Start Free Trial" : "Subscribe & Continue")
-                                .font(.headline)
-                                .fontWeight(.semibold)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 50)
+                            .background(Color.blue)
+                            .foregroundColor(.white)
+                            .cornerRadius(12)
                         }
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 50)
-                        .background(Color.blue)
-                        .foregroundColor(.white)
-                        .cornerRadius(12)
-                    }
-                    .disabled(isLoading || storeKit.purchaseInProgress)
-                    .padding(.horizontal)
-                    
-                    // Error Message
-                    if let errorMessage = errorMessage ?? storeKit.errorMessage {
-                        Text(errorMessage)
-                            .font(.caption)
-                            .foregroundColor(.red)
-                            .padding(.horizontal)
-                    }
-                    
-                    // Terms & Privacy
-                    VStack(spacing: 8) {
-                        Text("By continuing, you agree to our Terms of Service and Privacy Policy")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
+                        .disabled(isLoading || storeKit.purchaseInProgress)
+                        .padding(.horizontal)
                         
-                        if selectedPlan != .trial {
-                            Text("Cancel anytime. Auto-renewal can be turned off in your Apple ID settings.")
+                        // Error Message
+                        if let errorMessage = errorMessage ?? storeKit.errorMessage {
+                            Text(errorMessage)
+                                .font(.caption)
+                                .foregroundColor(.red)
+                                .padding(.horizontal)
+                        }
+                        
+                        // Terms & Privacy
+                        VStack(spacing: 8) {
+                            Text("By continuing, you agree to our Terms of Service and Privacy Policy")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                                 .multilineTextAlignment(.center)
+                            
+                            if selectedPlan != .trial {
+                                Text("Cancel anytime. Auto-renewal can be turned off in your Apple ID settings.")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .multilineTextAlignment(.center)
+                            }
                         }
+                        .padding(.horizontal)
+                        .padding(.bottom, 40)
                     }
-                    .padding(.horizontal)
-                    .padding(.bottom, 40)
                 }
             }
             .navigationBarHidden(true)
@@ -138,12 +129,12 @@ struct PlanSelectionView: View {
             
             // NEW: Set default plan based on trial eligibility
             if let user = authManager.currentUser, !user.isTrialEligible {
-                selectedPlan = .pro  // Default to pro if trial not eligible
+                selectedPlan = .coach  // Default to coach if trial not eligible
             }
         }
     }
     
-    // NEW: Monthly/Yearly Toggle Component
+    // MARK: - Monthly/Yearly Toggle Component
     private var billingPeriodToggle: some View {
         HStack {
             Text("Monthly")
@@ -173,150 +164,149 @@ struct PlanSelectionView: View {
         .animation(.easeInOut(duration: 0.2), value: isYearly)
     }
     
+    // MARK: - Actions
     private func handleContinue() {
-        guard !isLoading && !storeKit.purchaseInProgress else { return }
-        
-        isLoading = true
-        errorMessage = nil
-        
-        if selectedPlan == .trial {
-            // Start free trial immediately - no purchase needed
-            onPlanSelected(.trial)
-            isLoading = false
-        } else {
-            // For paid plans, find the matching product and purchase through StoreKit
-            Task {
-                await handlePaidPlanPurchase()
+            guard !isLoading && !storeKit.purchaseInProgress else { return }
+            
+            isLoading = true
+            errorMessage = nil
+            
+            if selectedPlan == .trial {
+                // Start free trial immediately - no purchase needed
+                onPlanSelected(.trial)
+                isLoading = false
+            } else {
+                // For paid plans, find the matching product and purchase through StoreKit
+                Task {
+                    await handlePaidPlanPurchase()
+                }
             }
         }
+        
+        func handlePaidPlanPurchase() async {
+            // Find the appropriate product for the selected plan and billing period
+            let targetProductID: String
+            
+            switch selectedPlan {
+            case .coach:
+                targetProductID = isYearly ? "com.coachcaddie.pro.yearly" : "com.coachcaddie.pro.monthly"
+            case .proCoach:
+                targetProductID = isYearly ? "com.coachcaddie.premium.yearly" : "com.coachcaddie.premium.monthly"
+            default:
+                errorMessage = "Invalid plan selection"
+                isLoading = false
+                return
+            }
+            
+            // Find the product in the loaded products
+            guard let product = storeKit.products.first(where: { $0.id == targetProductID }) else {
+                errorMessage = "Subscription products not available. Please try again later."
+                isLoading = false
+                return
+            }
+            
+            // Purchase through StoreKit
+            await storeKit.purchase(product)
+            
+            // Check if purchase was successful
+            if storeKit.isProductPurchased(product.id) {
+                // Purchase successful - complete the flow
+                onPlanSelected(selectedPlan)
+            }
+            
+            isLoading = false
+        }
     }
     
-    private func handlePaidPlanPurchase() async {
-        // Find the appropriate product for the selected plan and billing period
-        let targetProductID: String
+    struct PlanCard: View {
+        let plan: SubscriptionLevel // Using your existing enum!
+        let isSelected: Bool
+        let isPopular: Bool
+        let isYearly: Bool  // NEW: Whether to show yearly pricing
+        let onSelect: () -> Void
         
-        switch selectedPlan {
-        case .pro:
-            targetProductID = isYearly ? "com.coachcaddie.pro.yearly" : "com.coachcaddie.pro.monthly"
-        case .premium:
-            targetProductID = isYearly ? "com.coachcaddie.premium.yearly" : "com.coachcaddie.premium.monthly"
-        case .club:
-            targetProductID = isYearly ? "com.coachcaddie.club.yearly" : "com.coachcaddie.club.monthly"
-        default:
-            errorMessage = "Invalid plan selection"
-            isLoading = false
-            return
-        }
-        
-        // Find the product in the loaded products
-        guard let product = storeKit.products.first(where: { $0.id == targetProductID }) else {
-            errorMessage = "Subscription products not available. Please try again later."
-            isLoading = false
-            return
-        }
-        
-        // Purchase through StoreKit
-        await storeKit.purchase(product)
-        
-        // Check if purchase was successful
-        if storeKit.isProductPurchased(product.id) {
-            // Purchase successful - complete the flow
-            onPlanSelected(selectedPlan)
-        }
-        
-        isLoading = false
-    }
-}
-
-struct PlanCard: View {
-    let plan: SubscriptionLevel // Using your existing enum!
-    let isSelected: Bool
-    let isPopular: Bool
-    let isYearly: Bool  // NEW: Whether to show yearly pricing
-    let onSelect: () -> Void
-    
-    var body: some View {
-        Button(action: onSelect) {
-            VStack(alignment: .leading, spacing: 16) {
-                // Header with price and popular badge
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text(plan.displayName) // Using your existing property!
-                                .font(.title2)
-                                .fontWeight(.bold)
-                            
-                            if isPopular {
-                                Text("POPULAR")
-                                    .font(.caption)
+        var body: some View {
+            Button(action: onSelect) {
+                VStack(alignment: .leading, spacing: 16) {
+                    // Header with price and popular badge
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text(plan.displayName) // Using your existing property!
+                                    .font(.title2)
                                     .fontWeight(.bold)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 2)
-                                    .background(Color.orange)
-                                    .foregroundColor(.white)
-                                    .cornerRadius(4)
+                                
+                                if isPopular {
+                                    Text("POPULAR")
+                                        .font(.caption)
+                                        .fontWeight(.bold)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 2)
+                                        .background(Color.orange)
+                                        .foregroundColor(.white)
+                                        .cornerRadius(4)
+                                }
+                            }
+                            
+                            // NEW: Show pricing based on isYearly toggle
+                            if plan == .trial {
+                                Text(plan.monthlyPrice) // Trial is always the same
+                                    .font(.headline)
+                                    .foregroundColor(.blue)
+                            } else {
+                                Text(isYearly ? plan.yearlyPrice : plan.monthlyPrice)
+                                    .font(.headline)
+                                    .foregroundColor(.blue)
+                                
+                                if isYearly {
+                                    Text("Save 17% vs monthly")
+                                        .font(.caption)
+                                        .foregroundColor(.green)
+                                        .fontWeight(.medium)
+                                }
                             }
                         }
                         
-                        // NEW: Show pricing based on isYearly toggle
-                        if plan == .trial {
-                            Text(plan.monthlyPrice) // Trial is always the same
-                                .font(.headline)
-                                .foregroundColor(.blue)
-                        } else {
-                            Text(isYearly ? plan.yearlyPrice : plan.monthlyPrice)
-                                .font(.headline)
-                                .foregroundColor(.blue)
-                            
-                            if isYearly {
-                                Text("Save 17% vs monthly")
+                        Spacer()
+                        
+                        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                            .font(.title2)
+                            .foregroundColor(isSelected ? .blue : .gray)
+                    }
+                    
+                    // Features List - Using your existing features array!
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(plan.features, id: \.self) { feature in
+                            HStack(alignment: .top, spacing: 8) {
+                                Image(systemName: "checkmark")
                                     .font(.caption)
                                     .foregroundColor(.green)
-                                    .fontWeight(.medium)
+                                    .frame(width: 12)
+                                
+                                Text(feature)
+                                    .font(.subheadline)
+                                    .foregroundColor(.primary)
+                                
+                                Spacer()
                             }
                         }
                     }
-                    
-                    Spacer()
-                    
-                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                        .font(.title2)
-                        .foregroundColor(isSelected ? .blue : .gray)
                 }
-                
-                // Features List - Using your existing features array!
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(plan.features, id: \.self) { feature in
-                        HStack(alignment: .top, spacing: 8) {
-                            Image(systemName: "checkmark")
-                                .font(.caption)
-                                .foregroundColor(.green)
-                                .frame(width: 12)
-                            
-                            Text(feature)
-                                .font(.subheadline)
-                                .foregroundColor(.primary)
-                            
-                            Spacer()
-                        }
-                    }
-                }
+                .padding(20)
+                .background(
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Color(.systemBackground))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16)
+                                .stroke(isSelected ? Color.blue : Color(.systemGray4), lineWidth: isSelected ? 2 : 1)
+                        )
+                        .shadow(color: isSelected ? Color.blue.opacity(0.2) : Color.black.opacity(0.1),
+                                radius: isSelected ? 8 : 4, x: 0, y: 2)
+                )
             }
-            .padding(20)
-            .background(
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(Color(.systemBackground))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16)
-                            .stroke(isSelected ? Color.blue : Color(.systemGray4), lineWidth: isSelected ? 2 : 1)
-                    )
-                    .shadow(color: isSelected ? Color.blue.opacity(0.2) : Color.black.opacity(0.1),
-                           radius: isSelected ? 8 : 4, x: 0, y: 2)
-            )
+            .buttonStyle(PlainButtonStyle())
         }
-        .buttonStyle(PlainButtonStyle())
     }
-}
 
 #Preview {
     PlanSelectionView { plan in

@@ -494,23 +494,19 @@ struct SubscriptionView: View {
     }
     
     private func getSubscriptionLevel(for product: Product) -> SubscriptionLevel? {
-        if product.id.contains("pro") {
-            return .pro
-        } else if product.id.contains("premium") {
-            return .premium
-        } else if product.id.contains("club") {
-            return .club
+        if product.id.contains(".premium.") {
+            return .proCoach
+        } else if product.id.contains(".pro.") {
+            return .coach
         }
         return nil
     }
     
     private func getSubscriptionName(for product: Product) -> String {
-        if product.id.contains("pro") {
-            return "Pro"
-        } else if product.id.contains("premium") {
-            return "Premium"
-        } else if product.id.contains("club") {
-            return "Club"
+        if product.id.contains(".premium.") {
+            return "Pro Coach"
+        } else if product.id.contains(".pro.") {
+            return "Coach"
         }
         return "Unknown"
     }
@@ -559,14 +555,17 @@ struct SubscriptionView: View {
     }
     
     private func purchaseProduct(_ product: Product) async {
-        await storeKit.purchase(product)
-        
-        // Check if purchase was successful
-        if storeKit.errorMessage == nil {
-            // For shared access users upgrading, we need to ONLY update subscription, NOT membership type
+            await storeKit.purchase(product)
+            
+            // Check if purchase actually succeeded (not just no error)
+            guard storeKit.isProductPurchased(product.id) else {
+                // User cancelled or purchase failed - don't show success
+                return
+            }
+            
+            // Purchase was successful
             if isSharedAccessUser {
                 if let level = getSubscriptionLevel(for: product) {
-                    // FIXED: Only update subscription level, preserve existing membership type
                     try? await authManager.updateSubscriptionLevel(level, transactionId: nil)
                     
                     successMessage = "Successfully upgraded to \(level.displayName)! You can now create your own teams while keeping access to teams you were invited to."
@@ -585,7 +584,6 @@ struct SubscriptionView: View {
                 showingSuccessAlert = true
             }
         }
-    }
     
     private func openSubscriptionManagement() {
         if let url = URL(string: "https://apps.apple.com/account/subscriptions") {
@@ -605,12 +603,10 @@ struct SubscriptionPlanCard: View {
     let onSelect: () -> Void
     
     private var subscriptionLevel: SubscriptionLevel {
-        if product.id.contains("pro") {
-            return .pro
-        } else if product.id.contains("premium") {
-            return .premium
-        } else if product.id.contains("club") {
-            return .club
+        if product.id.contains(".premium.") {
+            return .proCoach
+        } else if product.id.contains(".pro.") {
+            return .coach
         } else {
             return .trial
         }
@@ -680,7 +676,7 @@ struct SubscriptionPlanCard: View {
                         }
                         
                         // Show "RECOMMENDED" for Pro plan for shared access users
-                        if isSharedAccessUser && subscriptionLevel == .pro {
+                        if isSharedAccessUser && subscriptionLevel == .coach {
                             Text("RECOMMENDED")
                                 .font(.caption)
                                 .fontWeight(.bold)
@@ -747,7 +743,7 @@ struct SubscriptionPlanCard: View {
                         Image(systemName: "star.fill")
                             .foregroundColor(.yellow)
                             .font(.caption)
-                        Text("Create up to \(subscriptionLevel == .pro ? "3" : subscriptionLevel == .premium ? "10" : "unlimited") teams")
+                        Text("Create up to \(subscriptionLevel == .coach ? "2" : "unlimited") teams")
                             .font(.caption)
                             .fontWeight(.medium)
                             .foregroundColor(.primary)

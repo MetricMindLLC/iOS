@@ -20,16 +20,12 @@ class StoreKitManager: ObservableObject {
     private var isInitialLoad = true
     private var hasCompletedInitialLoad = false
     
-    // Updated with Club subscription product IDs
     private let productIDs = [
         "com.coachcaddie.pro.monthly",
         "com.coachcaddie.pro.yearly",
         "com.coachcaddie.premium.monthly",
-        "com.coachcaddie.premium.yearly",
-        "com.coachcaddie.club.monthly",
-        "com.coachcaddie.club.yearly"
+        "com.coachcaddie.premium.yearly"
     ]
-    
     private var updateListenerTask: Task<Void, Error>?
     
     init(authManager: FirebaseAuthManager? = nil) {
@@ -446,11 +442,9 @@ class StoreKitManager: ObservableObject {
     func getSubscriptionLevel(for productID: String) -> SubscriptionLevel? {
         switch productID {
         case "com.coachcaddie.pro.monthly", "com.coachcaddie.pro.yearly":
-            return .pro
+            return .coach
         case "com.coachcaddie.premium.monthly", "com.coachcaddie.premium.yearly":
-            return .premium
-        case "com.coachcaddie.club.monthly", "com.coachcaddie.club.yearly":
-            return .club
+            return .proCoach
         default:
             return nil
         }
@@ -466,13 +460,12 @@ extension SubscriptionLevel {
     var sortOrder: Int {
         switch self {
         case .trial: return 0
-        case .pro: return 1
-        case .premium: return 2
-        case .club: return 3
-        case .free: return 4
-        case .sharedAccess: return 5
-        case .cancelled: return 6
-        case .expired: return 7
+        case .coach: return 1
+        case .proCoach: return 2
+        case .free: return 3
+        case .sharedAccess: return 4
+        case .cancelled: return 5
+        case .expired: return 6
         }
     }
 }

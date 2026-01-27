@@ -768,73 +768,62 @@ class FirebaseAuthManager: NSObject, ObservableObject {
             )
         }
     }
-    
     /// Handle subscription purchase result from StoreKit (UPDATED)
-    func handlePurchaseResult(_ transaction: StoreKit.Transaction) async throws {
-        print("🔥 FirebaseAuthManager: Handling purchase result for product: \(transaction.productID)")
-        
-        let subscriptionLevel: SubscriptionLevel
-        
-        switch transaction.productID {
-        case "com.coachcaddie.pro.monthly", "com.coachcaddie.pro.yearly":
-            subscriptionLevel = .pro
-        case "com.coachcaddie.premium.monthly", "com.coachcaddie.premium.yearly":
-            subscriptionLevel = .premium
-        case "com.coachcaddie.club.monthly", "com.coachcaddie.club.yearly":
-            subscriptionLevel = .club
-        default:
-            print("❌ Unknown product ID: \(transaction.productID)")
-            throw NSError(domain: "Subscription", code: -1, userInfo: [NSLocalizedDescriptionKey: "Unknown subscription product"])
+        func handlePurchaseResult(_ transaction: StoreKit.Transaction) async throws {
+            print("🔥 FirebaseAuthManager: Handling purchase result for product: \(transaction.productID)")
+            
+            let subscriptionLevel: SubscriptionLevel
+            
+            switch transaction.productID {
+            case "com.coachcaddie.pro.monthly", "com.coachcaddie.pro.yearly":
+                subscriptionLevel = .coach
+            case "com.coachcaddie.premium.monthly", "com.coachcaddie.premium.yearly":
+                subscriptionLevel = .proCoach
+            default:
+                print("❌ Unknown product ID: \(transaction.productID)")
+                throw NSError(domain: "Subscription", code: -1, userInfo: [NSLocalizedDescriptionKey: "Unknown subscription product"])
+            }
+            
+            // Update the user's subscription level
+            try await updateSubscriptionLevel(subscriptionLevel, transactionId: String(transaction.id))
+            
+            print("✅ FirebaseAuthManager: Successfully processed purchase for \(subscriptionLevel.rawValue)")
         }
-        
-        // Update the user's subscription level
-        try await updateSubscriptionLevel(subscriptionLevel, transactionId: String(transaction.id))
-        
-        print("✅ FirebaseAuthManager: Successfully processed purchase for \(subscriptionLevel.rawValue)")
-    }
 
-    /// Check if user can upgrade to a specific level
-    func canUpgradeToLevel(_ targetLevel: SubscriptionLevel) -> Bool {
-        guard let user = currentUser else { return false }
-        
-        let currentLevel = user.subscriptionLevel
-        
-        // Define upgrade hierarchy
-        switch currentLevel {
-        case .trial:
-            return targetLevel == .pro || targetLevel == .premium || targetLevel == .club
-        case .pro:
-            return targetLevel == .premium || targetLevel == .club
-        case .premium:
-            return targetLevel == .club
-        case .club, .free:
-            return false // Already at top level or legacy free
-        case .sharedAccess:
-            return targetLevel == .pro || targetLevel == .premium || targetLevel == .club
-        case .cancelled, .expired:
-            return true // Can reactivate to any level
+        /// Check if user can upgrade to a specific level
+        func canUpgradeToLevel(_ targetLevel: SubscriptionLevel) -> Bool {
+            guard let user = currentUser else { return false }
+            
+            let currentLevel = user.subscriptionLevel
+            
+            // Define upgrade hierarchy
+            switch currentLevel {
+            case .trial:
+                return targetLevel == .coach || targetLevel == .proCoach
+            case .coach:
+                return targetLevel == .proCoach
+            case .proCoach, .free:
+                return false // Already at top level or legacy free
+            case .sharedAccess:
+                return targetLevel == .coach || targetLevel == .proCoach
+            case .cancelled, .expired:
+                return true // Can reactivate to any level
+            }
         }
-    }
 
-    /// Get upgrade pricing info (for UI display)
-    func getUpgradeInfo(from currentLevel: SubscriptionLevel, to targetLevel: SubscriptionLevel) -> String? {
-        switch (currentLevel, targetLevel) {
-        case (.trial, .pro):
-            return "Upgrade to Pro for $3.49/month"
-        case (.trial, .premium):
-            return "Upgrade to Premium for $6.99/month"
-        case (.trial, .club):
-            return "Upgrade to Club for $55.99/month"
-        case (.pro, .premium):
-            return "Upgrade to Premium for $3.50/month more"
-        case (.pro, .club):
-            return "Upgrade to Club for $52.50/month more"
-        case (.premium, .club):
-            return "Upgrade to Club for $49/month more"
-        default:
-            return nil
+        /// Get upgrade pricing info (for UI display)
+        func getUpgradeInfo(from currentLevel: SubscriptionLevel, to targetLevel: SubscriptionLevel) -> String? {
+            switch (currentLevel, targetLevel) {
+            case (.trial, .coach):
+                return "Upgrade to Coach for $4.99/month"
+            case (.trial, .proCoach):
+                return "Upgrade to Pro Coach for $9.99/month"
+            case (.coach, .proCoach):
+                return "Upgrade to Pro Coach for $5/month more"
+            default:
+                return nil
+            }
         }
-    }
     
     // FIXED: Cancel subscription method
     func cancelSubscription() async throws {
@@ -949,7 +938,7 @@ class FirebaseAuthManager: NSObject, ObservableObject {
             NotificationCenter.default.post(
                 name: Notification.Name("TrialExpiredAutoConverted"),
                 object: nil,
-                userInfo: ["newSubscriptionLevel": SubscriptionLevel.pro.rawValue]
+                userInfo: ["newSubscriptionLevel": SubscriptionLevel.coach.rawValue]
             )
         }
     }
