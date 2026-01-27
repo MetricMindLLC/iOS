@@ -2007,6 +2007,8 @@ struct PracticeDetailView: View {
     @Binding var team: Team
     @EnvironmentObject var teamManager: TeamManager
     @State private var showingEditPractice = false
+    @State private var showingShareSheet = false
+    @State private var shareItems: [Any] = []
     @State private var showingDeleteAlert = false
     @State private var showingOptionsMenu = false
     @Environment(\.presentationMode) var presentationMode
@@ -2155,7 +2157,8 @@ struct PracticeDetailView: View {
                         showingEditPractice = true
                     },
                     .default(Text("Share Practice Report")) {
-                        sharePracticeReport()
+                        preparePracticeReportForSharing()
+                        showingShareSheet = true
                     },
                     .destructive(Text("Delete Practice")) {
                         showingDeleteAlert = true
@@ -2172,6 +2175,11 @@ struct PracticeDetailView: View {
             )
             EditPracticeView(practice: practiceBinding, team: $team)
                 .environmentObject(teamManager)
+        }
+        .sheet(isPresented: $showingShareSheet) {
+            if !shareItems.isEmpty {
+                ActivityViewController(activityItems: shareItems)
+            }
         }
         .alert("Delete Practice", isPresented: $showingDeleteAlert) {
             Button("Cancel", role: .cancel) { }
@@ -2208,48 +2216,414 @@ struct PracticeDetailView: View {
         }
     }
     
-    private func sharePracticeReport() {
-        let drillsList = currentPractice.drills.enumerated().map { index, drill in
-            "\(index + 1). \(drill.name) (\(drill.duration) min)"
-        }.joined(separator: "\n")
+    private func preparePracticeReportForSharing() {
+        // Create a visual representation of the practice
+        let renderer = ImageRenderer(content: ShareablePracticeReportView(practice: currentPractice, teamName: team.name))
+        renderer.scale = 3.0 // High resolution
         
-        let reportText = """
-        📋 PRACTICE PLAN
-        
-        📅 \(currentPractice.date.formatted(date: .abbreviated, time: .shortened))
-        ⏱️ Duration: \(currentPractice.duration) minutes
-        \(currentPractice.location.map { "📍 Location: \($0)" } ?? "")
-        \(currentPractice.weather.map { "🌤️ Weather: \($0)" } ?? "")
-        
-        📝 DRILLS:
-        \(drillsList.isEmpty ? "No drills planned" : drillsList)
-        
-        \(currentPractice.notes.map { "📌 Notes:\n\($0)" } ?? "")
-        
-        —
-        Created with Coach Caddie
-        """
-        
-        // Create shareable items array
-        let itemsToShare: [Any] = [reportText]
-        
-        // Present share sheet
-        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let window = windowScene.windows.first,
-           let rootVC = window.rootViewController {
-            let activityVC = UIActivityViewController(activityItems: itemsToShare, applicationActivities: nil)
+        if let image = renderer.uiImage {
+            shareItems = [image]
+        } else {
+            // Fallback to text if image generation fails
+            let drillsList = currentPractice.drills.enumerated().map { index, drill in
+                "\(index + 1). \(drill.name) (\(drill.duration) min)"
+            }.joined(separator: "\n")
             
-            // For iPad support
-            if let popoverController = activityVC.popoverPresentationController {
-                popoverController.sourceView = window
-                popoverController.sourceRect = CGRect(x: window.bounds.midX, y: window.bounds.midY, width: 0, height: 0)
-                popoverController.permittedArrowDirections = []
-            }
+            let reportText = """
+            📋 PRACTICE PLAN
             
-            rootVC.present(activityVC, animated: true)
+            📅 \(currentPractice.date.formatted(date: .abbreviated, time: .shortened))
+            ⏱️ Duration: \(currentPractice.duration) minutes
+            \(currentPractice.location.map { "📍 Location: \($0)" } ?? "")
+            \(currentPractice.weather.map { "🌤️ Weather: \($0)" } ?? "")
+            
+            📝 DRILLS:
+            \(drillsList.isEmpty ? "No drills planned" : drillsList)
+            
+            \(currentPractice.notes.map { "📌 Notes:\n\($0)" } ?? "")
+            
+            —
+            Created with Coach Caddie
+            """
+            
+            shareItems = [reportText]
         }
     }
 }
+
+// MARK: - Activity View Controller Wrapper
+struct ActivityViewController: UIViewControllerRepresentable {
+    let activityItems: [Any]
+    let applicationActivities: [UIActivity]? = nil
+    
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let controller = UIActivityViewController(
+            activityItems: activityItems,
+            applicationActivities: applicationActivities
+        )
+        return controller
+    }
+    
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {
+        // No update needed
+    }
+}
+
+// MARK: - Shareable Practice Report View
+struct ShareablePracticeReportView: View {
+    let practice: Practice
+    let teamName: String
+    
+    private var displayInstructions: [(drill: Drill, instructions: [String])] {
+        practice.drills.map { drill in
+            let instructions = drill.instructions.isEmpty ? getDefaultInstructions(for: drill) : drill.instructions
+            return (drill, instructions)
+        }
+    }
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header with gradient
+            VStack(spacing: 12) {
+                HStack {
+                    Image(systemName: "sportscourt.fill")
+                        .font(.system(size: 40))
+                        .foregroundColor(.white)
+                    
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("PRACTICE PLAN")
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .foregroundColor(.white)
+                        
+                        Text(teamName)
+                            .font(.headline)
+                            .foregroundColor(.white.opacity(0.9))
+                    }
+                    
+                    Spacer()
+                }
+                .padding()
+                
+                // Date, Time, Duration
+                HStack(spacing: 20) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label("Date & Time", systemImage: "calendar")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.8))
+                        Text(practice.date.formatted(date: .abbreviated, time: .shortened))
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.white)
+                    }
+                    
+                    Divider()
+                        .background(Color.white.opacity(0.5))
+                        .frame(height: 40)
+                    
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label("Duration", systemImage: "clock.fill")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.8))
+                        Text("\(practice.duration) min")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.white)
+                    }
+                    
+                    Spacer()
+                }
+                .padding(.horizontal)
+                .padding(.bottom)
+            }
+            .background(
+                LinearGradient(
+                    colors: [Color.blue, Color.blue.opacity(0.8)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            
+            // Location & Weather (if available)
+            if practice.location != nil || practice.weather != nil {
+                HStack(spacing: 16) {
+                    if let location = practice.location {
+                        HStack(spacing: 6) {
+                            Image(systemName: "location.fill")
+                                .foregroundColor(.red)
+                                .font(.caption)
+                            Text(location)
+                                .font(.subheadline)
+                                .foregroundColor(.primary)
+                        }
+                    }
+                    
+                    if let weather = practice.weather {
+                        HStack(spacing: 6) {
+                            Image(systemName: weatherIcon(for: weather))
+                                .foregroundColor(.orange)
+                                .font(.caption)
+                            Text(weather)
+                                .font(.subheadline)
+                                .foregroundColor(.primary)
+                        }
+                    }
+                }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(.systemGray6))
+            }
+            
+            // Drills section
+            if !practice.drills.isEmpty {
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack {
+                        Text("PRACTICE DRILLS")
+                            .font(.headline)
+                            .foregroundColor(.primary)
+                        Spacer()
+                        Text("\(practice.drills.count) drills")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.horizontal)
+                    .padding(.top)
+                    
+                    ForEach(Array(displayInstructions.enumerated()), id: \.offset) { index, item in
+                        ShareableDrillCard(
+                            drill: item.drill,
+                            instructions: item.instructions,
+                            index: index + 1
+                        )
+                    }
+                }
+                .padding(.bottom)
+            }
+            
+            // Notes (if available)
+            if let notes = practice.notes, !notes.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("NOTES")
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    
+                    Text(notes)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(.systemGray6))
+                .cornerRadius(12)
+                .padding(.horizontal)
+            }
+            
+            // Footer
+            HStack {
+                Spacer()
+                Text("Created with Coach Caddie")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Spacer()
+            }
+            .padding()
+        }
+        .frame(width: 800) // Fixed width for consistent sharing
+        .background(Color.white)
+    }
+    
+    private func weatherIcon(for weather: String) -> String {
+        switch weather {
+        case "Clear": return "sun.max.fill"
+        case "Cloudy": return "cloud.fill"
+        case "Rainy": return "cloud.rain.fill"
+        case "Windy": return "wind"
+        case "Hot": return "thermometer.sun.fill"
+        case "Cold": return "thermometer.snowflake"
+        case "Indoor": return "house.fill"
+        default: return "cloud.sun.fill"
+        }
+    }
+    
+    private func getDefaultInstructions(for drill: Drill) -> [String] {
+        switch drill.category.lowercased() {
+        case "warm-up":
+            return [
+                "Start with light jogging to warm up muscles",
+                "Perform dynamic stretches focusing on legs and core",
+                "Gradually increase intensity",
+                "Ensure all players are properly warmed up"
+            ]
+        case "passing":
+            return [
+                "Set up players in pairs or small groups",
+                "Focus on accuracy over power",
+                "Use both feet when passing",
+                "Progress from stationary to moving passes"
+            ]
+        case "shooting":
+            return [
+                "Set up shooting stations with proper angles",
+                "Practice with both feet",
+                "Focus on placement before power",
+                "Include shots under pressure"
+            ]
+        case "defending":
+            return [
+                "Practice proper defensive stance",
+                "Focus on staying between player and goal",
+                "Work on timing of challenges",
+                "Emphasize patience and positioning"
+            ]
+        case "dribbling":
+            return [
+                "Set up cones or markers for direction changes",
+                "Practice with both feet",
+                "Keep ball close to body",
+                "Focus on head up while dribbling"
+            ]
+        case "fitness":
+            return [
+                "Ensure proper form throughout exercise",
+                "Monitor players for fatigue",
+                "Provide adequate rest between sets",
+                "Scale intensity based on fitness levels"
+            ]
+        default:
+            return [
+                "Set up the drill according to description",
+                "Ensure all players understand their roles",
+                "Focus on technique and safety",
+                "Provide feedback and encouragement"
+            ]
+        }
+    }
+}
+
+// MARK: - Shareable Drill Card
+struct ShareableDrillCard: View {
+    let drill: Drill
+    let instructions: [String]
+    let index: Int
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Drill header
+            HStack(alignment: .top, spacing: 12) {
+                // Number badge
+                Text("\(index)")
+                    .font(.headline)
+                    .fontWeight(.bold)
+                    .foregroundColor(.white)
+                    .frame(width: 36, height: 36)
+                    .background(
+                        Circle()
+                            .fill(Color.blue)
+                    )
+                
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(drill.name)
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    
+                    HStack(spacing: 12) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "clock.fill")
+                                .font(.caption2)
+                            Text("\(drill.duration) min")
+                                .font(.caption)
+                        }
+                        .foregroundColor(.blue)
+                        
+                        Text("•")
+                            .foregroundColor(.secondary)
+                        
+                        Text(drill.category)
+                            .font(.caption)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Color.blue.opacity(0.1))
+                            .foregroundColor(.blue)
+                            .cornerRadius(6)
+                        
+                        Text("•")
+                            .foregroundColor(.secondary)
+                        
+                        Text(drill.difficulty)
+                            .font(.caption)
+                            .foregroundColor(difficultyColor(for: drill.difficulty))
+                    }
+                }
+                
+                Spacer()
+            }
+            
+            // Description
+            Text(drill.description)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.leading, 48)
+            
+            // Instructions
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Steps:")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.blue)
+                    .padding(.leading, 48)
+                
+                ForEach(Array(instructions.prefix(4).enumerated()), id: \.offset) { stepIndex, instruction in
+                    HStack(alignment: .top, spacing: 8) {
+                        Text("\(stepIndex + 1).")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundColor(.secondary)
+                            .frame(width: 20, alignment: .trailing)
+                        
+                        Text(instruction)
+                            .font(.caption)
+                            .foregroundColor(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        
+                        Spacer()
+                    }
+                    .padding(.leading, 48)
+                }
+                
+                if instructions.count > 4 {
+                    Text("+ \(instructions.count - 4) more steps...")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .italic()
+                        .padding(.leading, 68)
+                }
+            }
+        }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(.systemBackground))
+                .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color(.systemGray4), lineWidth: 0.5)
+        )
+        .padding(.horizontal)
+    }
+    
+    private func difficultyColor(for difficulty: String) -> Color {
+        switch difficulty {
+        case "Easy": return .green
+        case "Medium": return .orange
+        case "Hard": return .red
+        default: return .gray
+        }
+    }
+}
+
     // MARK: - Full Capture Practice Content (Non-scrollable version for sharing)
     struct FullCapturePracticeContent: View {
         let practice: Practice
