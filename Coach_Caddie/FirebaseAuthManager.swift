@@ -19,6 +19,10 @@ class FirebaseAuthManager: NSObject, ObservableObject {
     private let db = Firestore.firestore()
     private var authStateHandle: AuthStateDidChangeListenerHandle?
     
+    // OPTIMIZATION: Prevent duplicate profile loads
+    private var isLoadingProfile = false
+    private var lastLoadedUserUID: String?
+    
     // Apple Sign-In properties
     private var currentNonce: String?
     private var appleContinuation: CheckedContinuation<Void, Error>?
@@ -417,16 +421,29 @@ class FirebaseAuthManager: NSObject, ObservableObject {
     
     func loadUserProfile(for firebaseUser: FirebaseAuth.User) async {
         print("🔥 FirebaseAuthManager: Loading user profile for: \(firebaseUser.uid)")
+        
+        // OPTIMIZATION: Prevent duplicate loads
+        if isLoadingProfile && lastLoadedUserUID == firebaseUser.uid {
+            print("⏭️ Skipping duplicate profile load for: \(firebaseUser.uid)")
+            return
+        }
+        
+        isLoadingProfile = true
+        lastLoadedUserUID = firebaseUser.uid
+        defer {
+            isLoadingProfile = false
+        }
+        
         await MainActor.run {
             isLoading = true
         }
         
         do {
             print("🔥 FirebaseAuthManager: Fetching user document from Firestore")
-            // FORCE FRESH READ FROM SERVER, NOT CACHE
+            // OPTIMIZATION: Use cache-first strategy instead of forcing server read
             let doc = try await db.collection("users")
                 .document(firebaseUser.uid)
-                .getDocument(source: .server)
+                .getDocument(source: .default)  // ✅ Cache-first, then server if needed
             
             if doc.exists {
                 print("🔥 FirebaseAuthManager: User document exists, decoding")

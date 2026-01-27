@@ -14,6 +14,8 @@
 		FE19376C2E5BB6C20043DAA1 /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = FE19376B2E5BB6C20043DAA1 /* FirebaseStorage */; };
 		FE19376E2E5BB6D60043DAA1 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = FE19376D2E5BB6D60043DAA1 /* GoogleSignIn */; };
 		FE1937702E5BB6D60043DAA1 /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = FE19376F2E5BB6D60043DAA1 /* GoogleSignInSwift */; };
+		FE1B300D2F294EEE00EBB3EE /* EFFICIENCY_IMPROVEMENTS.md in Resources */ = {isa = PBXBuildFile; fileRef = FE1B300C2F294EEE00EBB3EE /* EFFICIENCY_IMPROVEMENTS.md */; };
+		FE1B300F2F294F2B00EBB3EE /* APPLIED_OPTIMIZATIONS.md in Resources */ = {isa = PBXBuildFile; fileRef = FE1B300E2F294F2B00EBB3EE /* APPLIED_OPTIMIZATIONS.md */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -34,6 +36,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		FE1B300C2F294EEE00EBB3EE /* EFFICIENCY_IMPROVEMENTS.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = EFFICIENCY_IMPROVEMENTS.md; sourceTree = "<group>"; };
+		FE1B300E2F294F2B00EBB3EE /* APPLIED_OPTIMIZATIONS.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = APPLIED_OPTIMIZATIONS.md; sourceTree = "<group>"; };
 		FE28D8092E707B8900BA491E /* Coach Caddie.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "Coach Caddie.entitlements"; sourceTree = "<group>"; };
 		FE5CD8272E6E0ED400B6B07E /* Coach CaddieDebug.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "Coach CaddieDebug.entitlements"; sourceTree = "<group>"; };
 		FE7B1A4B2E25702900F3F140 /* Coach Caddie.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Coach Caddie.app"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -100,6 +104,8 @@
 				FE7B1A5B2E25702B00F3F140 /* Coach_CaddieTests */,
 				FE7B1A652E25702B00F3F140 /* Coach_CaddieUITests */,
 				FE7B1A4C2E25702900F3F140 /* Products */,
+				FE1B300C2F294EEE00EBB3EE /* EFFICIENCY_IMPROVEMENTS.md */,
+				FE1B300E2F294F2B00EBB3EE /* APPLIED_OPTIMIZATIONS.md */,
 			);
 			sourceTree = "<group>";
 		};
@@ -244,6 +250,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FE1B300F2F294F2B00EBB3EE /* APPLIED_OPTIMIZATIONS.md in Resources */,
+				FE1B300D2F294EEE00EBB3EE /* EFFICIENCY_IMPROVEMENTS.md in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
