@@ -1388,6 +1388,7 @@ struct SeasonRosterView: View {
     @Binding var team: Team
     let season: Season
     @EnvironmentObject var teamManager: TeamManager
+    @Environment(\.presentationMode) var presentationMode
     @State private var selectedPlayerIds: Set<UUID>
     @State private var isSaving = false
     
@@ -1464,13 +1465,16 @@ struct SeasonRosterView: View {
     private func saveRoster() {
         isSaving = true
         
-        guard let index = team.seasons.firstIndex(where: { $0.id == season.id }) else {
+        // Find the team in teamManager to preserve all data (including games)
+        guard let teamIndex = teamManager.teams.firstIndex(where: { $0.id == team.id }),
+              let seasonIndex = teamManager.teams[teamIndex].seasons.firstIndex(where: { $0.id == season.id }) else {
             isSaving = false
             return
         }
         
         Task {
             do {
+                // Save only the season roster to Firebase (not the whole team)
                 try await teamManager.firebaseManager.updateSeasonRoster(
                     seasonId: season.id,
                     activePlayerIds: Array(selectedPlayerIds),
@@ -1478,14 +1482,29 @@ struct SeasonRosterView: View {
                 )
                 
                 await MainActor.run {
-                    team.seasons[index].activePlayerIds = Array(selectedPlayerIds)
-                    teamManager.updateTeam(team)
+                    // Update the season in teamManager
+                    teamManager.teams[teamIndex].seasons[seasonIndex].activePlayerIds = Array(selectedPlayerIds)
+                    
+                    // Update the binding from teamManager (preserves games)
+                    team = teamManager.teams[teamIndex]
+                    
+                    // Save locally only - do NOT call updateTeam which triggers full Firebase save
+                    teamManager.saveLocalData()
+                    
+                    // Notify observers to refresh UI
+                    teamManager.objectWillChange.send()
+                    
                     isSaving = false
+                    
+                    print("✅ Updated active roster for season")
+                    
+                    // FIXED: Dismiss the form after successful save
+                    presentationMode.wrappedValue.dismiss()
                 }
             } catch {
                 await MainActor.run {
                     isSaving = false
-                    print("Failed to save roster: \(error)")
+                    print("❌ Failed to save roster: \(error)")
                 }
             }
         }

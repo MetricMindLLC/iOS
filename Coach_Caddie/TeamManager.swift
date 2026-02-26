@@ -1382,6 +1382,14 @@ var teamsICreated: [Team] {
         
         print("✅ Added player \(player.name) locally to team \(team.name)")
         
+        // FIXED: Update permission cache to include new player
+        let role = getCurrentUserRole(for: teams[teamIndex])
+        if role == .coach {
+            // Coaches can edit all players, so update cache with new player list
+            updateCacheForTeam(teams[teamIndex].id, role: .coach, playerIds: teams[teamIndex].players.map { $0.id })
+            print("✅ Updated permission cache to include new player")
+        }
+        
         // Save locally immediately
         debouncedSave()
         
@@ -1423,6 +1431,14 @@ var teamsICreated: [Team] {
         teams[teamIndex].updateActivityTimestamp()
         
         print("✅ Removed player \(player.name) locally from team \(team.name)")
+        
+        // FIXED: Update permission cache to reflect removed player
+        let role = getCurrentUserRole(for: teams[teamIndex])
+        if role == .coach {
+            // Coaches can edit all remaining players, so update cache
+            updateCacheForTeam(teams[teamIndex].id, role: .coach, playerIds: teams[teamIndex].players.map { $0.id })
+            print("✅ Updated permission cache after removing player")
+        }
         
         // Save locally immediately
         debouncedSave()
