@@ -1,63 +1,104 @@
 import SwiftUI
 
-// MARK: - Improved Loading Overlay
-struct LoadingOverlay: View {
-    @State private var animationRotation: Double = 0
-    @State private var showTimeout = false
-    let timeoutDuration: TimeInterval = 10 // Show timeout warning after 10 seconds
-    
+// MARK: - Bouncing Soccer Ball
+private struct BouncingSoccerBall: View {
+    @State private var isUp = false
+
     var body: some View {
-        ZStack {
-            // Less opaque background - more subtle
-            Color.black.opacity(0.15)
-                .ignoresSafeArea()
-            
-            VStack(spacing: 16) {
-                // Custom loading spinner
-                ZStack {
-                    Circle()
-                        .stroke(Color.white.opacity(0.3), lineWidth: 3)
-                        .frame(width: 40, height: 40)
-                    
-                    Circle()
-                        .trim(from: 0, to: 0.7)
-                        .stroke(Color.white, lineWidth: 3)
-                        .frame(width: 40, height: 40)
-                        .rotationEffect(.degrees(animationRotation))
-                        .animation(
-                            Animation.linear(duration: 1)
-                                .repeatForever(autoreverses: false),
-                            value: animationRotation
-                        )
-                }
-                
-                VStack(spacing: 4) {
-                    Text("Loading…")
-                        .foregroundColor(.white)
-                        .font(.headline)
-                        .fontWeight(.medium)
-                    
-                    if showTimeout {
-                        Text("This is taking longer than usual")
-                            .foregroundColor(.white.opacity(0.8))
-                            .font(.caption)
-                            .transition(.opacity)
-                    }
+        VStack(spacing: 6) {
+            Image(systemName: "soccerball")
+                .font(.system(size: 58, weight: .regular))
+                .foregroundStyle(Color.white, Color.black.opacity(0.85))
+                .rotationEffect(.degrees(isUp ? -18 : 18))
+                .offset(y: isUp ? -44 : 0)
+                .scaleEffect(x: isUp ? 1.0 : 1.12, y: isUp ? 1.0 : 0.88)
+                .animation(
+                    .interpolatingSpring(stiffness: 160, damping: 11)
+                        .repeatForever(autoreverses: true),
+                    value: isUp
+                )
+
+            // Ground shadow — shrinks/fades as ball rises
+            Ellipse()
+                .fill(Color.black.opacity(isUp ? 0.08 : 0.28))
+                .frame(width: isUp ? 28 : 52, height: isUp ? 5 : 9)
+                .blur(radius: isUp ? 3 : 1)
+                .animation(
+                    .interpolatingSpring(stiffness: 160, damping: 11)
+                        .repeatForever(autoreverses: true),
+                    value: isUp
+                )
+        }
+        .onAppear {
+            // Small delay so the first frame renders before animating
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                isUp = true
+            }
+        }
+    }
+}
+
+// MARK: - Shared Soccer Loading Card
+struct SoccerLoadingCard: View {
+    let message: String
+    var subMessage: String? = nil
+
+    var body: some View {
+        VStack(spacing: 20) {
+            BouncingSoccerBall()
+
+            VStack(spacing: 5) {
+                Text(message)
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.white)
+
+                if let sub = subMessage {
+                    Text(sub)
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.7))
+                        .multilineTextAlignment(.center)
+                        .transition(.opacity)
                 }
             }
-            .padding(24)
-            .background(
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(Color.black.opacity(0.8))
-                    .shadow(color: .black.opacity(0.3), radius: 10, x: 0, y: 5)
+        }
+        .padding(.horizontal, 44)
+        .padding(.vertical, 36)
+        .background(
+            RoundedRectangle(cornerRadius: 22)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.15, green: 0.50, blue: 0.27),
+                            Color(red: 0.08, green: 0.30, blue: 0.16)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .shadow(color: .black.opacity(0.35), radius: 22, x: 0, y: 10)
+        )
+    }
+}
+
+// MARK: - Full Loading Overlay (startup / data load)
+struct LoadingOverlay: View {
+    @State private var showTimeout = false
+    let timeoutDuration: TimeInterval = 10
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.38)
+                .ignoresSafeArea()
+
+            SoccerLoadingCard(
+                message: "Loading...",
+                subMessage: showTimeout ? "This is taking longer than usual" : nil
             )
         }
         .onAppear {
-            animationRotation = 360
-            
-            // Show timeout message after delay
             DispatchQueue.main.asyncAfter(deadline: .now() + timeoutDuration) {
-                withAnimation(.easeInOut(duration: 0.3)) {
+                withAnimation(.easeInOut(duration: 0.4)) {
                     showTimeout = true
                 }
             }
@@ -65,10 +106,22 @@ struct LoadingOverlay: View {
     }
 }
 
-// MARK: - Alternative Minimal Loading Indicator
+// MARK: - Reconnecting Overlay
+struct ReconnectingOverlay: View {
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.38)
+                .ignoresSafeArea()
+
+            SoccerLoadingCard(message: "Reconnecting...")
+        }
+    }
+}
+
+// MARK: - Minimal syncing dots (used elsewhere)
 struct MinimalLoadingIndicator: View {
     @State private var isAnimating = false
-    
+
     var body: some View {
         HStack(spacing: 8) {
             ForEach(0..<3, id: \.self) { index in
@@ -84,7 +137,7 @@ struct MinimalLoadingIndicator: View {
                         value: isAnimating
                     )
             }
-            
+
             Text("Syncing")
                 .font(.caption)
                 .foregroundColor(.secondary)
@@ -96,99 +149,45 @@ struct MinimalLoadingIndicator: View {
                 .fill(Color(.systemBackground))
                 .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
         )
-        .onAppear {
-            isAnimating = true
-        }
+        .onAppear { isAnimating = true }
     }
 }
 
-// MARK: - Top Bar Loading Indicator (Alternative to full overlay)
-struct TopBarLoadingIndicator: View {
-    @State private var progress: CGFloat = 0
-    
-    var body: some View {
-        VStack(spacing: 0) {
-            // Progress bar
-            GeometryReader { geometry in
-                Rectangle()
-                    .fill(Color.green)
-                    .frame(width: geometry.size.width * progress, height: 3)
-                    .animation(.easeInOut(duration: 0.3), value: progress)
-            }
-            .frame(height: 3)
-            .background(Color.green.opacity(0.2))
-            
-            Spacer()
-        }
-        .onAppear {
-            // Simulate indeterminate progress
-            withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true)) {
-                progress = 1.0
-            }
-        }
-    }
-}
-
-// MARK: - Loading State Wrapper View
+// MARK: - Loading State Wrapper
 struct LoadingStateView<Content: View>: View {
     let isLoading: Bool
     let useMinimal: Bool
     let content: Content
-    
+
     init(isLoading: Bool, useMinimal: Bool = false, @ViewBuilder content: () -> Content) {
         self.isLoading = isLoading
         self.useMinimal = useMinimal
         self.content = content()
     }
-    
+
     var body: some View {
         ZStack {
             content
                 .disabled(isLoading)
-            
+
             if isLoading {
-                if useMinimal {
-                    VStack {
-                        TopBarLoadingIndicator()
-                        Spacer()
-                    }
-                } else {
-                    LoadingOverlay()
-                }
+                LoadingOverlay()
             }
         }
     }
 }
 
-// MARK: - Preview
-struct LoadingOverlay_Previews: PreviewProvider {
-    static var previews: some View {
-        Group {
-            // Full overlay
-            ZStack {
-                Color.blue.ignoresSafeArea()
-                LoadingOverlay()
-            }
-            .previewDisplayName("Full Overlay")
-            
-            // Minimal indicator
-            VStack {
-                Text("Some content here")
-                MinimalLoadingIndicator()
-                Text("More content")
-            }
-            .padding()
-            .previewDisplayName("Minimal Indicator")
-            
-            // Top bar indicator
-            ZStack {
-                VStack {
-                    Text("App Content")
-                    Spacer()
-                }
-                TopBarLoadingIndicator()
-            }
-            .previewDisplayName("Top Bar")
-        }
+// MARK: - Previews
+#Preview("Loading") {
+    ZStack {
+        Color(red: 0.1, green: 0.12, blue: 0.15).ignoresSafeArea()
+        LoadingOverlay()
+    }
+}
+
+#Preview("Reconnecting") {
+    ZStack {
+        Color(red: 0.1, green: 0.12, blue: 0.15).ignoresSafeArea()
+        ReconnectingOverlay()
     }
 }

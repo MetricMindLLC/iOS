@@ -2383,6 +2383,31 @@ struct LineupPosition: Codable, Equatable {
     var playerId: UUID?
     var position: Position
     var fieldPosition: CGPoint
+    
+    enum CodingKeys: String, CodingKey {
+        case playerId, position, fieldPosition
+    }
+    
+    init(playerId: UUID? = nil, position: Position, fieldPosition: CGPoint) {
+        self.playerId = playerId
+        self.position = position
+        self.fieldPosition = fieldPosition
+    }
+    
+    // Custom decoder to handle empty string or invalid UUID gracefully.
+    // Firebase data can contain "" for nil playerIds due to a prior serialization bug.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let playerIdString = try? container.decode(String.self, forKey: .playerId),
+           !playerIdString.isEmpty,
+           let uuid = UUID(uuidString: playerIdString) {
+            playerId = uuid
+        } else {
+            playerId = nil
+        }
+        position = try container.decode(Position.self, forKey: .position)
+        fieldPosition = try container.decode(CGPoint.self, forKey: .fieldPosition)
+    }
 }
 
 // MARK: - Active Game State (for live game tracking)

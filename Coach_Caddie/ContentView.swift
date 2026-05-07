@@ -40,33 +40,8 @@ struct ContentView: View {
                 
                 // Loading Overlay
                 if !isDataFullyLoaded {
-                    ZStack {
-                        Color.black.opacity(0.4)
-                            .ignoresSafeArea()
-                        
-                        VStack(spacing: 20) {
-                            ProgressView()
-                                .scaleEffect(1.5)
-                                .progressViewStyle(CircularProgressViewStyle(tint: Color(red: 0.13, green: 0.47, blue: 0.25)))
-                            
-                            VStack(spacing: 8) {
-                                Text("Loading team data...")
-                                    .font(.headline)
-                                    .foregroundColor(.primary)
-                                
-                                Text(loadingStatusText)
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                        .padding(40)
-                        .background(
-                            RoundedRectangle(cornerRadius: 20)
-                                .fill(Color(.systemBackground))
-                                .shadow(color: Color.black.opacity(0.3), radius: 15, x: 0, y: 8)
-                        )
-                    }
-                    .transition(.opacity)
+                    LoadingOverlay()
+                        .transition(.opacity)
                 }
             }
         }
@@ -111,120 +86,42 @@ struct ContentView: View {
         }
     }
     
-    @State private var loadingStatusText = "Please wait..."
-    
     private func loadDataAndWait(isRefresh: Bool = false) async {
-        // Skip if already loading (unless it's a manual refresh)
         if !isRefresh && isDataFullyLoaded {
             return
         }
-        
+
         await MainActor.run {
             isDataFullyLoaded = false
-            loadingStatusText = "Loading teams..."
         }
-        
-        print("🔄 ContentView: Starting data load at \(Date())")
-        
+
         // Trigger the load
         await MainActor.run {
             teamManager.loadData()
         }
-        
-        // Wait for initial team load
-        try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
-        
-        // Wait for isLoading to become false
+
+        // Brief pause so the background Task inside loadData() has time to start
+        // and flip isLoading = true before we begin polling.
+        try? await Task.sleep(nanoseconds: 300_000_000) // 0.3s
+
+        // Wait until TeamManager signals that the full Firebase load
+        // (including subcollections) is complete. hasCompletedFirstLoad is
+        // only set to true inside loadTeamsFromFirebase() after all data is in memory.
+        // Timeout after ~15s so the app is never stuck indefinitely.
         var iterations = 0
-        while await MainActor.run(body: { teamManager.isLoading }) && iterations < 100 {
-            try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 second
+        while await MainActor.run(body: { !teamManager.hasCompletedFirstLoad || teamManager.isLoading }) && iterations < 150 {
+            try? await Task.sleep(nanoseconds: 100_000_000) // 0.1s per tick
             iterations += 1
         }
-        
-        let teamCount = await MainActor.run { teamManager.teams.count }
-        print("🔄 ContentView: Initial load complete at \(Date()), teams: \(teamCount)")
-        
-        // Now monitor for subcollection loading
-        if teamCount > 0 {
-            await MainActor.run {
-                loadingStatusText = "Loading games and players..."
-            }
-            
-            // Monitor game/player counts with a longer, more patient approach
-            var previousSnapshot: [UUID: (games: Int, players: Int)] = [:]
-            var consecutiveStableChecks = 0
-            let requiredStableChecks = 8 // Need 8 checks at 0.5s = 4 seconds of stability
-            let checkInterval: UInt64 = 500_000_000 // 0.5 seconds
-            let maxWaitTime: TimeInterval = 15.0 // Wait up to 15 seconds
-            let startTime = Date()
-            
-            while Date().timeIntervalSince(startTime) < maxWaitTime {
-                try? await Task.sleep(nanoseconds: checkInterval)
-                
-                // Get current snapshot
-                let currentSnapshot = await MainActor.run {
-                    var snapshot: [UUID: (games: Int, players: Int)] = [:]
-                    for team in teamManager.teams {
-                        snapshot[team.id] = (games: team.games.count, players: team.players.count)
-                    }
-                    return snapshot
-                }
-                
-                // Log current state
-                let totalGames = currentSnapshot.values.reduce(0) { $0 + $1.games }
-                let totalPlayers = currentSnapshot.values.reduce(0) { $0 + $1.players }
-                print("📊 Check at \(Date()): Games=\(totalGames), Players=\(totalPlayers), Stable=\(consecutiveStableChecks)/\(requiredStableChecks)")
-                
-                // Compare with previous
-                if currentSnapshot == previousSnapshot {
-                    consecutiveStableChecks += 1
-                    
-                    if consecutiveStableChecks >= requiredStableChecks {
-                        print("✅ ContentView: Data stabilized after \(consecutiveStableChecks) checks")
-                        print("✅ Final: Games=\(totalGames), Players=\(totalPlayers)")
-                        break
-                    }
-                } else {
-                    // Data changed
-                    if !previousSnapshot.isEmpty {
-                        print("🔄 Data changed, resetting stability counter")
-                        for (teamId, current) in currentSnapshot {
-                            if let previous = previousSnapshot[teamId] {
-                                if current.games != previous.games || current.players != previous.players {
-                                    print("   Team \(teamId): Games \(previous.games)->\(current.games), Players \(previous.players)->\(current.players)")
-                                }
-                            }
-                        }
-                    }
-                    consecutiveStableChecks = 0
-                    previousSnapshot = currentSnapshot
-                }
-            }
-            
-            // Log final state
-            let finalSnapshot = await MainActor.run {
-                var snapshot: [UUID: (games: Int, players: Int)] = [:]
-                for team in teamManager.teams {
-                    snapshot[team.id] = (games: team.games.count, players: team.players.count)
-                }
-                return snapshot
-            }
-            let finalGames = finalSnapshot.values.reduce(0) { $0 + $1.games }
-            let finalPlayers = finalSnapshot.values.reduce(0) { $0 + $1.players }
-            print("✅ ContentView: Loading complete at \(Date())")
-            print("✅ Final state: \(teamCount) teams, \(finalGames) games, \(finalPlayers) players")
-        }
-        
-        // One more small delay before showing UI
-        try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
-        
+
+        // Small grace period for any final @Published propagation
+        try? await Task.sleep(nanoseconds: 300_000_000) // 0.3s
+
         await MainActor.run {
             withAnimation {
                 isDataFullyLoaded = true
             }
         }
-        
-        print("✅ ContentView: UI ready at \(Date())")
     }
     
     private var headerSection: some View {

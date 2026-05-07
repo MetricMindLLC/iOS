@@ -28,6 +28,9 @@ class TeamManager: ObservableObject {
     @Published var isReconnecting = false
     @Published var lastSavedDate: Date?
     @Published var isInLocalOnlyMode = false
+    /// Flips to true once the first Firebase data load (including subcollections) completes.
+    /// ContentView waits on this flag before hiding the loading overlay.
+    @Published var hasCompletedFirstLoad: Bool = false
     
     // MARK: - Permission Caching (NEW)
     @Published private var permissionCache: UserPermissionCache?
@@ -1111,9 +1114,10 @@ var teamsICreated: [Team] {
         }
         
         isCurrentlyLoadingData = true
-        
+        hasCompletedFirstLoad = false  // Reset so ContentView waits for the new load
+
         loadLocalData()
-        
+
         Task {
             await loadTeamsFromFirebase()
             await MainActor.run {
@@ -2505,15 +2509,16 @@ var teamsICreated: [Team] {
                 }
                 
                 self.isLoading = false
+                self.hasCompletedFirstLoad = true  // Signal that all data (including subcollections) is ready
                 self.saveLocalData()
-                
+
                 // Setup real-time listeners for all teams
                 for team in self.teams {
                     // Placeholder - implement setupRealTimeListener in FirebaseManager
                     print("Setting up real-time listener for team: \(team.name)")
                 }
             }
-            
+
             // Sync any pending changes (moved outside MainActor.run)
             await syncPendingChanges()
         } catch {
@@ -2525,6 +2530,7 @@ var teamsICreated: [Team] {
                     self.setError("Failed to load teams: \(error.localizedDescription)")
                 }
                 self.isLoading = false
+                self.hasCompletedFirstLoad = true  // Show whatever we have even on error
             }
         }
     }

@@ -809,12 +809,15 @@ class FirebaseManager: NSObject, ObservableObject {
         
         // Convert LineupPosition array to Firebase format
         if let startingLineup = game.startingLineup {
-            let lineupArray = startingLineup.map { lineupPosition in
-                return [
-                    "playerId": lineupPosition.playerId?.uuidString ?? "",
+            let lineupArray: [[String: Any]] = startingLineup.map { lineupPosition in
+                var dict: [String: Any] = [
                     "position": lineupPosition.position.rawValue,
                     "fieldPosition": [lineupPosition.fieldPosition.x, lineupPosition.fieldPosition.y]
                 ]
+                if let playerId = lineupPosition.playerId {
+                    dict["playerId"] = playerId.uuidString
+                }
+                return dict
             }
             planningUpdate["startingLineup"] = lineupArray
         } else {
@@ -822,12 +825,15 @@ class FirebaseManager: NSObject, ObservableObject {
         }
         
         if let actualStartingLineup = game.actualStartingLineup {
-            let actualLineupArray = actualStartingLineup.map { lineupPosition in
-                return [
-                    "playerId": lineupPosition.playerId?.uuidString ?? "",
+            let actualLineupArray: [[String: Any]] = actualStartingLineup.map { lineupPosition in
+                var dict: [String: Any] = [
                     "position": lineupPosition.position.rawValue,
                     "fieldPosition": [lineupPosition.fieldPosition.x, lineupPosition.fieldPosition.y]
                 ]
+                if let playerId = lineupPosition.playerId {
+                    dict["playerId"] = playerId.uuidString
+                }
+                return dict
             }
             planningUpdate["actualStartingLineup"] = actualLineupArray
         } else {
@@ -1337,7 +1343,13 @@ class FirebaseManager: NSObject, ObservableObject {
         var games: [Game] = []
         
         for document in snapshot.documents {
-            var game = try Firestore.Decoder().decode(Game.self, from: document.data())
+            var game: Game
+            do {
+                game = try Firestore.Decoder().decode(Game.self, from: document.data())
+            } catch {
+                print("⚠️ Skipping game \(document.documentID) due to decode error: \(error)")
+                continue
+            }
             game.plannedPositionChanges = deserializePlannedPositionChanges(from: document.data())
             let gameRef = gamesRef.document(document.documentID)
             

@@ -87,24 +87,9 @@ struct MainAppView: View {
         }
         .accentColor(Color(red: 0.13, green: 0.47, blue: 0.25))
         .overlay(
-            // Loading overlay for network reconnection
             Group {
                 if teamManager.isReconnecting {
-                    Color.black.opacity(0.3)
-                        .ignoresSafeArea()
-                    
-                    VStack {
-                        ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle())
-                            .scaleEffect(1.5)
-                        
-                        Text("Reconnecting...")
-                            .font(.headline)
-                            .padding(.top)
-                    }
-                    .padding()
-                    .background(Color(.systemBackground))
-                    .cornerRadius(12)
+                    ReconnectingOverlay()
                 }
             }
         )

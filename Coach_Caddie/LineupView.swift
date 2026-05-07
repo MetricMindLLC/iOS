@@ -2012,6 +2012,7 @@ struct PositionSwapView: View {
     @State private var playerB: Player?
     @State private var playerAPosition: Position?
     @State private var playerBPosition: Position?
+    @State private var swapsAdded: Int = 0
     
     // NEW: Custom init to set initial minute
     init(team: Team, game: Binding<Game>, lineupPositions: [LineupPosition], onPositionChangeAdded: @escaping () -> Void, initialMinute: Int = 0) {
@@ -2034,6 +2035,18 @@ struct PositionSwapView: View {
                     Stepper("Minute: \(selectedMinute)", value: $selectedMinute, in: 0...90)
                 }
                 
+                if swapsAdded > 0 {
+                    Section {
+                        HStack {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                            Text("\(swapsAdded) swap\(swapsAdded == 1 ? "" : "s") added — select another pair or tap Done")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+
                 Section("Select Players to Swap") {
                     Picker("First Player", selection: $playerA) {
                         Text("Select Player").tag(nil as Player?)
@@ -2122,23 +2135,29 @@ struct PositionSwapView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") {
+                    Button("Done") {
+                        if swapsAdded > 0 {
+                            onPositionChangeAdded()
+                        }
                         presentationMode.wrappedValue.dismiss()
                     }
                 }
-                
+
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Swap") {
+                    Button("Add Swap") {
                         createPositionSwap()
-                        onPositionChangeAdded()
-                        presentationMode.wrappedValue.dismiss()
+                        swapsAdded += 1
+                        playerA = nil
+                        playerB = nil
+                        playerAPosition = nil
+                        playerBPosition = nil
                     }
                     .disabled(playerA == nil || playerB == nil)
                 }
             }
         }
     }
-    
+
     private func createPositionSwap() {
         guard let playerA = playerA, let playerB = playerB,
               let posA = playerAPosition, let posB = playerBPosition else { return }
@@ -2185,28 +2204,29 @@ struct PositionSwapView: View {
     }
     
     private func getCurrentPosition(for player: Player, atMinute minute: Int) -> Position? {
-        // Get all events before this minute, sorted chronologically
+        // Using <= for position changes so that chained swaps at the same minute
+        // correctly reflect the result of previously-added swaps in the same session.
         let relevantSubs = game.plannedSubstitutions
             .filter { $0.plannedMinute <= minute }
             .sorted { $0.plannedMinute < $1.plannedMinute }
-        
+
         let relevantPositionChanges = game.plannedPositionChanges
-            .filter { $0.plannedMinute < minute && $0.playerId == player.id }
+            .filter { $0.plannedMinute <= minute && $0.playerId == player.id }
             .sorted { $0.plannedMinute < $1.plannedMinute }
-        
+
         // Track player's status through all events chronologically
         var isOnField = false
         var currentPosition: Position? = nil
-        
+
         // First check if player is in starting lineup
         if let startingPosition = lineupPositions.first(where: { $0.playerId == player.id }) {
             isOnField = true
             currentPosition = startingPosition.position
         }
-        
+
         // Create a combined timeline of all events
         var allEvents: [(minute: Int, type: String, data: Any)] = []
-        
+
         // Add substitutions to timeline
         for sub in relevantSubs {
             if sub.playerOut == player.id {
@@ -2215,15 +2235,15 @@ struct PositionSwapView: View {
                 allEvents.append((minute: sub.plannedMinute, type: "subIn", data: sub))
             }
         }
-        
+
         // Add position changes to timeline
         for posChange in relevantPositionChanges {
             allEvents.append((minute: posChange.plannedMinute, type: "positionChange", data: posChange))
         }
-        
+
         // Sort all events chronologically
         allEvents.sort { $0.minute < $1.minute }
-        
+
         // Apply events in chronological order
         for event in allEvents {
             switch event.type {
@@ -2245,7 +2265,7 @@ struct PositionSwapView: View {
                 break
             }
         }
-        
+
         return isOnField ? currentPosition : nil
     }
 }
@@ -4002,7 +4022,7 @@ struct SubstitutionPlanShareView: View {
             SubstitutionFlowLayout(spacing: 8) {
                 ForEach(changes) { change in
                     if let player = team.players.first(where: { $0.id == change.playerId }) {
-                        Text("\(change.plannedMinute)': #\(player.jerseyNumber) \(change.fromPosition.abbreviation)→\(change.toPosition.abbreviation)")
+                        Text("\(change.plannedMinute)': #\(player.jerseyNumber) \(player.name.components(separatedBy: " ").first ?? "") \(change.fromPosition.abbreviation)→\(change.toPosition.abbreviation)")
                             .font(.caption)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 3)
@@ -4785,9 +4805,21 @@ struct ModernLineupBuilder: View {
     let availableHeight: CGFloat
     let hideAvailablePlayersHeader: Bool
     @EnvironmentObject var teamManager: TeamManager
-    
+
+    /// Players eligible for the lineup: those in the active season's roster.
+    /// Falls back to the full squad if no season is selected or the season has no roster entries.
+    private var activeSeasonPlayers: [Player] {
+        guard let activeSeasonId = team.activeSeasonId,
+              let activeSeason = team.seasons.first(where: { $0.id == activeSeasonId }),
+              !activeSeason.activePlayerIds.isEmpty else {
+            return team.players
+        }
+        let activeIds = Set(activeSeason.activePlayerIds)
+        return team.players.filter { activeIds.contains($0.id) }
+    }
+
     var unassignedPlayers: [Player] {
-        let unsorted = team.players.filter { player in
+        let unsorted = activeSeasonPlayers.filter { player in
             !lineupPositions.contains { $0.playerId == player.id }
         }
         
@@ -5348,16 +5380,29 @@ struct ModernGameModeView: View {
     @EnvironmentObject var teamManager: TeamManager
     @State private var selectedPlayer: Player?
     @State private var selectedEventType: EventType = .goal
-    @State private var showingSubstitution = false
     @State private var showingAuditLog = false
     @State private var showingEndGameConfirmation = false
     @State private var showingClearGameConfirmation = false
     @State private var userRole: AccessLevel?
     @State private var canEditGame = false
+    @State private var isSwapMode = false
+    @State private var swapSourcePlayer: Player? = nil
     
     // UPDATED: Check if user has game editing permissions
     private var isReadOnlyUser: Bool {
         return userRole == .viewer || userRole == .parent
+    }
+
+    /// Players eligible for the bench: those in the active season's roster.
+    /// Falls back to the full squad if no season is selected or the season has no roster entries.
+    private var activeSeasonPlayers: [Player] {
+        guard let activeSeasonId = team.activeSeasonId,
+              let activeSeason = team.seasons.first(where: { $0.id == activeSeasonId }),
+              !activeSeason.activePlayerIds.isEmpty else {
+            return team.players
+        }
+        let activeIds = Set(activeSeason.activePlayerIds)
+        return team.players.filter { activeIds.contains($0.id) }
     }
     
     var calculatedMinute: Int { gameStateManager.calculatedMinute }
@@ -5430,9 +5475,12 @@ struct ModernGameModeView: View {
                 ModernActionBar(
                     selectedPlayer: selectedPlayer,
                     selectedEventType: selectedEventType,
+                    isSwapMode: isSwapMode,
+                    swapSourcePlayer: swapSourcePlayer,
                     onRecord: recordEvent,
                     onCancel: { selectedPlayer = nil },
-                    onSubstitution: { showingSubstitution = true }
+                    onSwapMode: enterSwapMode,
+                    onCancelSwap: cancelSwapMode
                 )
                 .padding(.horizontal, 16)
                 .padding(.vertical, 6) // REDUCED from 8
@@ -5453,9 +5501,9 @@ struct ModernGameModeView: View {
                 .padding(.vertical, 6)
             }
             
-            // Field View - UPDATED with reduced spacing and larger field
+            // Field + Bench — shrinks into compact layout when Sub/Swap is active
             ScrollView {
-                VStack(spacing: 12) { // REDUCED from default spacing
+                VStack(spacing: isSwapMode ? 8 : 12) {
                     ModernGameFieldView(
                         formation: selectedFormation,
                         lineupPositions: lineupPositions,
@@ -5463,38 +5511,34 @@ struct ModernGameModeView: View {
                         selectedEventType: selectedEventType,
                         team: team,
                         game: game,
-                        isReadOnlyUser: isReadOnlyUser
+                        isReadOnlyUser: isReadOnlyUser,
+                        isSwapMode: isSwapMode,
+                        swapSourcePlayerId: swapSourcePlayer?.id,
+                        onSwapTap: handleSwapTap
                     )
-                    .frame(height: 380) // INCREASED from 350 to use more space
-                    .padding(.horizontal, 12) // REDUCED from 16
-                    
-                    // Bench - UPDATED with reduced spacing
+                    .frame(height: isSwapMode ? 305 : 380)
+                    .padding(.horizontal, 12)
+                    .animation(.spring(response: 0.32, dampingFraction: 0.82), value: isSwapMode)
+
                     ModernBenchView(
-                        benchPlayers: team.players.filter { player in
+                        benchPlayers: activeSeasonPlayers.filter { player in
                             !lineupPositions.contains { $0.playerId == player.id }
                         },
                         selectedPlayer: $selectedPlayer,
-                        isReadOnlyUser: isReadOnlyUser
+                        isReadOnlyUser: isReadOnlyUser,
+                        isSwapMode: isSwapMode,
+                        hasSwapSource: swapSourcePlayer != nil,
+                        onSwapTap: handleSwapTap
                     )
-                    .padding(.horizontal, 12) // REDUCED from default
-                    
-                    Color.clear.frame(height: 30) // REDUCED from 50
+                    .padding(.horizontal, 12)
+
+                    Color.clear.frame(height: isSwapMode ? 8 : 30)
                 }
             }
         }
         .onAppear {
             checkGamePermissions()
             syncGameStateOnAppear()
-        }
-        .sheet(isPresented: $showingSubstitution) {
-            if !isReadOnlyUser {
-                SubstitutionView(
-                    team: team,
-                    game: $game,
-                    lineupPositions: $lineupPositions
-                )
-                .environmentObject(gameStateManager)
-            }
         }
         .sheet(isPresented: $showingAuditLog) {
             if let auditLog = gameStateManager.activeGameState?.auditLog {
@@ -5549,6 +5593,88 @@ struct ModernGameModeView: View {
         }
     }
     
+    // MARK: - Quick Swap Mode
+    private func enterSwapMode() {
+        isSwapMode = true
+        swapSourcePlayer = nil
+        selectedPlayer = nil
+    }
+
+    private func cancelSwapMode() {
+        isSwapMode = false
+        swapSourcePlayer = nil
+    }
+
+    private func handleSwapTap(_ tappedPlayer: Player) {
+        guard isSwapMode else { return }
+
+        if swapSourcePlayer == nil {
+            // Only allow field players as the source
+            let isOnField = lineupPositions.contains { $0.playerId == tappedPlayer.id }
+            guard isOnField else { return }
+            swapSourcePlayer = tappedPlayer
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        } else if swapSourcePlayer?.id == tappedPlayer.id {
+            // Tapped the same player — deselect
+            swapSourcePlayer = nil
+        } else {
+            let source = swapSourcePlayer!
+            let isTargetOnField = lineupPositions.contains { $0.playerId == tappedPlayer.id }
+            if isTargetOnField {
+                executeQuickPositionSwap(player1: source, player2: tappedPlayer)
+            } else {
+                executeQuickSubstitution(playerOut: source, playerIn: tappedPlayer)
+            }
+            cancelSwapMode()
+        }
+    }
+
+    private func executeQuickPositionSwap(player1: Player, player2: Player) {
+        guard let idx1 = lineupPositions.firstIndex(where: { $0.playerId == player1.id }),
+              let idx2 = lineupPositions.firstIndex(where: { $0.playerId == player2.id }) else { return }
+
+        let pos1 = lineupPositions[idx1].position
+        let pos2 = lineupPositions[idx2].position
+
+        // Swap player IDs between their lineup slots (positions stay with slots)
+        lineupPositions[idx1].playerId = player2.id
+        lineupPositions[idx2].playerId = player1.id
+
+        gameStateManager.addAuditEntry(
+            eventType: .positionChange,
+            gameTime: gameStateManager.auditLogTime,
+            details: "SWAP: \(player1.name) (\(pos1.abbreviation)) ↔ \(player2.name) (\(pos2.abbreviation))"
+        )
+
+        gameStateManager.activeGameState?.lineupPositions = lineupPositions
+        teamManager.updateTeam(team, activeGameId: game.id)
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+    }
+
+    private func executeQuickSubstitution(playerOut: Player, playerIn: Player) {
+        guard let positionIndex = lineupPositions.firstIndex(where: { $0.playerId == playerOut.id }) else { return }
+
+        lineupPositions[positionIndex].playerId = playerIn.id
+
+        let substitution = Substitution(
+            playerIn: playerIn.id,
+            playerOut: playerOut.id,
+            minute: gameStateManager.calculatedMinute,
+            reason: .tactical
+        )
+        game.substitutions.append(substitution)
+
+        gameStateManager.addAuditEntry(
+            eventType: .substitution,
+            gameTime: gameStateManager.auditLogTime,
+            details: "\(playerOut.name) → \(playerIn.name) (Tactical)"
+        )
+
+        gameStateManager.activeGameState?.lineupPositions = lineupPositions
+        teamManager.updateTeam(team, activeGameId: game.id)
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+    }
+
     // MARK: - Permission Check
     private func checkGamePermissions() {
         Task {
@@ -6111,13 +6237,59 @@ struct ModernGameModeView: View {
     struct ModernActionBar: View {
         let selectedPlayer: Player?
         let selectedEventType: EventType
+        let isSwapMode: Bool
+        let swapSourcePlayer: Player?
         let onRecord: () -> Void
         let onCancel: () -> Void
-        let onSubstitution: () -> Void
-        
+        let onSwapMode: () -> Void
+        let onCancelSwap: () -> Void
+
         var body: some View {
             HStack {
-                if let player = selectedPlayer {
+                if isSwapMode {
+                    // Swap mode — waiting for source or target
+                    if let source = swapSourcePlayer {
+                        HStack(spacing: 8) {
+                            Circle()
+                                .fill(Color.orange)
+                                .frame(width: 30, height: 30)
+                                .overlay(
+                                    Text("\(source.jerseyNumber)")
+                                        .font(.caption)
+                                        .bold()
+                                        .foregroundColor(.white)
+                                )
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(source.name.components(separatedBy: " ").first ?? source.name)
+                                    .font(.subheadline)
+                                    .bold()
+                                Text("Field player = swap · Bench = sub")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.orange.opacity(0.1))
+                        .cornerRadius(8)
+                    } else {
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .foregroundColor(.orange)
+                            Text("Tap a field player to swap")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+
+                    Spacer()
+
+                    Button("Cancel", action: onCancelSwap)
+                        .foregroundColor(.red)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+
+                } else if let player = selectedPlayer {
                     HStack {
                         Circle()
                             .fill(selectedEventType.color)
@@ -6128,7 +6300,7 @@ struct ModernGameModeView: View {
                                     .bold()
                                     .foregroundColor(.white)
                             )
-                        
+
                         VStack(alignment: .leading, spacing: 2) {
                             Text(player.name)
                                 .font(.subheadline)
@@ -6142,34 +6314,35 @@ struct ModernGameModeView: View {
                     .padding(.vertical, 8)
                     .background(Color(.systemGray6))
                     .cornerRadius(8)
-                    
+
                     Spacer()
-                    
+
                     Button("Record", action: onRecord)
                         .foregroundColor(.white)
                         .padding(.horizontal, 20)
                         .padding(.vertical, 8)
                         .background(Color.green)
                         .cornerRadius(8)
-                    
+
                     Button("Cancel", action: onCancel)
                         .foregroundColor(.red)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
+
                 } else {
                     Text("Select a player to record an event")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
-                    
+
                     Spacer()
-                    
-                    Button(action: onSubstitution) {
-                        HStack {
+
+                    Button(action: onSwapMode) {
+                        HStack(spacing: 4) {
                             Image(systemName: "arrow.left.arrow.right")
-                            Text("Sub")
+                            Text("Sub / Swap")
                         }
                         .foregroundColor(.white)
-                        .padding(.horizontal, 12)
+                        .padding(.horizontal, 14)
                         .padding(.vertical, 8)
                         .background(Color.blue)
                         .cornerRadius(8)
@@ -6188,6 +6361,9 @@ struct ModernGameModeView: View {
         let team: Team
         let game: Game
         let isReadOnlyUser: Bool
+        var isSwapMode: Bool = false
+        var swapSourcePlayerId: UUID? = nil
+        var onSwapTap: (Player) -> Void = { _ in }
         
         // NEW: Calculate actual field positions considering position swaps
         private func calculateActualFieldPositions(for geometry: CGSize) -> [CGPoint] {
@@ -6236,15 +6412,22 @@ struct ModernGameModeView: View {
                             
                             GamePlayerMarker(
                                 player: player,
-                                position: position.position, // This should reflect the swapped position
-                                isSelected: selectedPlayer?.id == player.id,
+                                position: position.position,
+                                isSelected: selectedPlayer?.id == player.id && !isSwapMode,
                                 eventColor: selectedEventType.color,
-                                isReadOnlyUser: isReadOnlyUser
+                                isReadOnlyUser: isReadOnlyUser,
+                                isSwapSource: isSwapMode && swapSourcePlayerId == player.id,
+                                isSwapTarget: isSwapMode && swapSourcePlayerId != nil && swapSourcePlayerId != player.id,
+                                isCompact: isSwapMode
                             )
-                            .position(actualPos) // Use the calculated actual position
+                            .position(actualPos)
                             .onTapGesture {
                                 if !isReadOnlyUser {
-                                    selectedPlayer = player
+                                    if isSwapMode {
+                                        onSwapTap(player)
+                                    } else {
+                                        selectedPlayer = player
+                                    }
                                 }
                             }
                         }
@@ -6259,57 +6442,86 @@ struct ModernGameModeView: View {
         let position: Position
         let isSelected: Bool
         let eventColor: Color
-        let isReadOnlyUser: Bool  // ADDED
-        
+        let isReadOnlyUser: Bool
+        var isSwapSource: Bool = false
+        var isSwapTarget: Bool = false
+        var isCompact: Bool = false
+
+        private var circleSize: CGFloat { isCompact ? 36 : 45 }
+        private var ringSize: CGFloat { isCompact ? 48 : 60 }
+        private var fontSize: CGFloat { isCompact ? 13 : 16 }
+
         var body: some View {
             ZStack {
-                // UPDATED: Only show selection highlight for coaches
-                if isSelected && !isReadOnlyUser {
+                if isSwapSource {
+                    Circle()
+                        .stroke(Color.orange, lineWidth: 3)
+                        .frame(width: ringSize, height: ringSize)
+                } else if isSwapTarget {
+                    Circle()
+                        .stroke(Color.green, lineWidth: 2)
+                        .frame(width: ringSize, height: ringSize)
+                } else if isSelected && !isReadOnlyUser {
                     Circle()
                         .stroke(eventColor, lineWidth: 3)
-                        .frame(width: 60, height: 60)
+                        .frame(width: ringSize, height: ringSize)
                         .animation(.easeInOut(duration: 0.3), value: isSelected)
                 }
-                
+
                 VStack(spacing: 2) {
                     ZStack {
                         Circle()
-                            .fill(position.color)
-                            .frame(width: 45, height: 45)
-                        
+                            .fill(isSwapSource ? Color.orange : position.color)
+                            .frame(width: circleSize, height: circleSize)
+
                         Text(String(player.jerseyNumber))
-                            .font(.system(size: 16, weight: .bold))
+                            .font(.system(size: fontSize, weight: .bold))
                             .foregroundColor(.white)
                     }
-                    
+
                     Text(player.name.components(separatedBy: " ").first ?? "")
                         .font(.caption2)
                         .fontWeight(.medium)
                         .foregroundColor(.white)
                         .lineLimit(1)
-                        .padding(.horizontal, 6)
+                        .padding(.horizontal, isCompact ? 4 : 6)
                         .padding(.vertical, 2)
                         .background(Color.black.opacity(0.6))
                         .cornerRadius(4)
                 }
             }
+            .animation(.spring(response: 0.32, dampingFraction: 0.82), value: isCompact)
         }
     }
     // MARK: - Modern Bench View
     struct ModernBenchView: View {
         let benchPlayers: [Player]
         @Binding var selectedPlayer: Player?
-        let isReadOnlyUser: Bool  // ADDED
-        
+        let isReadOnlyUser: Bool
+        var isSwapMode: Bool = false
+        var hasSwapSource: Bool = false
+        var onSwapTap: (Player) -> Void = { _ in }
+
         var body: some View {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     Text("Bench")
                         .font(.headline)
                         .padding(.horizontal)
-                    
+
+                    // Hint label when a source is selected and bench players are available
+                    if isSwapMode && hasSwapSource && !benchPlayers.isEmpty {
+                        Text("Tap to sub in")
+                            .font(.caption)
+                            .foregroundColor(.green)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Color.green.opacity(0.12))
+                            .cornerRadius(6)
+                    }
+
                     Spacer()
-                    
+
                     Text("\(benchPlayers.count)")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
@@ -6319,7 +6531,7 @@ struct ModernGameModeView: View {
                         .cornerRadius(12)
                         .padding(.horizontal)
                 }
-                
+
                 if benchPlayers.isEmpty {
                     Text("All players are on the field")
                         .font(.subheadline)
@@ -6332,11 +6544,17 @@ struct ModernGameModeView: View {
                             ForEach(benchPlayers) { player in
                                 BenchPlayerCard(
                                     player: player,
-                                    isSelected: selectedPlayer?.id == player.id,
-                                    isReadOnlyUser: isReadOnlyUser  // ADDED
+                                    isSelected: selectedPlayer?.id == player.id && !isSwapMode,
+                                    isReadOnlyUser: isReadOnlyUser,
+                                    isSwapTarget: isSwapMode && hasSwapSource,
+                                    isCompact: isSwapMode
                                 ) {
-                                    if !isReadOnlyUser {  // ADDED: Only allow selection for coaches
-                                        selectedPlayer = player
+                                    if !isReadOnlyUser {
+                                        if isSwapMode {
+                                            onSwapTap(player)
+                                        } else {
+                                            selectedPlayer = player
+                                        }
                                     }
                                 }
                             }
@@ -6351,47 +6569,63 @@ struct ModernGameModeView: View {
     struct BenchPlayerCard: View {
         let player: Player
         let isSelected: Bool
-        let isReadOnlyUser: Bool  // ADDED
+        let isReadOnlyUser: Bool
+        var isSwapTarget: Bool = false
+        var isCompact: Bool = false
         let onTap: () -> Void
-        
+
+        private var circleSize: CGFloat { isCompact ? 34 : 42 }
+        private var cardWidth: CGFloat { isCompact ? 62 : 80 }
+        private var verticalPadding: CGFloat { isCompact ? 5 : 8 }
+
         var body: some View {
             Button(action: onTap) {
-                VStack(spacing: 8) {
+                VStack(spacing: isCompact ? 4 : 8) {
                     ZStack {
                         Circle()
-                            .fill(Color.gray.opacity(0.3))
-                            .frame(width: 42, height: 42)
-                        
+                            .fill(isSwapTarget ? Color.green.opacity(0.25) : Color.gray.opacity(0.3))
+                            .frame(width: circleSize, height: circleSize)
+
                         Text(String(player.jerseyNumber))
-                            .font(.headline)
+                            .font(isCompact ? .subheadline : .headline)
                             .fontWeight(.bold)
-                            .foregroundColor(.gray)
+                            .foregroundColor(isSwapTarget ? .green : .gray)
                     }
-                    
+
                     VStack(spacing: 2) {
                         Text(player.name.components(separatedBy: " ").first ?? "")
                             .font(.caption)
                             .fontWeight(.medium)
                             .lineLimit(1)
-                        
-                        Text(player.positions.joined(separator: "/"))
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                            .lineLimit(1)
+
+                        if !isCompact {
+                            Text(player.positions.joined(separator: "/"))
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                        }
                     }
                 }
-                .frame(width: 80)
-                .padding(.vertical, 8)
+                .frame(width: cardWidth)
+                .padding(.vertical, verticalPadding)
                 .background(
                     RoundedRectangle(cornerRadius: 12)
-                        .fill(isSelected && !isReadOnlyUser ? Color.blue.opacity(0.15) : Color(.systemGray6))
+                        .fill(
+                            isSwapTarget ? Color.green.opacity(0.12) :
+                            (isSelected && !isReadOnlyUser ? Color.blue.opacity(0.15) : Color(.systemGray6))
+                        )
                         .overlay(
                             RoundedRectangle(cornerRadius: 12)
-                                .stroke(isSelected && !isReadOnlyUser ? Color.blue : Color.clear, lineWidth: 2)
+                                .stroke(
+                                    isSwapTarget ? Color.green :
+                                    (isSelected && !isReadOnlyUser ? Color.blue : Color.clear),
+                                    lineWidth: 2
+                                )
                         )
                 )
+                .animation(.spring(response: 0.32, dampingFraction: 0.82), value: isCompact)
             }
-            .disabled(isReadOnlyUser)  // ADDED: Disable interaction for read-only users
+            .disabled(isReadOnlyUser)
         }
     }
     
