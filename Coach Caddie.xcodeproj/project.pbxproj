@@ -14,6 +14,7 @@
 		FE19376C2E5BB6C20043DAA1 /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = FE19376B2E5BB6C20043DAA1 /* FirebaseStorage */; };
 		FE19376E2E5BB6D60043DAA1 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = FE19376D2E5BB6D60043DAA1 /* GoogleSignIn */; };
 		FE1937702E5BB6D60043DAA1 /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = FE19376F2E5BB6D60043DAA1 /* GoogleSignInSwift */; };
+		FE84211B2FF32BBA00D63872 /* FirebaseFunctions in Frameworks */ = {isa = PBXBuildFile; productRef = FE84211A2FF32BBA00D63872 /* FirebaseFunctions */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -67,6 +68,7 @@
 				FE19376A2E5BB6C20043DAA1 /* FirebaseMessaging in Frameworks */,
 				FE1937642E5BB6C20043DAA1 /* FirebaseAuth in Frameworks */,
 				FE1937702E5BB6D60043DAA1 /* GoogleSignInSwift in Frameworks */,
+				FE84211B2FF32BBA00D63872 /* FirebaseFunctions in Frameworks */,
 				FE1937662E5BB6C20043DAA1 /* FirebaseFirestore in Frameworks */,
 				FE19376C2E5BB6C20043DAA1 /* FirebaseStorage in Frameworks */,
 				FE1937682E5BB6C20043DAA1 /* FirebaseInAppMessaging-Beta in Frameworks */,
@@ -99,6 +101,7 @@
 				FE7B1A4D2E25702900F3F140 /* Coach_Caddie */,
 				FE7B1A5B2E25702B00F3F140 /* Coach_CaddieTests */,
 				FE7B1A652E25702B00F3F140 /* Coach_CaddieUITests */,
+				FE8421192FF32BBA00D63872 /* Frameworks */,
 				FE7B1A4C2E25702900F3F140 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -111,6 +114,13 @@
 				FE7B1A622E25702B00F3F140 /* Coach CaddieUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		FE8421192FF32BBA00D63872 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -140,6 +150,7 @@
 				FE19376B2E5BB6C20043DAA1 /* FirebaseStorage */,
 				FE19376D2E5BB6D60043DAA1 /* GoogleSignIn */,
 				FE19376F2E5BB6D60043DAA1 /* GoogleSignInSwift */,
+				FE84211A2FF32BBA00D63872 /* FirebaseFunctions */,
 			);
 			productName = Coach_Caddie;
 			productReference = FE7B1A4B2E25702900F3F140 /* Coach Caddie.app */;
@@ -430,7 +441,7 @@
 				CODE_SIGN_ENTITLEMENTS = "Coach CaddieDebug.entitlements";
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 29;
+				CURRENT_PROJECT_VERSION = 34;
 				DEVELOPMENT_TEAM = N46B389T6Y;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -448,7 +459,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.9;
+				MARKETING_VERSION = 1.14;
 				PRODUCT_BUNDLE_IDENTIFIER = metricmind.coachcaddie;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -471,7 +482,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Distribution";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 29;
+				CURRENT_PROJECT_VERSION = 34;
 				DEVELOPMENT_TEAM = "";
 				"DEVELOPMENT_TEAM[sdk=iphoneos*]" = N46B389T6Y;
 				ENABLE_PREVIEWS = YES;
@@ -490,7 +501,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.9;
+				MARKETING_VERSION = 1.14;
 				PRODUCT_BUNDLE_IDENTIFIER = metricmind.coachcaddie;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -676,6 +687,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = FE66DFCD2E5BB47500EFC0B8 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
 			productName = GoogleSignInSwift;
+		};
+		FE84211A2FF32BBA00D63872 /* FirebaseFunctions */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FE66DFCC2E5BB41000EFC0B8 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFunctions;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

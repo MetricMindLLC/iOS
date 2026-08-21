@@ -21,10 +21,11 @@ struct ImprovedNewPracticeView: View {
     @State private var weather = "Clear"
     @State private var showingLocationPicker = false
     @State private var selectedMapItem: MKMapItem?
-    
+    @State private var showingCancelAlert = false
+
     // OPTIMIZATION: Cache all drills on view load
     @State private var cachedAllDrills: [Drill]?
-    
+
     @Environment(\.presentationMode) var presentationMode
     
     let weatherOptions = ["Clear", "Cloudy", "Rainy", "Windy", "Hot", "Cold", "Indoor"]
@@ -118,22 +119,38 @@ struct ImprovedNewPracticeView: View {
             .background(Color(.systemGroupedBackground))
             .navigationTitle("Plan Practice")
             .navigationBarTitleDisplayMode(.inline)
+            .interactiveDismissDisabled(!selectedDrills.isEmpty)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button("Cancel") {
-                        presentationMode.wrappedValue.dismiss()
+                        if !selectedDrills.isEmpty {
+                            showingCancelAlert = true
+                        } else {
+                            presentationMode.wrappedValue.dismiss()
+                        }
                     }
                 }
-                
+
                 ToolbarItem(placement: .navigationBarTrailing) {
                     if hasAvailableSeasons {
                         Button("Create") {
                             createPractice()
                         }
                         .fontWeight(.semibold)
-                        .disabled(selectedDrills.isEmpty || selectedSeasonId == nil)  // UPDATED
+                        .disabled(selectedDrills.isEmpty || selectedSeasonId == nil)
                     }
                 }
+            }
+            .alert("Discard Practice?", isPresented: $showingCancelAlert) {
+                if !selectedDrills.isEmpty && selectedSeasonId != nil {
+                    Button("Save Practice") { createPractice() }
+                }
+                Button("Discard", role: .destructive) {
+                    presentationMode.wrappedValue.dismiss()
+                }
+                Button("Keep Editing", role: .cancel) { }
+            } message: {
+                Text("You have unsaved changes. Do you want to save this practice before closing?")
             }
             .sheet(isPresented: $showingDrillDetail) {
                 if let drill = selectedDrill {
@@ -839,6 +856,7 @@ struct EditPracticeView: View {
     @State private var duration: Int
     @State private var location: String
     @State private var notes: String
+    @State private var retrospectiveNotes: String
     @State private var weather: String
     @State private var selectedDrills: [DrillWithCustomTime]
     @State private var showingLocationPicker = false
@@ -869,6 +887,7 @@ struct EditPracticeView: View {
         self._duration = State(initialValue: practice.wrappedValue.duration)
         self._location = State(initialValue: practice.wrappedValue.location ?? "")
         self._notes = State(initialValue: practice.wrappedValue.notes ?? "")
+        self._retrospectiveNotes = State(initialValue: practice.wrappedValue.retrospectiveNotes ?? "")
         self._weather = State(initialValue: practice.wrappedValue.weather ?? "Clear")
         self._selectedDrills = State(initialValue: practice.wrappedValue.drills.map {
             DrillWithCustomTime(drill: $0, customDuration: $0.duration)
@@ -1053,9 +1072,20 @@ struct EditPracticeView: View {
                 }
                 
                 // MARK: - Notes Section
-                Section("Notes") {
+                Section("Practice Notes") {
                     TextEditor(text: $notes)
                         .frame(minHeight: 80)
+                }
+
+                Section("Post-Practice Reflections") {
+                    TextEditor(text: $retrospectiveNotes)
+                        .frame(minHeight: 80)
+                        .foregroundColor(retrospectiveNotes.isEmpty ? .secondary : .primary)
+                    if retrospectiveNotes.isEmpty {
+                        Text("What went well? What would you change next time?")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                 }
             }
             .navigationTitle("Edit Practice")
@@ -1110,6 +1140,7 @@ struct EditPracticeView: View {
         updatedPractice.duration = duration
         updatedPractice.location = location.isEmpty ? nil : location
         updatedPractice.notes = notes.isEmpty ? nil : notes
+        updatedPractice.retrospectiveNotes = retrospectiveNotes.isEmpty ? nil : retrospectiveNotes
         updatedPractice.weather = weather
         updatedPractice.drills = selectedDrills.map { drillWithTime in
             var drill = drillWithTime.drill
@@ -1430,20 +1461,30 @@ struct ImprovedCustomDrillView: View {
     @State private var newEquipment = ""
     @State private var instructions: [String] = []
     @State private var newInstruction = ""
+    @State private var showingCancelAlert = false
     @Environment(\.presentationMode) var presentationMode
-    
+
     let categories = DrillLibrary.categories
     let difficulties = ["Easy", "Medium", "Hard"]
     let durationOptions = [5, 10, 15, 20, 25, 30, 45, 60]
-    
+
     let onSave: (Drill) -> Void
-    
+
+    private var hasChanges: Bool {
+        !name.isEmpty || !description.isEmpty || !equipment.isEmpty || !instructions.isEmpty
+    }
+
+    private var canSave: Bool {
+        !name.isEmpty && !description.isEmpty
+    }
+
     var body: some View {
         NavigationView {
             Form {
                 Section("Basic Information") {
-                    TextField("Drill Name", text: $name)
-                    
+                    TextField("Drill Name", text: $name, axis: .vertical)
+                        .lineLimit(1...4)
+
                     TextEditor(text: $description)
                         .frame(minHeight: 80)
                         .overlay(
@@ -1456,31 +1497,32 @@ struct ImprovedCustomDrillView: View {
                             alignment: .topLeading
                         )
                 }
-                
+
                 Section("Details") {
                     Picker("Duration", selection: $duration) {
                         ForEach(durationOptions, id: \.self) { minutes in
                             Text("\(minutes) minutes").tag(minutes)
                         }
                     }
-                    
+
                     Picker("Category", selection: $category) {
                         ForEach(categories, id: \.self) { cat in
                             Text(cat).tag(cat)
                         }
                     }
-                    
+
                     Picker("Difficulty", selection: $difficulty) {
                         ForEach(difficulties, id: \.self) { diff in
                             Text(diff).tag(diff)
                         }
                     }
                 }
-                
+
                 Section("Equipment") {
                     ForEach(equipment, id: \.self) { item in
-                        HStack {
+                        HStack(alignment: .top) {
                             Text(item)
+                                .fixedSize(horizontal: false, vertical: true)
                             Spacer()
                             Button(action: {
                                 equipment.removeAll { $0 == item }
@@ -1488,9 +1530,10 @@ struct ImprovedCustomDrillView: View {
                                 Image(systemName: "xmark.circle.fill")
                                     .foregroundColor(.red)
                             }
+                            .buttonStyle(BorderlessButtonStyle())
                         }
                     }
-                    
+
                     HStack {
                         TextField("Add equipment...", text: $newEquipment)
                         Button("Add") {
@@ -1502,26 +1545,29 @@ struct ImprovedCustomDrillView: View {
                         .disabled(newEquipment.isEmpty)
                     }
                 }
-                
+
                 Section("Instructions") {
                     ForEach(Array(instructions.enumerated()), id: \.offset) { index, instruction in
-                        HStack {
+                        HStack(alignment: .top, spacing: 8) {
                             Text("\(index + 1).")
                                 .fontWeight(.medium)
                                 .frame(width: 25, alignment: .leading)
                             Text(instruction)
-                            Spacer()
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             Button(action: {
                                 instructions.remove(at: index)
                             }) {
                                 Image(systemName: "xmark.circle.fill")
                                     .foregroundColor(.red)
                             }
+                            .buttonStyle(BorderlessButtonStyle())
                         }
                     }
-                    
+
                     HStack {
-                        TextField("Add instruction step...", text: $newInstruction)
+                        TextField("Add instruction step...", text: $newInstruction, axis: .vertical)
+                            .lineLimit(1...3)
                         Button("Add") {
                             if !newInstruction.isEmpty {
                                 instructions.append(newInstruction)
@@ -1534,19 +1580,35 @@ struct ImprovedCustomDrillView: View {
             }
             .navigationTitle("Create Custom Drill")
             .navigationBarTitleDisplayMode(.inline)
+            .interactiveDismissDisabled(hasChanges)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button("Cancel") {
-                        presentationMode.wrappedValue.dismiss()
+                        if hasChanges {
+                            showingCancelAlert = true
+                        } else {
+                            presentationMode.wrappedValue.dismiss()
+                        }
                     }
                 }
-                
+
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Save") {
                         saveDrill()
                     }
-                    .disabled(name.isEmpty || description.isEmpty)
+                    .disabled(!canSave)
                 }
+            }
+            .alert("Unsaved Drill", isPresented: $showingCancelAlert) {
+                if canSave {
+                    Button("Save Drill") { saveDrill() }
+                }
+                Button("Discard", role: .destructive) {
+                    presentationMode.wrappedValue.dismiss()
+                }
+                Button("Keep Editing", role: .cancel) { }
+            } message: {
+                Text("You have unsaved changes. Do you want to save this drill before closing?")
             }
         }
     }
@@ -2024,6 +2086,11 @@ struct PracticeDetailView: View {
     @State private var shareItems: [Any] = []
     @State private var showingDeleteAlert = false
     @State private var showingOptionsMenu = false
+    @State private var showingNotesEditor = false
+    @State private var showingRetroNotesEditor = false
+    @State private var editingNotesText = ""
+    @State private var editingRetroNotesText = ""
+    @State private var isSavingNotes = false
     @Environment(\.presentationMode) var presentationMode
     
     // CRITICAL FIX: Get fresh practice data from TeamManager
@@ -2137,23 +2204,28 @@ struct PracticeDetailView: View {
                         }
                     }
                     
-                    // Notes
-                    if let notes = currentPractice.notes, !notes.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Notes")
-                                .font(.headline)
-                                .padding(.horizontal)
-                            
-                            Text(notes)
-                                .font(.subheadline)
-                                .padding()
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(Color(.systemBackground))
-                                .cornerRadius(10)
-                                .padding(.horizontal)
+                    // Practice Notes (pre-practice planning)
+                    inlineNotesCard(
+                        title: "Practice Notes",
+                        text: currentPractice.notes,
+                        placeholder: "Add pre-practice notes, focus areas, or reminders…",
+                        onEdit: {
+                            editingNotesText = currentPractice.notes ?? ""
+                            showingNotesEditor = true
                         }
-                    }
-                    
+                    )
+
+                    // Post-Practice Reflections
+                    inlineNotesCard(
+                        title: "Post-Practice Reflections",
+                        text: currentPractice.retrospectiveNotes,
+                        placeholder: "What went well? What would you change next time?",
+                        onEdit: {
+                            editingRetroNotesText = currentPractice.retrospectiveNotes ?? ""
+                            showingRetroNotesEditor = true
+                        }
+                    )
+
                     // Bottom padding
                     Color.clear.frame(height: 40)
                 }
@@ -2202,8 +2274,77 @@ struct PracticeDetailView: View {
         } message: {
             Text("Are you sure you want to permanently delete this practice session? This action cannot be undone.")
         }
+        .sheet(isPresented: $showingNotesEditor) {
+            NotesEditorSheet(
+                title: "Practice Notes",
+                text: $editingNotesText,
+                onSave: {
+                    var updated = currentPractice
+                    updated.notes = editingNotesText.isEmpty ? nil : editingNotesText
+                    teamManager.updatePractice(in: team, practice: updated)
+                    showingNotesEditor = false
+                },
+                onCancel: { showingNotesEditor = false }
+            )
+        }
+        .sheet(isPresented: $showingRetroNotesEditor) {
+            NotesEditorSheet(
+                title: "Post-Practice Reflections",
+                text: $editingRetroNotesText,
+                onSave: {
+                    var updated = currentPractice
+                    updated.retrospectiveNotes = editingRetroNotesText.isEmpty ? nil : editingRetroNotesText
+                    teamManager.updatePractice(in: team, practice: updated)
+                    showingRetroNotesEditor = false
+                },
+                onCancel: { showingRetroNotesEditor = false }
+            )
+        }
     }
-    
+
+    @ViewBuilder
+    private func inlineNotesCard(title: String, text: String?, placeholder: String, onEdit: @escaping () -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(title)
+                    .font(.headline)
+                Spacer()
+                Button(action: onEdit) {
+                    Image(systemName: "pencil")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding(.horizontal)
+
+            if let text = text, !text.isEmpty {
+                Text(text)
+                    .font(.subheadline)
+                    .padding()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(.systemBackground))
+                    .cornerRadius(10)
+                    .padding(.horizontal)
+            } else {
+                Button(action: onEdit) {
+                    Text(placeholder)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color(.systemBackground))
+                        .cornerRadius(10)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(Color(.systemGray4), lineWidth: 1)
+                        )
+                        .padding(.horizontal)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
     private func deletePractice() {
         print("🗑️ Attempting to delete practice with ID: \(practice.id)")
         
@@ -2246,8 +2387,9 @@ struct PracticeDetailView: View {
             📝 DRILLS:
             \(drillsList.isEmpty ? "No drills planned" : drillsList)
             
-            \(currentPractice.notes.map { "📌 Notes:\n\($0)" } ?? "")
-            
+            \(currentPractice.notes.map { "📌 Practice Notes:\n\($0)" } ?? "")
+            \(currentPractice.retrospectiveNotes.map { "\n✅ Post-Practice Reflections:\n\($0)" } ?? "")
+
             —
             Created with Coach Caddie
             """
@@ -2406,13 +2548,13 @@ struct ShareablePracticeReportView: View {
                 .padding(.bottom)
             }
             
-            // Notes (if available)
+            // Practice Notes (if available)
             if let notes = practice.notes, !notes.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("NOTES")
+                    Text("PRACTICE NOTES")
                         .font(.headline)
                         .foregroundColor(.primary)
-                    
+
                     Text(notes)
                         .font(.subheadline)
                         .foregroundColor(.secondary)
@@ -2424,7 +2566,26 @@ struct ShareablePracticeReportView: View {
                 .cornerRadius(12)
                 .padding(.horizontal)
             }
-            
+
+            // Post-Practice Reflections (if available)
+            if let retro = practice.retrospectiveNotes, !retro.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("POST-PRACTICE REFLECTIONS", systemImage: "checkmark.seal.fill")
+                        .font(.headline)
+                        .foregroundColor(.primary)
+
+                    Text(retro)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.green.opacity(0.08))
+                .cornerRadius(12)
+                .padding(.horizontal)
+            }
+
             // Footer
             HStack {
                 Spacer()
@@ -2863,6 +3024,32 @@ struct ShareableDrillCard: View {
         }
     }
     
+    // MARK: - Notes Editor Sheet
+    struct NotesEditorSheet: View {
+        let title: String
+        @Binding var text: String
+        let onSave: () -> Void
+        let onCancel: () -> Void
+
+        var body: some View {
+            NavigationView {
+                TextEditor(text: $text)
+                    .padding()
+                    .navigationTitle(title)
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarLeading) {
+                            Button("Cancel", action: onCancel)
+                        }
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button("Save") { onSave() }
+                                .fontWeight(.semibold)
+                        }
+                    }
+            }
+        }
+    }
+
     // MARK: - Enhanced Practice Drill Row with Always-Visible Expand
     struct PracticeDrillRow: View {
         let drill: Drill

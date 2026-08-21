@@ -303,8 +303,8 @@ struct SuperEnhancedNewGameView: View {
                                                 .lineLimit(2)
                                         }
                                     }
-                                    if let seasonId = team.seasonIdForNewEvents,
-                                       let season = team.seasons.first(where: { $0.id == seasonId }) {
+                                    if let seasonId = selectedSeasonId,
+                                       let season = currentTeam.seasons.first(where: { $0.id == seasonId }) {
                                         HStack {
                                             Image(systemName: season.type.icon)
                                                 .foregroundColor(season.type.color)
@@ -312,12 +312,12 @@ struct SuperEnhancedNewGameView: View {
                                             Text(season.displayName)
                                                 .font(.subheadline)
                                         }
-                                    } else if !team.seasons.isEmpty {
+                                    } else if !eligibleSeasons.isEmpty {
                                         HStack {
                                             Image(systemName: "calendar.badge.exclamationmark")
                                                 .foregroundColor(.orange)
                                                 .frame(width: 30)
-                                            Text("No active season")
+                                            Text("No season selected")
                                                 .font(.subheadline)
                                                 .foregroundColor(.orange)
                                         }

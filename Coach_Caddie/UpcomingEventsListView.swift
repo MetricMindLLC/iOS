@@ -128,6 +128,7 @@ struct UpcomingEventsListView: View {
     @State private var cachedEvents: [TeamEvent] = []
     @State private var lastTeamsHash: Int = 0
     @State private var lastCacheUpdate: Date = Date.distantPast
+    @State private var cacheDebounceTask: Task<Void, Never>? = nil
     
     // Cache expiration time (30 seconds)
     private let cacheExpirationInterval: TimeInterval = 30
@@ -211,11 +212,12 @@ struct UpcomingEventsListView: View {
                 }
             }
             .onChange(of: teamManager.teams) { _ in
-                // Update cache when teams change
-                Task { @MainActor in
+                // Debounce cache updates so rapid bursts (e.g. subcollection loading) only trigger once
+                cacheDebounceTask?.cancel()
+                cacheDebounceTask = Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 300_000_000) // 300ms
+                    guard !Task.isCancelled else { return }
                     updateCacheIfNeeded()
-                    
-                    // Mark as loaded if we have teams
                     if !teamManager.teams.isEmpty && !hasInitiallyLoaded {
                         hasInitiallyLoaded = true
                     }

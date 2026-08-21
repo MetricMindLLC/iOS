@@ -1246,14 +1246,14 @@ struct Player: Identifiable, Codable, Equatable, Hashable {
             }
             
             // Count games played and minutes
+            if game.playerParticipated(self.id) {
+                stats.gamesPlayed += 1
+            }
             if let playerGameStats = game.playerStats.first(where: { $0.playerId == self.id }) {
-                if game.isCompleted {
-                    stats.gamesPlayed += 1
-                }
                 stats.minutesPlayed += playerGameStats.minutesPlayed
             }
         }
-        
+
         // Add ALL season manual adjustments
         stats.goals += seasonStats.getTotalSeasonAdjustments("goals")
         stats.assists += seasonStats.getTotalSeasonAdjustments("assists")
@@ -2139,9 +2139,9 @@ extension Game {
                     totalMinutes += max(0, entryEnd - entryStart)
                 }
                 
-                // If we have time entries, use that calculation
+                // If we have time entries, use that calculation (capped at total game time)
                 if !playerStats.timeEntries.isEmpty {
-                    return totalMinutes
+                    return min(totalGameTime, totalMinutes)
                 }
                 
                 // Fall back to stored minutesPlayed if no time entries
@@ -2185,9 +2185,18 @@ extension Game {
             }
         }
         
-        return max(0, minutesPlayed)
+        return min(totalGameTime, max(0, minutesPlayed))
     }
-    
+
+    /// Returns true if a player appeared in this game at all — starting lineup, audit log event, or executed sub
+    func playerParticipated(_ playerId: UUID) -> Bool {
+        let lineup = actualStartingLineup ?? startingLineup ?? []
+        if lineup.contains(where: { $0.playerId == playerId }) { return true }
+        if let log = auditLog, log.contains(where: { $0.playerId == playerId }) { return true }
+        if substitutions.contains(where: { $0.playerIn == playerId }) { return true }
+        return false
+    }
+
     /// Update all player stats with presumed minutes played
     mutating func updateAllPresumedMinutes(with team: Team) {
         for index in playerStats.indices {
@@ -2332,6 +2341,7 @@ struct Practice: Identifiable, Codable, Equatable {
     var duration: Int
     var location: String?
     var notes: String?
+    var retrospectiveNotes: String?
     var attendees: [UUID] = []
     var drills: [Drill] = []
     var attendance: [UUID: Bool] = [:]

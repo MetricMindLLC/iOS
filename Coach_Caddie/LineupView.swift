@@ -89,40 +89,19 @@ struct LineupView: View {
         .overlay {
             readOnlyOverlay
         }
-        .overlay {
+        .toolbar {
             if hasUnsavedPlanningChanges && selectedGame != nil && !showingGameMode && canEditLineup {
-                VStack {
-                    HStack {
-                        Spacer()
-                            .frame(maxWidth: 125)  // This controls how far left it goes
-                        
-                        Button(action: savePlanningToFirebase) {
-                            HStack(spacing: 6) {
-                                if isSavingPlanning {
-                                    ProgressView()
-                                        .scaleEffect(0.7)
-                                        .tint(.white)
-                                } else {
-                                    Image(systemName: "square.and.arrow.up")
-                                        .font(.system(size: 14, weight: .semibold))
-                                }
-                                Text(isSavingPlanning ? "Saving..." : "Save")
-                                    .font(.system(size: 14, weight: .semibold))
-                            }
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(Color.blue)
-                            .cornerRadius(20)
-                            .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: savePlanningToFirebase) {
+                        if isSavingPlanning {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                        } else {
+                            Text("Save")
+                                .fontWeight(.semibold)
                         }
-                        .disabled(isSavingPlanning)
-                        
-                        Spacer()
                     }
-                    .padding(.top, 0)  // Keep this positive to position below the very top
-                    
-                    Spacer()
+                    .disabled(isSavingPlanning)
                 }
             }
         }
@@ -218,6 +197,10 @@ struct LineupView: View {
                 activeGame: activeGame,
                 onViewGame: {
                     enterActiveGameMode()
+                },
+                onDismiss: {
+                    gameStateManager.endGameSession()
+                    gameStateManager.clearPersistedGameState()
                 }
             )
             .padding(.horizontal)
@@ -469,7 +452,8 @@ struct LineupView: View {
             selectedPlayer: $selectedPlayer,
             selectedPositionIndex: $selectedPositionIndex,
             availableHeight: geometry.size.height - geometry.safeAreaInsets.top - geometry.safeAreaInsets.bottom - 525,
-            hideAvailablePlayersHeader: selectedGame != nil && !showingGameMode && gameStateManager.activeGameState == nil
+            hideAvailablePlayersHeader: selectedGame != nil && !showingGameMode && gameStateManager.activeGameState == nil,
+            gameIsSelected: selectedGame != nil && !showingGameMode
         )
         .disabled(isReadOnlyUser)
         .opacity(isReadOnlyUser ? 0.8 : 1.0)
@@ -544,10 +528,7 @@ struct LineupView: View {
     
     private func startGameMode() {
         guard var game = selectedGame else { return }
-        
-        // Enable local-only mode BEFORE starting the game
-        teamManager.enableLocalOnlyMode()
-        
+
         if game.startingLineup == nil || game.startingLineup?.isEmpty == true {
               game.startingLineup = lineupPositions  // Preserve original starting lineup
               print("✅ Saved starting lineup with \(lineupPositions.count) positions")
@@ -799,7 +780,9 @@ struct LineupView: View {
             updatedTeam.games[gameIndex] = updatedGame
             print("Updated game in team games array")
         } else {
-            print("Could not find game in team games array")
+            // New game (created this session) not yet in team.games — add it now
+            updatedTeam.games.append(updatedGame)
+            print("Added new game to team games array")
         }
         
         print("Team has \(updatedTeam.games.count) games")
@@ -838,36 +821,24 @@ struct LineupView: View {
         print("Game completed locally, preparing for Firebase sync...")
         isSavingGame = true
 
-        // 15. CRITICAL FIX: Save player season stats AND game data to Firebase
+        // 15. Save game data and player season stats to Firebase
         Task {
-            // First, sync the completed game with all its data
+            // Sync the completed game with all its data
             let syncSuccess = await teamManager.disableLocalOnlyModeAndSync(updatedTeam, game: updatedGame)
-            
-            // CRITICAL FIX: Also save each player's updated season stats
+
+            // Save only the players who participated — avoids rewriting all games
             if syncSuccess {
-                print("✅ Game data synced, now saving updated player season stats...")
-                
-                // Save each player who participated in the game to ensure season stats persist
-                for gamePlayerStats in updatedGame.playerStats {
-                    if let updatedPlayer = updatedTeam.players.first(where: { $0.id == gamePlayerStats.playerId }) {
-                        // Use updatePlayer to ensure season stats are saved to Firebase
-                        await MainActor.run {
-                            self.teamManager.updatePlayer(in: updatedTeam, player: updatedPlayer)
-                        }
-                        print("✅ Saved season stats for player: \(updatedPlayer.name)")
-                    }
+                let participatingPlayers = updatedGame.playerStats.compactMap { stats in
+                    updatedTeam.players.first { $0.id == stats.playerId }
                 }
-                
-                // Give a moment for all player updates to complete
-                try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+                await teamManager.savePlayerSeasonStats(for: participatingPlayers, in: updatedTeam)
             }
-            
+
             await MainActor.run {
                 self.isSavingGame = false
-                
+
                 if syncSuccess {
                     print("✅ Game and player season stats successfully synced to Firebase")
-                    // Clear game state and exit
                     self.clearGameStateAndExit()
                 } else {
                     print("❌ Failed to sync game to Firebase")
@@ -1671,7 +1642,8 @@ struct LineupView: View {
 struct ActiveGameBanner: View {
     let activeGame: ActiveGameState
     let onViewGame: () -> Void
-    
+    var onDismiss: (() -> Void)? = nil
+
     var body: some View {
         HStack {
             HStack(spacing: 8) {
@@ -1686,7 +1658,7 @@ struct ActiveGameBanner: View {
                             .opacity(0.5)
                             .animation(Animation.easeInOut(duration: 1).repeatForever(autoreverses: true), value: UUID())
                     )
-                
+
                 VStack(alignment: .leading, spacing: 2) {
                     Text("ACTIVE GAME")
                         .font(.caption)
@@ -1698,9 +1670,9 @@ struct ActiveGameBanner: View {
                         .foregroundColor(.primary)
                 }
             }
-            
+
             Spacer()
-            
+
             Button(action: onViewGame) {
                 Text("View Game")
                     .font(.caption)
@@ -1710,6 +1682,15 @@ struct ActiveGameBanner: View {
                     .padding(.vertical, 8)
                     .background(Color.green)
                     .cornerRadius(20)
+            }
+
+            if let onDismiss = onDismiss {
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title3)
+                        .foregroundColor(.secondary)
+                }
+                .padding(.leading, 4)
             }
         }
         .padding()
@@ -4804,6 +4785,7 @@ struct ModernLineupBuilder: View {
     @Binding var selectedPositionIndex: Int?
     let availableHeight: CGFloat
     let hideAvailablePlayersHeader: Bool
+    var gameIsSelected: Bool = false
     @EnvironmentObject var teamManager: TeamManager
 
     /// Players eligible for the lineup: those in the active season's roster.
@@ -4850,9 +4832,9 @@ struct ModernLineupBuilder: View {
         }
     }
     
-    // UPDATED: Dynamic field sizing based on formation complexity
+    // Dynamic field sizing: shrink slightly when a game is selected to keep player chips visible
     private var idealFieldHeight: CGFloat {
-        let baseHeight: CGFloat = 280
+        let baseHeight: CGFloat = gameIsSelected ? 250 : 280
         let playerCount = selectedFormation.positions.count
         let densityMultiplier = playerCount >= 11 ? 1.2 : playerCount >= 9 ? 1.1 : 1.0
         return baseHeight * densityMultiplier
@@ -5387,6 +5369,7 @@ struct ModernGameModeView: View {
     @State private var canEditGame = false
     @State private var isSwapMode = false
     @State private var swapSourcePlayer: Player? = nil
+    @State private var bulkSwapCount = 0
     
     // UPDATED: Check if user has game editing permissions
     private var isReadOnlyUser: Bool {
@@ -5477,6 +5460,7 @@ struct ModernGameModeView: View {
                     selectedEventType: selectedEventType,
                     isSwapMode: isSwapMode,
                     swapSourcePlayer: swapSourcePlayer,
+                    bulkSwapCount: bulkSwapCount,
                     onRecord: recordEvent,
                     onCancel: { selectedPlayer = nil },
                     onSwapMode: enterSwapMode,
@@ -5516,7 +5500,7 @@ struct ModernGameModeView: View {
                         swapSourcePlayerId: swapSourcePlayer?.id,
                         onSwapTap: handleSwapTap
                     )
-                    .frame(height: isSwapMode ? 305 : 380)
+                    .frame(height: isSwapMode ? 255 : 310)
                     .padding(.horizontal, 12)
                     .animation(.spring(response: 0.32, dampingFraction: 0.82), value: isSwapMode)
 
@@ -5598,6 +5582,7 @@ struct ModernGameModeView: View {
         isSwapMode = true
         swapSourcePlayer = nil
         selectedPlayer = nil
+        bulkSwapCount = 0
     }
 
     private func cancelSwapMode() {
@@ -5625,7 +5610,9 @@ struct ModernGameModeView: View {
             } else {
                 executeQuickSubstitution(playerOut: source, playerIn: tappedPlayer)
             }
-            cancelSwapMode()
+            // Stay in swap mode — let user make more changes before tapping Done
+            swapSourcePlayer = nil
+            bulkSwapCount += 1
         }
     }
 
@@ -5840,8 +5827,6 @@ struct ModernGameModeView: View {
     }
     
     private func updatePlayerStats(for player: Player, event: EventType) {
-        print("📊 Updating stats for \(player.name): \(event.rawValue)")
-        
         // Find or create player stats for this game
         if let statsIndex = game.playerStats.firstIndex(where: { $0.playerId == player.id }) {
             // Update existing stats
@@ -5863,7 +5848,6 @@ struct ModernGameModeView: View {
             default:
                 break
             }
-            print("📊 Updated existing stats for \(player.name) - Goals: \(game.playerStats[statsIndex].goals)")
         } else {
             // Create new stats for this player
             var newStats = PlayerGameStats(playerId: player.id)
@@ -5886,30 +5870,7 @@ struct ModernGameModeView: View {
                 break
             }
             game.playerStats.append(newStats)
-            print("📊 Created new stats for \(player.name)")
         }
-        
-        // Also update season stats for the player
-        if let playerIndex = team.players.firstIndex(where: { $0.id == player.id }) {
-            switch event {
-            case .goal:
-                team.players[playerIndex].seasonStats.goals += 1
-            case .assist:
-                team.players[playerIndex].seasonStats.assists += 1
-            case .save:
-                team.players[playerIndex].seasonStats.saves += 1
-            case .goalAgainst:
-                team.players[playerIndex].seasonStats.goalsConceded += 1
-            case .yellowCard:
-                team.players[playerIndex].seasonStats.yellowCards += 1
-            case .redCard:
-                team.players[playerIndex].seasonStats.redCards += 1
-            default:
-                break
-            }
-        }
-        
-        print("✅ Updated stats for \(player.name): \(event.rawValue)")
     }
     
     // MARK: - Audit Log Management (unchanged)
@@ -6111,18 +6072,18 @@ struct ModernGameModeView: View {
                 }
                 
                 // Timer Display - UPDATED with reduced spacing
-                VStack(spacing: 2) { // REDUCED from 4
+                VStack(spacing: 1) {
                     Text(formattedTime)
-                        .font(.system(size: 32, weight: .bold, design: .monospaced)) // REDUCED from 36
+                        .font(.system(size: 26, weight: .bold, design: .monospaced))
                         .foregroundColor(isPaused ? .orange : .primary)
-                    
+
                     Text(isFirstHalf ? "First Half" : "Second Half")
-                        .font(.caption)
+                        .font(.caption2)
                         .foregroundColor(.secondary)
                 }
             }
-            .padding(.horizontal, 16) // REDUCED from 20
-            .padding(.vertical, 12) // REDUCED from 16
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
             .background(Color(.systemBackground))
         }
     }
@@ -6205,22 +6166,22 @@ struct ModernGameModeView: View {
         
         var body: some View {
             Button(action: action) {
-                VStack(spacing: 6) {
+                VStack(spacing: 4) {
                     Image(systemName: eventType.systemImage)
-                        .font(.title2)
-                        .frame(height: 24) // Fixed height for icon
-                    
+                        .font(.body)
+                        .frame(height: 18)
+
                     Text(eventType.rawValue)
                         .font(.caption2)
                         .fontWeight(.medium)
                         .lineLimit(2)
                         .multilineTextAlignment(.center)
-                        .frame(height: 30) // Fixed height for text
+                        .frame(height: 24)
                 }
                 .foregroundColor(isSelected ? .white : eventType.color)
-                .frame(maxWidth: .infinity) // Equal width distribution
-                .padding(.vertical, 12)
-                .padding(.horizontal, 8)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .padding(.horizontal, 6)
                 .background(
                     RoundedRectangle(cornerRadius: 10)
                         .fill(isSelected ? eventType.color : eventType.color.opacity(0.12))
@@ -6239,6 +6200,7 @@ struct ModernGameModeView: View {
         let selectedEventType: EventType
         let isSwapMode: Bool
         let swapSourcePlayer: Player?
+        var bulkSwapCount: Int = 0
         let onRecord: () -> Void
         let onCancel: () -> Void
         let onSwapMode: () -> Void
@@ -6276,18 +6238,27 @@ struct ModernGameModeView: View {
                         HStack(spacing: 6) {
                             Image(systemName: "arrow.triangle.2.circlepath")
                                 .foregroundColor(.orange)
-                            Text("Tap a field player to swap")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(bulkSwapCount > 0 ? "\(bulkSwapCount) change\(bulkSwapCount == 1 ? "" : "s") made" : "Tap a field player to swap")
+                                    .font(.subheadline)
+                                    .foregroundColor(bulkSwapCount > 0 ? .orange : .secondary)
+                                if bulkSwapCount > 0 {
+                                    Text("Tap another player or tap Done")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
                         }
                     }
 
                     Spacer()
 
-                    Button("Cancel", action: onCancelSwap)
-                        .foregroundColor(.red)
+                    Button(bulkSwapCount > 0 ? "Done" : "Cancel", action: onCancelSwap)
+                        .foregroundColor(bulkSwapCount > 0 ? .white : .red)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
+                        .background(bulkSwapCount > 0 ? Color.green : Color.clear)
+                        .cornerRadius(8)
 
                 } else if let player = selectedPlayer {
                     HStack {

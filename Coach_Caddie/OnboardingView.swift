@@ -262,6 +262,7 @@ struct InviteCodeFlowView: View {
     enum InviteFlowStep {
         case enterCode
         case chooseAuth
+        case signIn
         case createAccount
         case joiningTeam
     }
@@ -274,6 +275,8 @@ struct InviteCodeFlowView: View {
                     enterCodeView
                 case .chooseAuth:
                     chooseAuthView
+                case .signIn:
+                    inviteSignInView
                 case .createAccount:
                     createAccountView
                 case .joiningTeam:
@@ -464,13 +467,53 @@ struct InviteCodeFlowView: View {
                     }
                     .padding(.top, 8)
                 }
+
+                Divider()
+                    .padding(.vertical, 4)
+
+                Text("Already have an account?")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+
+                Button(action: { currentStep = .signIn }) {
+                    HStack {
+                        Image(systemName: "arrow.right.circle")
+                        Text("Sign In Instead")
+                            .fontWeight(.semibold)
+                    }
+                    .foregroundColor(Color(red: 0.05, green: 0.15, blue: 0.35))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(Color(.systemBackground))
+                    .cornerRadius(12)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color(red: 0.05, green: 0.15, blue: 0.35), lineWidth: 1.5)
+                    )
+                }
             }
             .padding(.horizontal)
-            
+
             Spacer()
         }
     }
-    
+
+    // MARK: - Sign In View (for existing users joining via invite)
+    private var inviteSignInView: some View {
+        Group {
+            if let invite = validatedInvite {
+                InviteSignInView(
+                    validatedInvite: invite,
+                    inviteCode: inviteCode,
+                    onSuccess: {
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                )
+                .environmentObject(authManager)
+            }
+        }
+    }
+
     // MARK: - Step 3: Create Account
     private var createAccountView: some View {
         InviteCreateAccountView(
@@ -532,6 +575,13 @@ struct InviteCodeFlowView: View {
     }
     
     private func validateInviteCodeWithoutAuth(_ code: String) async throws -> TeamInvite {
+        // Firestore rules require authentication to read invite documents.
+        // Sign in anonymously as a temporary bridge — the session is replaced when the
+        // user creates an account or signs in for real.
+        if Auth.auth().currentUser == nil {
+            try await Auth.auth().signInAnonymously()
+            print("🔐 Signed in anonymously to validate invite code")
+        }
         let db = Firestore.firestore()
         let inviteDoc = try await db.collection("invites").document(code).getDocument()
         
@@ -781,6 +831,107 @@ struct InviteCreateAccountView: View {
                     inviteAccessLevel: validatedInvite.accessLevel
                 )
                 
+                await MainActor.run {
+                    isLoading = false
+                    onSuccess()
+                }
+            } catch {
+                await MainActor.run {
+                    isLoading = false
+                    errorMessage = error.localizedDescription
+                    showError = true
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Sign In for Invite (existing users joining a team via invite code)
+struct InviteSignInView: View {
+    let validatedInvite: TeamInvite
+    let inviteCode: String
+    let onSuccess: () -> Void
+
+    @EnvironmentObject var authManager: FirebaseAuthManager
+    @State private var email = ""
+    @State private var password = ""
+    @State private var isLoading = false
+    @State private var errorMessage: String?
+    @State private var showError = false
+
+    private var canSubmit: Bool { !email.isEmpty && !password.isEmpty && !isLoading }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 24) {
+                VStack(spacing: 12) {
+                    Text("Sign In to Join")
+                        .font(.largeTitle)
+                        .fontWeight(.bold)
+                    Text("Join \(validatedInvite.teamName)")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                .padding(.top, 20)
+
+                VStack(spacing: 16) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Email")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        TextField("your@email.com", text: $email)
+                            .keyboardType(.emailAddress)
+                            .autocapitalization(.none)
+                            .disableAutocorrection(true)
+                            .padding()
+                            .background(Color(.systemGray6))
+                            .cornerRadius(10)
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Password")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        SecureField("Password", text: $password)
+                            .padding()
+                            .background(Color(.systemGray6))
+                            .cornerRadius(10)
+                    }
+
+                    Button(action: signInAndJoin) {
+                        HStack {
+                            if isLoading {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                    .scaleEffect(0.8)
+                            } else {
+                                Text("Sign In & Join Team")
+                                    .fontWeight(.semibold)
+                            }
+                        }
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                        .background(canSubmit ? Color(red: 0.13, green: 0.47, blue: 0.25) : Color.gray)
+                        .cornerRadius(12)
+                    }
+                    .disabled(!canSubmit)
+                }
+                .padding(.horizontal)
+            }
+        }
+        .alert("Error", isPresented: $showError) {
+            Button("OK") { }
+        } message: {
+            Text(errorMessage ?? "An error occurred")
+        }
+    }
+
+    private func signInAndJoin() {
+        isLoading = true
+        Task {
+            do {
+                try await authManager.signInAndJoinTeam(email: email, password: password, inviteCode: inviteCode)
                 await MainActor.run {
                     isLoading = false
                     onSuccess()

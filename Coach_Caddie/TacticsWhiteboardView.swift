@@ -555,8 +555,8 @@ struct TacticsWhiteboardView: View {
                                     },
                                     onSetBallCarrier: {
                                         animationSequence.ballCarrier = chipId
-                                        showingChipMenu = false
-                                        selectedChipForPath = nil
+                                        // Keep chip selected — re-show menu so coach can immediately add dribble/pass/shot
+                                        showingChipMenu = true
                                     },
                                     onRemovePaths: {
                                         animationSequence.steps.removeAll { $0.path.chipId == chipId }
@@ -629,6 +629,44 @@ struct TacticsWhiteboardView: View {
                             )
                             .padding(8)
                         }
+
+                        // Video recording overlay
+                        if isRecordingVideo {
+                            ZStack {
+                                Color.black.opacity(0.6)
+                                    .cornerRadius(12)
+
+                                VStack(spacing: 16) {
+                                    ZStack {
+                                        Circle()
+                                            .stroke(Color.white.opacity(0.25), lineWidth: 5)
+                                            .frame(width: 72, height: 72)
+
+                                        Circle()
+                                            .trim(from: 0, to: recordingProgress)
+                                            .stroke(Color.white, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                                            .frame(width: 72, height: 72)
+                                            .rotationEffect(.degrees(-90))
+                                            .animation(.linear(duration: 0.05), value: recordingProgress)
+
+                                        Text("\(Int(recordingProgress * 100))%")
+                                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                                            .foregroundColor(.white)
+                                    }
+
+                                    Text("Rendering Animation")
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundColor(.white)
+
+                                    Text("Don't close the app")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.white.opacity(0.65))
+                                }
+                            }
+                            .padding(8)
+                            .transition(.opacity)
+                            .animation(.easeInOut(duration: 0.25), value: isRecordingVideo)
+                        }
                     }
                     .onAppear {
                         fieldSize = CGSize(width: geometry.size.width - 16, height: geometry.size.height)
@@ -649,7 +687,8 @@ struct TacticsWhiteboardView: View {
                     addToCurrentStep: $addToCurrentStep,
                     isRecordingVideo: $isRecordingVideo,
                     recordingProgress: $recordingProgress,
-                    animationSpeed: $animationSpeed,  // ADD THIS
+                    playbackProgress: $playbackProgress,
+                    animationSpeed: $animationSpeed,
                     hasAnimationPaths: !animationSequence.steps.isEmpty,
                     onUndo: {
                         if isAnimationMode {
@@ -673,7 +712,8 @@ struct TacticsWhiteboardView: View {
                         playerChipPositions: $playerChipPositions,
                         opponentChipPositions: $opponentChipPositions,
                         ballPosition: $ballPosition,
-                        opponentColor: $opponentColor
+                        opponentColor: $opponentColor,
+                        fieldCenter: CGPoint(x: fieldSize.width / 2, y: fieldSize.height / 2)
                     )
                     .frame(height: 110)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -805,10 +845,15 @@ struct TacticsWhiteboardView: View {
             animationSequence.ballCarrier = nil
             selectedChipForPath = nil
         } else {
-            // Run or Dribble - add the step directly
+            // Run or Dribble - add the step, keep chip selected so coach can chain more movements
             let step = AnimationStep(path: newPath, order: newPath.sequenceOrder)
             animationSequence.addStep(step)
-            selectedChipForPath = nil
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            // Update menu position to path endpoint for natural re-appearance
+            if let newPosition = getChipPosition(selectedChipForPath) {
+                chipMenuPosition = newPosition
+            }
+            showingChipMenu = true
         }
     }
     
@@ -1378,9 +1423,9 @@ struct ChipActionMenu: View {
                     .padding(.top, 4)
                 }
                 
-                // Cancel button
+                // Done button — deselects chip
                 Button(action: onDismiss) {
-                    Text("Cancel")
+                    Text("Done")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(.secondary)
                         .padding(.horizontal, 16)
@@ -2204,7 +2249,9 @@ struct SelectablePlayerChip: View {
     let hasBall: Bool
     var isPassTarget: Bool = false
     let onTap: () -> Void
-    
+
+    @State private var isPulsing = false
+
     var body: some View {
         VStack(spacing: 2) {
             ZStack {
@@ -2215,12 +2262,15 @@ struct SelectablePlayerChip: View {
                         .frame(width: 56, height: 56)
                         .opacity(0.8)
                 }
-                
-                // Selection ring
+
+                // Selection ring — pulses when active
                 if isSelected {
                     Circle()
-                        .stroke(Color.yellow, lineWidth: 3)
-                        .frame(width: 52, height: 52)
+                        .stroke(Color.yellow.opacity(isPulsing ? 0.4 : 1.0), lineWidth: isPulsing ? 2 : 3)
+                        .frame(width: isPulsing ? 58 : 52, height: isPulsing ? 58 : 52)
+                        .animation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true), value: isPulsing)
+                        .onAppear { isPulsing = true }
+                        .onDisappear { isPulsing = false }
                 }
                 
                 Circle()
@@ -2462,6 +2512,7 @@ struct ChipTrayView: View {
     @Binding var opponentChipPositions: [Int: CGPoint]
     @Binding var ballPosition: CGPoint?
     @Binding var opponentColor: Color
+    let fieldCenter: CGPoint
     
     @State private var selectedTray: Int = 0 // 0 = Team, 1 = Opponents, 2 = Ball
     
@@ -2508,7 +2559,15 @@ struct ChipTrayView: View {
                         } else {
                             ForEach(availablePlayers) { player in
                                 TrayPlayerChip(player: player, teamColor: team.primaryColor) {
-                                    playerChipPositions[player.id] = CGPoint(x: 200, y: 300)
+                                    let jitter = CGPoint(
+                                        x: CGFloat.random(in: -20...20),
+                                        y: CGFloat.random(in: -20...20)
+                                    )
+                                    playerChipPositions[player.id] = CGPoint(
+                                        x: fieldCenter.x + jitter.x,
+                                        y: fieldCenter.y + jitter.y
+                                    )
+                                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                                 }
                             }
                         }
@@ -2549,7 +2608,15 @@ struct ChipTrayView: View {
                         } else {
                             ForEach(availableOpponents, id: \.self) { number in
                                 TrayOpponentChip(number: number, color: opponentColor) {
-                                    opponentChipPositions[number] = CGPoint(x: 200, y: 300)
+                                    let jitter = CGPoint(
+                                        x: CGFloat.random(in: -20...20),
+                                        y: CGFloat.random(in: -20...20)
+                                    )
+                                    opponentChipPositions[number] = CGPoint(
+                                        x: fieldCenter.x + jitter.x,
+                                        y: fieldCenter.y + jitter.y
+                                    )
+                                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                                 }
                             }
                         }
@@ -2558,7 +2625,8 @@ struct ChipTrayView: View {
                         // Ball
                         if ballPosition == nil {
                             TrayBallChip {
-                                ballPosition = CGPoint(x: 200, y: 300)
+                                ballPosition = fieldCenter
+                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                             }
                         } else {
                             Text("Ball already on field")
@@ -2726,9 +2794,10 @@ struct WhiteboardToolbar: View {
     @Binding var showingPlayerTray: Bool
     @Binding var isDraggingChip: Bool
     @Binding var addToCurrentStep: Bool
-    @Binding var isRecordingVideo: Bool  // ADD THIS
+    @Binding var isRecordingVideo: Bool
     @Binding var recordingProgress: Double
-    @Binding var animationSpeed: Double  // AD// ADD THIS
+    @Binding var playbackProgress: Double
+    @Binding var animationSpeed: Double
     
     let hasAnimationPaths: Bool
     let onUndo: () -> Void
@@ -2886,7 +2955,7 @@ struct WhiteboardToolbar: View {
             
             // Playback progress bar
             if isPlaying {
-                PlaybackProgressView()
+                PlaybackProgressView(progress: playbackProgress)
                     .padding(.horizontal)
                     .padding(.vertical, 8)
             }
@@ -2909,8 +2978,10 @@ struct WhiteboardToolbar: View {
                 } else {
                     // Move mode button
                     Button(action: {
-                        isDrawingMode = false
-                        isAnimationMode = false
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                            isDrawingMode = false
+                            isAnimationMode = false
+                        }
                     }) {
                         VStack(spacing: 4) {
                             Image(systemName: "hand.point.up.left.fill")
@@ -2928,8 +2999,10 @@ struct WhiteboardToolbar: View {
                     
                     // Draw mode button
                     Button(action: {
-                        isDrawingMode = true
-                        isAnimationMode = false
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                            isDrawingMode = true
+                            isAnimationMode = false
+                        }
                     }) {
                         VStack(spacing: 4) {
                             Image(systemName: "pencil.tip")
@@ -2947,8 +3020,10 @@ struct WhiteboardToolbar: View {
                     
                     // Animate mode button
                     Button(action: {
-                        isDrawingMode = false
-                        isAnimationMode = true
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                            isDrawingMode = false
+                            isAnimationMode = true
+                        }
                     }) {
                         VStack(spacing: 4) {
                             Image(systemName: "play.circle")
@@ -2985,15 +3060,9 @@ struct WhiteboardToolbar: View {
                         // Save Video button
                         Button(action: onRecordVideo) {
                             VStack(spacing: 4) {
-                                if isRecordingVideo {
-                                    ProgressView()
-                                        .scaleEffect(0.8)
-                                        .frame(width: 22, height: 22)
-                                } else {
-                                    Image(systemName: "video.fill")
-                                        .font(.system(size: 22))
-                                }
-                                Text(isRecordingVideo ? "\(Int(recordingProgress * 100))%" : "Save")
+                                Image(systemName: "video.fill")
+                                    .font(.system(size: 22))
+                                Text("Export")
                                     .font(.system(size: 11, weight: .medium))
                             }
                             .foregroundColor(isRecordingVideo ? .gray : .purple)
@@ -3074,6 +3143,8 @@ struct WhiteboardToolbar: View {
 
 // MARK: - Playback Progress View
 struct PlaybackProgressView: View {
+    let progress: Double
+
     var body: some View {
         VStack(spacing: 4) {
             HStack {
@@ -3081,18 +3152,21 @@ struct PlaybackProgressView: View {
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(.green)
                 Spacer()
+                Text("\(Int(progress * 100))%")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.secondary)
             }
-            
+
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 2)
                         .fill(Color(.systemGray4))
                         .frame(height: 4)
-                    
+
                     RoundedRectangle(cornerRadius: 2)
                         .fill(Color.green)
-                        .frame(height: 4)
-                        .animation(.linear, value: UUID())
+                        .frame(width: max(0, geometry.size.width * CGFloat(progress)), height: 4)
+                        .animation(.linear(duration: 0.05), value: progress)
                 }
             }
             .frame(height: 4)

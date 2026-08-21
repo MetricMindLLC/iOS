@@ -4,6 +4,7 @@ import FirebaseFirestore
 import FirebaseStorage
 import FirebaseMessaging
 import Network
+import FirebaseFunctions
 
 @MainActor
 class FirebaseManager: NSObject, ObservableObject {
@@ -30,6 +31,7 @@ class FirebaseManager: NSObject, ObservableObject {
     private var subcollectionCache: [String: (data: Any, timestamp: Date)] = [:]
     private let cacheExpiration: TimeInterval = 1800
     private var activeLoadOperations: Set<String> = []
+    private lazy var functions = Functions.functions()
     
     override init() {
         super.init()
@@ -101,11 +103,6 @@ class FirebaseManager: NSObject, ObservableObject {
         guard let user = Auth.auth().currentUser else {
             throw FirebaseError.notAuthenticated
         }
-        print("🔥 saveTeam called for team: \(team.name)")
-        print("🔥 Team ID: \(team.id.uuidString)")
-        print("🔥 useSubcollections: \(team.useSubcollections)")
-        print("🔥 onlyNewGames: \(onlyNewGames)")
-        
         let teamRef = db.collection("teams").document(team.id.uuidString)
         
         if team.useSubcollections {
@@ -296,77 +293,84 @@ class FirebaseManager: NSObject, ObservableObject {
         print("✅ Successfully deserialized \(results.count) position changes")
         return results
     }
-    /// Saves only the specified game's data to Firebase subcollections - used during live games
+    /// Saves only the specified game's data to Firebase subcollections - used during live games.
+    /// Uses a WriteBatch so all writes are atomic: if any write fails nothing is partially saved,
+    /// and stale documents are only deleted AFTER the batch commits successfully.
     func saveActiveGameData(_ game: Game, in team: Team) async throws {
         guard team.useSubcollections else {
-            // Fallback to full team save for non-subcollection teams
             try await saveTeam(team)
             return
         }
-        
-        guard let user = Auth.auth().currentUser else {
+
+        guard Auth.auth().currentUser != nil else {
             throw FirebaseError.notAuthenticated
         }
-        
+
         print("🎯 Saving ONLY active game data for: \(game.opponent) (ID: \(game.id))")
-        
+
         let gameRef = db.collection("teams").document(team.id.uuidString)
             .collection("games").document(game.id.uuidString)
-        
-        // Save nested subcollections FIRST
-        
-        // Save audit log entries
+
+        let batch = db.batch()
+
+        // Batch-write audit log (indexed 0..n; only grows during a live game)
         if let auditLog = game.auditLog, !auditLog.isEmpty {
-            let auditLogRef = gameRef.collection("auditLog")
-            let existingAuditDocs = try await auditLogRef.getDocuments()
-            for doc in existingAuditDocs.documents {
-                try await doc.reference.delete()
+            for (index, entry) in auditLog.enumerated() {
+                let ref = gameRef.collection("auditLog").document(String(index))
+                let data = try Firestore.Encoder().encode(entry)
+                batch.setData(data, forDocument: ref)
             }
-            for (index, auditEntry) in auditLog.enumerated() {
-                let auditData = try Firestore.Encoder().encode(auditEntry)
-                try await auditLogRef.document(String(index)).setData(auditData)
-            }
-            print("📝 Saved \(auditLog.count) audit log entries for ACTIVE game vs \(game.opponent)")
+            print("📝 Queued \(auditLog.count) audit log entries in batch")
         }
-        
-        // Save player stats
+
+        // Batch-write player stats (keyed by playerId; no stale docs possible)
         if !game.playerStats.isEmpty {
-            let playerStatsRef = gameRef.collection("playerStats")
-            let existingStatsDocs = try await playerStatsRef.getDocuments()
-            for doc in existingStatsDocs.documents {
-                try await doc.reference.delete()
-            }
             for stats in game.playerStats {
-                let statsData = try Firestore.Encoder().encode(stats)
-                try await playerStatsRef.document(stats.playerId.uuidString).setData(statsData)
+                let ref = gameRef.collection("playerStats").document(stats.playerId.uuidString)
+                let data = try Firestore.Encoder().encode(stats)
+                batch.setData(data, forDocument: ref)
             }
-            print("📊 Saved \(game.playerStats.count) player stats for ACTIVE game vs \(game.opponent)")
+            print("📊 Queued \(game.playerStats.count) player stats in batch")
         }
-        
-        // Save current lineup
-        if let actualStartingLineup = game.actualStartingLineup, !actualStartingLineup.isEmpty {
-            let currentLineupRef = gameRef.collection("currentLineup")
-            let existingLineupDocs = try await currentLineupRef.getDocuments()
-            for doc in existingLineupDocs.documents {
-                try await doc.reference.delete()
+
+        // Batch-write current lineup (indexed 0..n; may shrink if lineup changes)
+        let newLineupCount = game.actualStartingLineup?.count ?? 0
+        if let lineup = game.actualStartingLineup, !lineup.isEmpty {
+            for (index, position) in lineup.enumerated() {
+                let ref = gameRef.collection("currentLineup").document(String(index))
+                let data = try Firestore.Encoder().encode(position)
+                batch.setData(data, forDocument: ref)
             }
-            for (index, position) in actualStartingLineup.enumerated() {
-                let positionData = try Firestore.Encoder().encode(position)
-                try await currentLineupRef.document(String(index)).setData(positionData)
-            }
-            print("📋 Saved \(actualStartingLineup.count) lineup positions for ACTIVE game vs \(game.opponent)")
+            print("📋 Queued \(lineup.count) lineup positions in batch")
         }
-        
-        // NOW save the main game document WITHOUT nested arrays
-        var gameDataForFirebase = game
-        gameDataForFirebase.auditLog = []  // Clear the array, not nil
-        gameDataForFirebase.playerStats = []
-        gameDataForFirebase.actualStartingLineup = []  // Clear the array, not nil
-        
-        let gameData = try Firestore.Encoder().encode(gameDataForFirebase)
-        try await gameRef.setData(gameData, merge: true)
-        
-        print("✅ ACTIVE game saved successfully: \(game.opponent)")
+
+        // Batch-write main game document (strip nested arrays; they live in subcollections)
+        var gameForFirebase = game
+        gameForFirebase.auditLog = []
+        gameForFirebase.playerStats = []
+        gameForFirebase.actualStartingLineup = []
+        let gameData = try Firestore.Encoder().encode(gameForFirebase)
+        batch.setData(gameData, forDocument: gameRef, merge: true)
+
+        // Commit all writes atomically — nothing is deleted before this succeeds
+        try await batch.commit()
+        print("✅ ACTIVE game batch committed: \(game.opponent)")
+
+        // Touch the team document so other clients' snapshot listeners detect the live game
+        // update and reload auditLog / playerStats / currentLineup from subcollections.
+        let teamDocRef = db.collection("teams").document(team.id.uuidString)
+        try await teamDocRef.updateData(["lastSyncDate": FieldValue.serverTimestamp()])
+
+        // After a successful commit, remove any stale lineup docs whose index is now out of range
+        // (happens when lineup shrinks, e.g. players removed mid-game)
+        if newLineupCount > 0 {
+            let lineupDocs = try await gameRef.collection("currentLineup").getDocuments()
+            for doc in lineupDocs.documents {
+                if let index = Int(doc.documentID), index >= newLineupCount {
+                    try await doc.reference.delete()
+                }
+            }
+        }
     }
 
     /// Updates only the main team document without touching subcollections - used for team-level changes during games
@@ -793,8 +797,13 @@ class FirebaseManager: NSObject, ObservableObject {
         
         let gameData = try Firestore.Encoder().encode(gameDataForFirebase)
         try await gameRef.setData(gameData)
+
+        // Touch the team document so other clients' snapshot listeners detect the change
+        // and reload the updated lineup from subcollections.
+        let teamDocRef = db.collection("teams").document(team.id.uuidString)
+        try await teamDocRef.updateData(["lastSyncDate": FieldValue.serverTimestamp()])
     }
-    
+
     func saveGamePlanningOnly(_ game: Game, in team: Team) async throws {
         guard team.useSubcollections else {
             try await saveTeam(team)
@@ -895,6 +904,11 @@ class FirebaseManager: NSObject, ObservableObject {
         try await gameRef.updateData(planningUpdate)
         print("✅ Updated planning fields including position changes in game document")
         clearSubcollectionCache(for: team.id)
+
+        // Touch the team document so other clients' snapshot listeners detect the change
+        // and reload games (including the updated lineup) from subcollections.
+        let teamDocRef = db.collection("teams").document(team.id.uuidString)
+        try await teamDocRef.updateData(["lastSyncDate": FieldValue.serverTimestamp()])
     }
     
     
@@ -1834,55 +1848,48 @@ class FirebaseManager: NSObject, ObservableObject {
     }
     
     func joinTeamWithCode(_ code: String) async throws -> Team {
-        guard let user = Auth.auth().currentUser else {
+        guard Auth.auth().currentUser != nil else {
             throw FirebaseError.notAuthenticated
         }
-        
-        print("🔍 Attempting to join team with code: \(code.uppercased())")
-        
-        let inviteDoc = try await db.collection("invites").document(code.uppercased()).getDocument()
-        
-        guard inviteDoc.exists else {
-            print("❌ Invite document does not exist")
-            throw FirebaseError.invalidInviteCode
+
+        let trimmedCode = code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        print("🔍 Redeeming invite via Cloud Function: \(trimmedCode)")
+
+        do {
+            let result = try await functions.httpsCallable("redeemInvite").call(["code": trimmedCode])
+
+            guard let data = result.data as? [String: Any],
+                  let teamId = data["teamId"] as? String else {
+                // CF returned success but in an unexpected format — log it so we can diagnose
+                print("⚠️ redeemInvite returned unexpected format: \(String(describing: result.data))")
+                throw NSError(domain: "JoinTeam", code: 0, userInfo: [
+                    NSLocalizedDescriptionKey: "Team joined on server but couldn't load details. Please restart the app and the team should appear."
+                ])
+            }
+            print("✅ Joined team: \(data["teamName"] as? String ?? teamId)")
+
+            // Load and return the joined team (same decode the old path used).
+            let teamDoc = try await db.collection("teams").document(teamId).getDocument()
+            guard let team = try? teamDoc.data(as: Team.self) else {
+                throw FirebaseError.teamNotFound
+            }
+            return team
+        } catch let error as NSError where error.domain == FunctionsErrorDomain {
+            switch FunctionsErrorCode(rawValue: error.code) {
+            case .notFound:           throw FirebaseError.invalidInviteCode
+            case .failedPrecondition: throw FirebaseError.expiredInviteCode
+            case .unauthenticated:    throw FirebaseError.notAuthenticated
+            case .alreadyExists:
+                throw NSError(domain: "JoinTeam", code: 409, userInfo: [
+                    NSLocalizedDescriptionKey: "You are already a member of this team."
+                ])
+            default:
+                let msg = error.localizedDescription.isEmpty
+                    ? "Unable to join team. Please try again."
+                    : error.localizedDescription
+                throw NSError(domain: "JoinTeam", code: error.code, userInfo: [NSLocalizedDescriptionKey: msg])
+            }
         }
-        
-        let invite = try inviteDoc.data(as: TeamInvite.self)
-        
-        if invite.expiresAt < Date() {
-            print("❌ Invite is expired")
-            throw FirebaseError.expiredInviteCode
-        }
-        
-        if invite.usedCount >= invite.maxUses {
-            print("❌ Invite uses exceeded")
-            throw FirebaseError.expiredInviteCode
-        }
-        
-        let teamDoc = try await db.collection("teams").document(invite.teamId).getDocument()
-        guard let team = try? teamDoc.data(as: Team.self) else {
-            print("❌ Team not found for ID: \(invite.teamId)")
-            throw FirebaseError.teamNotFound
-        }
-        
-        print("✅ Successfully found team: \(team.name)")
-        
-        // Add user to team with specified role
-        try await addUserToTeam(
-            userId: user.uid,
-            teamId: invite.teamId,
-            accessLevel: invite.accessLevel,
-            userEmail: user.email ?? ""
-        )
-        
-        // Update invite usage count
-        try await db.collection("invites").document(invite.id).updateData([
-            "usedCount": FieldValue.increment(Int64(1))
-        ])
-        
-        print("✅ Successfully joined team and updated invite usage")
-        
-        return team
     }
     
     // MARK: - Messaging Setup

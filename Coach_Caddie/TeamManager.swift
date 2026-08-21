@@ -329,15 +329,6 @@ var teamsICreated: [Team] {
             return
         }
         
-        print("🔥 updateTeam called for team: \(team.name)")
-        print("🔥 Called from: \(Thread.callStackSymbols[1])")
-        print("🔥 Team ID: \(team.id)")
-        print("🔥 Current user UID: \(Auth.auth().currentUser?.uid ?? "nil")")
-        print("🔥 Team coachUID: \(team.coachUID ?? "nil")")
-        print("🔥 isOnline: \(firebaseManager.isOnline)")
-        print("🔥 Active Game ID: \(activeGameId?.uuidString ?? "none")")
-        print("🔥 Local-only mode: \(isInLocalOnlyMode)")
-        
         // Update local array first (always happens)
         if let index = teams.firstIndex(where: { $0.id == team.id }) {
             teams[index] = team
@@ -346,20 +337,17 @@ var teamsICreated: [Team] {
         
         // Skip Firebase sync if in local-only mode
         if isInLocalOnlyMode {
-            print("🔒 LOCAL-ONLY MODE: Skipping Firebase sync during live game")
             return
         }
-        
+
         // Cancel any existing work item for this team
         firebaseUpdateWorkItems[team.id]?.cancel()
-        
+
         // Route to appropriate save method based on whether we have an active game
         if let activeGameId = activeGameId,
            let activeGame = team.games.first(where: { $0.id == activeGameId }) {
-            print("🔥 Routing to ACTIVE GAME specific save for game: \(activeGame.opponent)")
             updateActiveGameWithDebounce(team, activeGame: activeGame)
         } else {
-            print("🔥 Routing to FULL TEAM save (will process all games)")
             updateTeamWithDebounce(team, debounceTime: 1.5)
         }
     }
@@ -375,15 +363,13 @@ var teamsICreated: [Team] {
     func disableLocalOnlyModeAndSync(_ team: Team, game: Game) async -> Bool {
         isInLocalOnlyMode = false
         print("🔓 Disabled local-only mode, syncing to Firebase...")
-        
-        do {
-            // Force immediate sync of the completed game
-            await updateTeamImmediatelyForActiveGame(team, activeGameId: game.id)
-            return true
-        } catch {
-            print("❌ Failed to sync completed game: \(error)")
-            return false
+
+        // updateTeamImmediatelyForActiveGame now returns the real save outcome
+        let success = await updateTeamImmediatelyForActiveGame(team, activeGameId: game.id, activeGame: game)
+        if !success {
+            print("❌ Failed to sync completed game to Firebase")
         }
+        return success
     }
     
     // Add this method to temporarily disable listeners
@@ -474,23 +460,24 @@ var teamsICreated: [Team] {
     }
 
 
-    private func saveActiveGameToFirebaseLive(_ team: Team, activeGame: Game) async {
+    private func saveActiveGameToFirebaseLive(_ team: Team, activeGame: Game) async -> Bool {
         print("🎯 LIVE saveActiveGameToFirebase called for game: \(activeGame.opponent)")
-        
+
         guard await ensureAuthentication() else {
             print("❌ ensureAuthentication failed")
-            return
+            return false
         }
-        
+
         do {
             // Use the specific active game save method instead of full team save
             try await firebaseManager.saveActiveGameData(activeGame, in: team)
             print("✅ LIVE Active Game save completed - parents/viewers will see updates")
-            
+
             await MainActor.run {
                 self.removePendingChange("team_\(team.id.uuidString)")
                 self.firebaseUpdateWorkItems.removeValue(forKey: team.id)
             }
+            return true
         } catch {
             print("❌ LIVE Active Game save failed: \(error)")
             await MainActor.run {
@@ -498,34 +485,38 @@ var teamsICreated: [Team] {
                 self.addToPendingChanges("team_\(team.id.uuidString)", action: "update", teamId: team.id.uuidString)
                 self.firebaseUpdateWorkItems.removeValue(forKey: team.id)
             }
+            return false
         }
     }
-    
-    func updateTeamImmediatelyForActiveGame(_ team: Team, activeGameId: UUID) async {
+
+    @discardableResult
+    func updateTeamImmediatelyForActiveGame(_ team: Team, activeGameId: UUID, activeGame passedGame: Game? = nil) async -> Bool {
         print("🚨 CRITICAL EVENT - immediate sync for live view")
-        
+
         // Cancel any pending debounced updates
         firebaseUpdateWorkItems[team.id]?.cancel()
         firebaseUpdateWorkItems.removeValue(forKey: team.id)
-        
+
         // Update local state
         if let index = teams.firstIndex(where: { $0.id == team.id }) {
             teams[index] = team
             debouncedSave()
         }
-        
-        // Get the active game
-        guard let activeGame = team.games.first(where: { $0.id == activeGameId }) else {
-            print("❌ Active game not found, falling back to full team save")
-            await updateTeamImmediately(team)
-            return
+
+        // Prefer the game from the team array; fall back to the explicitly passed game
+        guard let activeGame = team.games.first(where: { $0.id == activeGameId }) ?? passedGame else {
+            print("❌ Active game not found and none passed — cannot save")
+            return false
         }
-        
+
         // Save only the active game data immediately
         if isOnline {
-            await saveActiveGameToFirebaseLive(team, activeGame: activeGame)
+            return await saveActiveGameToFirebaseLive(team, activeGame: activeGame)
         } else {
-            addToPendingChanges("team_\(team.id.uuidString)", action: "update", teamId: team.id.uuidString)
+            // Use a game-specific key so syncPendingChanges can call saveActiveGameData
+            // (saveTeamToFirebase skips subcollection game docs, so isCompleted would never be written)
+            addToPendingChanges("game_complete_\(activeGame.id.uuidString)", action: "completeGame", teamId: team.id.uuidString)
+            return false
         }
     }
 
@@ -593,6 +584,40 @@ var teamsICreated: [Team] {
         saveLocalData()
         
         print("💾 Local-only update complete - Firebase NOT triggered")
+    }
+
+    /// Saves only the player documents for a given set of players without touching any games.
+    /// Use this after ending a game to persist updated season stats without rewriting all 28+ games.
+    func savePlayerSeasonStats(for players: [Player], in team: Team) async {
+        guard await ensureAuthentication() else { return }
+
+        // Update in-memory state first
+        if let teamIdx = teams.firstIndex(where: { $0.id == team.id }) {
+            for player in players {
+                if let playerIdx = teams[teamIdx].players.firstIndex(where: { $0.id == player.id }) {
+                    teams[teamIdx].players[playerIdx] = player
+                }
+            }
+            debouncedSave()
+        }
+
+        guard isOnline else {
+            addToPendingChanges("team_\(team.id.uuidString)", action: "update", teamId: team.id.uuidString)
+            return
+        }
+
+        if team.useSubcollections {
+            for player in players {
+                do {
+                    try await firebaseManager.savePlayerToSubcollection(player, in: team)
+                } catch {
+                    print("❌ Failed to save player season stats for \(player.name): \(error)")
+                }
+            }
+        } else {
+            // Non-subcollection teams: fall back to a full team save (no games to over-write here)
+            await saveTeamToFirebaseLive(team)
+        }
     }
 
     // MARK: - Game State Sync (separate from team updates for better performance)
@@ -1282,11 +1307,7 @@ var teamsICreated: [Team] {
                 return "You've reached your maximum of \(maxTeams) teams."
             }
         }
-        
-        if currentTeams == maxTeams - 1 {
-            return "This will be your last team on the \(currentUser.subscriptionLevel.displayName) plan."
-        }
-        
+
         return nil
     }
 
@@ -1341,9 +1362,9 @@ var teamsICreated: [Team] {
         // Update local array first
         teams[teamIndex].players[playerIndex] = player
         teams[teamIndex].updateActivityTimestamp()
-        
+
         print("✅ Updated player \(player.name) locally in team \(team.name)")
-        
+
         // Save locally immediately
         debouncedSave()
         
@@ -1749,30 +1770,9 @@ var teamsICreated: [Team] {
             
             // Count stats from all games
             for game in team.games {
-                // Count from game events (manually entered games)
-                for event in game.gameEvents where event.playerId == playerId {
-                    switch event.eventType {
-                    case .goal:
-                        newStats.goals += 1
-                    case .assist:
-                        newStats.assists += 1
-                    case .shot, .shotOnTarget:
-                        newStats.shots += 1
-                    case .save:
-                        newStats.saves += 1
-                    case .goalAgainst:
-                        newStats.goalsConceded += 1
-                    case .yellowCard:
-                        newStats.yellowCards += 1
-                    case .redCard:
-                        newStats.redCards += 1
-                    default:
-                        break
-                    }
-                }
-                
-                // CRITICAL FIX: Also count from auditLog (live game mode)
-                if let auditLog = game.auditLog {
+                // For live games the auditLog is authoritative; for manually entered games
+                // use gameEvents. Never count both — live games populate both and would double-count.
+                if let auditLog = game.auditLog, !auditLog.isEmpty {
                     for entry in auditLog where entry.playerId == playerId {
                         switch entry.eventType {
                         case .goal:
@@ -1780,6 +1780,27 @@ var teamsICreated: [Team] {
                         case .assist:
                             newStats.assists += 1
                         case .shot:
+                            newStats.shots += 1
+                        case .save:
+                            newStats.saves += 1
+                        case .goalAgainst:
+                            newStats.goalsConceded += 1
+                        case .yellowCard:
+                            newStats.yellowCards += 1
+                        case .redCard:
+                            newStats.redCards += 1
+                        default:
+                            break
+                        }
+                    }
+                } else {
+                    for event in game.gameEvents where event.playerId == playerId {
+                        switch event.eventType {
+                        case .goal:
+                            newStats.goals += 1
+                        case .assist:
+                            newStats.assists += 1
+                        case .shot, .shotOnTarget:
                             newStats.shots += 1
                         case .save:
                             newStats.saves += 1
@@ -2512,6 +2533,15 @@ var teamsICreated: [Team] {
                 self.hasCompletedFirstLoad = true  // Signal that all data (including subcollections) is ready
                 self.saveLocalData()
 
+                // Clear any persisted active game state whose game no longer exists
+                if let activeState = GameStateManager.shared.activeGameState {
+                    let gameExists = self.teams.contains { $0.games.contains { $0.id == activeState.gameId } }
+                    if !gameExists {
+                        GameStateManager.shared.activeGameState = nil
+                        GameStateManager.shared.clearPersistedGameState()
+                    }
+                }
+
                 // Setup real-time listeners for all teams
                 for team in self.teams {
                     // Placeholder - implement setupRealTimeListener in FirebaseManager
@@ -2687,10 +2717,23 @@ var teamsICreated: [Team] {
         // Ensure authentication before syncing
         guard await ensureAuthentication() else { return }
         
-        for (_, change) in pendingChanges {
+        for (id, change) in pendingChanges {
             if let team = teams.first(where: { $0.id.uuidString == change.teamId }) {
                 switch change.action {
                 case "create", "update":
+                    await saveTeamToFirebase(team)
+                case "completeGame":
+                    // Key format: "game_complete_<gameUUID>" — write the game subcollection
+                    // so isCompleted and all game data reaches Firestore (saveTeamToFirebase skips subcollections)
+                    let gameIdStr = id.replacingOccurrences(of: "game_complete_", with: "")
+                    if let gameId = UUID(uuidString: gameIdStr),
+                       let game = team.games.first(where: { $0.id == gameId }) {
+                        do {
+                            try await firebaseManager.saveActiveGameData(game, in: team)
+                        } catch {
+                            print("❌ Failed to sync completed game \(gameId) after coming online: \(error)")
+                        }
+                    }
                     await saveTeamToFirebase(team)
                 case "delete":
                     await deleteTeamFromFirebase(team)

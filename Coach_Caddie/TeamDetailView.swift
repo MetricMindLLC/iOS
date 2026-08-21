@@ -1911,99 +1911,69 @@ struct QuickActionButton: View {
 // MARK: - Team Stats Summary (UPDATED TO CALCULATE DYNAMICALLY)
 struct TeamStatsSummary: View {
     let team: Team
-    
-    // Calculate total goals dynamically: game events + season adjustments + overall adjustments
+    @EnvironmentObject var teamManager: TeamManager
+
+    // Always read from the live teamManager array so edits are reflected immediately
+    // without relying on the binding chain through TeamDetailView's navigation stack.
+    private var liveTeam: Team {
+        teamManager.teams.first(where: { $0.id == team.id }) ?? team
+    }
+
+    // Goals come from game result scorelines — same source as Stats > Teams tab.
     var totalGoals: Int {
-        var total = 0
-        
-        for player in team.players {
-            // Count from all game events
-            for game in team.games {
-                for event in game.gameEvents where event.playerId == player.id && event.eventType == .goal {
-                    total += 1
-                }
-            }
-            
-            // Add all season manual adjustments
-            total += player.seasonStats.getTotalSeasonAdjustments("goals")
-            
-            // Add overall manual adjustments
-            total += player.seasonStats.getManualAdjustment("goals")
-        }
-        
-        return total
+        liveTeam.games.compactMap { $0.result }.reduce(0) { $0 + $1.goalsFor }
     }
-    
-    // Calculate total assists dynamically
+
+    // Assists sum per-player from game events + all manual adjustments — same logic as
+    // PlayerStatsTeamSection.calculateOverallStats(for:) in StatsView.
     var totalAssists: Int {
-        var total = 0
-        
-        for player in team.players {
-            // Count from all game events
-            for game in team.games {
+        liveTeam.players.reduce(0) { total, player in
+            var count = 0
+            for game in liveTeam.games {
                 for event in game.gameEvents where event.playerId == player.id && event.eventType == .assist {
-                    total += 1
+                    count += 1
                 }
             }
-            
-            // Add all season manual adjustments
-            total += player.seasonStats.getTotalSeasonAdjustments("assists")
-            
-            // Add overall manual adjustments
-            total += player.seasonStats.getManualAdjustment("assists")
+            count += player.seasonStats.getTotalSeasonAdjustments("assists")
+            count += player.seasonStats.getManualAdjustment("assists")
+            return total + count
         }
-        
-        return total
     }
-    
+
     var gamesWon: Int {
-        team.games.filter { game in
+        liveTeam.games.filter { game in
             guard let result = game.result else { return false }
             return result.goalsFor > result.goalsAgainst
         }.count
     }
-    
+
     var gamesLost: Int {
-        team.games.filter { game in
+        liveTeam.games.filter { game in
             guard let result = game.result else { return false }
             return result.goalsFor < result.goalsAgainst
         }.count
     }
-    
+
     var gamesDrawn: Int {
-        team.games.filter { game in
+        liveTeam.games.filter { game in
             guard let result = game.result else { return false }
             return result.goalsFor == result.goalsAgainst
         }.count
     }
-    
-    // Calculate top scorer dynamically
+
     var topScorer: (player: Player, goals: Int)? {
-        var playerGoals: [(Player, Int)] = []
-        
-        for player in team.players {
-            var goals = 0
-            
-            // Count from all game events
-            for game in team.games {
+        let scored = liveTeam.players.map { player -> (Player, Int) in
+            var count = 0
+            for game in liveTeam.games {
                 for event in game.gameEvents where event.playerId == player.id && event.eventType == .goal {
-                    goals += 1
+                    count += 1
                 }
             }
-            
-            // Add all season manual adjustments
-            goals += player.seasonStats.getTotalSeasonAdjustments("goals")
-            
-            // Add overall manual adjustments
-            goals += player.seasonStats.getManualAdjustment("goals")
-            
-            playerGoals.append((player, goals))
+            count += player.seasonStats.getTotalSeasonAdjustments("goals")
+            count += player.seasonStats.getManualAdjustment("goals")
+            return (player, count)
         }
-        
-        guard let top = playerGoals.max(by: { $0.1 < $1.1 }), top.1 > 0 else {
-            return nil
-        }
-        
+        guard let top = scored.max(by: { $0.1 < $1.1 }), top.1 > 0 else { return nil }
         return (top.0, top.1)
     }
     

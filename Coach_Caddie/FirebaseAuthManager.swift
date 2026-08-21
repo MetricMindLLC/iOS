@@ -28,6 +28,7 @@ class FirebaseAuthManager: NSObject, ObservableObject {
     private var appleContinuation: CheckedContinuation<Void, Error>?
     private var pendingInviteCode: String?
     private var pendingInviteAccessLevel: AccessLevel?
+    private var isHandlingInviteSignup = false
 
     override init() {
         print("🔥 FirebaseAuthManager: Initializing")
@@ -428,6 +429,21 @@ class FirebaseAuthManager: NSObject, ObservableObject {
             return
         }
         
+        // Don't run during invite signup — signUpWithInvite / signUpWithAppleAndInvite
+        // save the profile with the correct membershipType themselves; running this
+        // concurrently would overwrite with membershipType = nil and flash MembershipSelectionView.
+        guard !isHandlingInviteSignup else {
+            await MainActor.run { self.isLoading = false }
+            return
+        }
+
+        // Anonymous users are only used as a bridge to read invite codes from Firestore before
+        // the user has created an account. Never treat them as real signed-in users.
+        guard !firebaseUser.isAnonymous else {
+            await MainActor.run { self.isLoading = false }
+            return
+        }
+
         isLoadingProfile = true
         lastLoadedUserUID = firebaseUser.uid
         defer {
@@ -572,11 +588,12 @@ class FirebaseAuthManager: NSObject, ObservableObject {
     
     func signUpWithInvite(email: String, password: String, displayName: String, inviteCode: String, inviteAccessLevel: AccessLevel) async throws {
         print("🔥 FirebaseAuthManager: Starting sign up with invite")
+        isHandlingInviteSignup = true
         await MainActor.run {
             isLoading = true
             errorMessage = nil
         }
-        
+
         do {
             // 1. Create the account
             let result = try await Auth.auth().createUser(withEmail: email, password: password)
@@ -618,11 +635,12 @@ class FirebaseAuthManager: NSObject, ObservableObject {
             
             // 6. Set up local state - user is fully authenticated
             await MainActor.run {
+                self.isHandlingInviteSignup = false
                 self.currentUser = user
                 self.needsMembershipSelection = false
                 self.isAuthenticated = true
                 self.isLoading = false
-                
+
                 // Create legacy coach object for compatibility
                 self.currentCoach = Coach(
                     id: user.id,
@@ -634,13 +652,14 @@ class FirebaseAuthManager: NSObject, ObservableObject {
                     subscriptionLevel: user.subscriptionLevel,
                     dateJoined: user.dateJoined
                 )
-                
+
                 print("✅ FirebaseAuthManager: User signed up and joined team with \(subscriptionLevel.rawValue) access")
             }
-            
+
         } catch {
             print("❌ FirebaseAuthManager: Sign up with invite failed: \(error)")
             await MainActor.run {
+                self.isHandlingInviteSignup = false
                 self.errorMessage = error.localizedDescription
                 self.isLoading = false
             }
@@ -648,6 +667,29 @@ class FirebaseAuthManager: NSObject, ObservableObject {
         }
     }
     
+    // MARK: - Sign In existing user and join team
+    func signInAndJoinTeam(email: String, password: String, inviteCode: String) async throws {
+        print("🔥 FirebaseAuthManager: Signing in existing user and joining team")
+        await MainActor.run { isLoading = true; errorMessage = nil }
+
+        do {
+            let result = try await Auth.auth().signIn(withEmail: email, password: password)
+            print("✅ FirebaseAuthManager: Signed in, now joining team")
+            let _ = try await FirebaseManager.shared.joinTeamWithCode(inviteCode)
+            print("✅ FirebaseAuthManager: Joined team, loading profile")
+            await loadUserProfile(for: result.user)
+            await MainActor.run {
+                NotificationCenter.default.post(name: Notification.Name("ForceLoadTeams"), object: nil)
+            }
+        } catch {
+            await MainActor.run {
+                self.errorMessage = error.localizedDescription
+                self.isLoading = false
+            }
+            throw error
+        }
+    }
+
     // MARK: - Apple Sign-In with Invite
     func signUpWithAppleAndInvite(inviteCode: String, inviteAccessLevel: AccessLevel) async throws {
         print("🍎 FirebaseAuthManager: Starting Apple sign up with invite")
@@ -672,6 +714,7 @@ class FirebaseAuthManager: NSObject, ObservableObject {
             // Store invite info for use in Apple callback
             self.pendingInviteCode = inviteCode
             self.pendingInviteAccessLevel = inviteAccessLevel
+            self.isHandlingInviteSignup = true
             
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                 self.appleContinuation = continuation
@@ -1145,11 +1188,12 @@ extension FirebaseAuthManager: ASAuthorizationControllerDelegate, ASAuthorizatio
                     let _ = try await firebaseManager.joinTeamWithCode(inviteCode)
                     
                     await MainActor.run {
+                        self.isHandlingInviteSignup = false
                         self.currentUser = user
                         self.needsMembershipSelection = false
                         self.isAuthenticated = true
                         self.isLoading = false
-                        
+
                         // Create legacy coach object
                         self.currentCoach = Coach(
                             id: user.id,
@@ -1161,24 +1205,25 @@ extension FirebaseAuthManager: ASAuthorizationControllerDelegate, ASAuthorizatio
                             subscriptionLevel: user.subscriptionLevel,
                             dateJoined: user.dateJoined
                         )
-                        
+
                         // Clear pending invite info
                         self.pendingInviteCode = nil
                         self.pendingInviteAccessLevel = nil
-                        
+
                         print("✅ FirebaseAuthManager: Apple user signed up and joined team with \(subscriptionLevel.rawValue) access")
                     }
                 } else {
                     // Regular Apple sign-in
                     await loadUserProfile(for: result.user)
                 }
-                
+
                 appleContinuation?.resume()
                 appleContinuation = nil
-                
+
             } catch {
                 print("❌ FirebaseAuthManager: Apple sign in failed: \(error)")
                 await MainActor.run {
+                    self.isHandlingInviteSignup = false
                     self.errorMessage = error.localizedDescription
                     self.isLoading = false
                 }
